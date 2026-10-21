@@ -13,24 +13,28 @@ auditRouter.get(
   requirePropertyAccess('query', 'propertyId'),
   async (req: Request, res: Response) => {
     try {
-      const { propertyId, limit = '100' } = req.query;
+      const { propertyId, limit = '100', cursor } = req.query;
 
       const where: any = {};
       if (propertyId && propertyId !== 'all') {
         where.propertyId = String(propertyId);
       }
 
+      const pageSize = Math.min(500, Math.max(1, parseInt(String(limit), 10) || 100));
       const logs = await prisma.auditLog.findMany({
         where,
-        take: Math.min(500, Math.max(1, parseInt(String(limit), 10) || 100)),
-        orderBy: { createdAt: 'desc' },
+        take: pageSize + 1,
+        ...(typeof cursor === 'string' && cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           user: { select: { id: true, name: true, email: true, role: true } },
           property: { select: { id: true, name: true, code: true } },
         },
       });
 
-      return res.json({ logs });
+      const hasMore = logs.length > pageSize;
+      const page = logs.slice(0, pageSize);
+      return res.json({ logs: page, nextCursor: hasMore ? page[page.length - 1].id : null });
     } catch (error) {
       console.error('Fetch audit log error:', error);
       return res.status(500).json({ error: 'Failed to fetch audit log.' });

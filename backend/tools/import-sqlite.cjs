@@ -10,6 +10,7 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 const order = ['Property', 'User', 'UserProperty', 'StaffMember', 'Category', 'Item', 'Bill', 'BillItem', 'Attendance', 'MonthLock', 'AuditLog', 'Authenticator', 'PasswordReset'];
 function normalize(field, value) {
   if (value === null) { if (field.isRequired) throw Error('A required source field is null.'); return null; }
+  if (field.isList) { const parsed = typeof value === 'string' ? JSON.parse(value) : value; if (!Array.isArray(parsed) || parsed.some(entry => typeof entry !== 'string')) throw Error('Invalid list in source database.'); return parsed; }
   if (field.type === 'DateTime') {
     let parsed;
     if (typeof value === 'number' || /^-?\d+(?:\.0+)?$/.test(String(value))) parsed = new Date(Number(value));
@@ -35,8 +36,9 @@ async function importSqlite(sourcePath, targetUrl) {
       if (!tables.has(name)) throw Error('Source schema is incomplete. Upgrade the SQLite source before importing.');
       const columns = new Set(source.prepare(`PRAGMA table_info("${name}")`).all().map(row => row.name));
       const fields = model.fields.filter(field => field.kind === 'scalar');
-      if (fields.some(field => !columns.has(field.name))) throw Error('Source schema is outdated. Use the final SQLite application schema before importing.');
-      const records = source.prepare(`SELECT * FROM "${name}"`).all().map(row => Object.fromEntries(fields.map(field => [field.name, normalize(field, row[field.name])])));
+      const additive = new Set(name === 'Property' ? ['pmsPropertyCodes'] : name === 'StaffMember' ? ['userId'] : []);
+      if (fields.some(field => !columns.has(field.name) && !additive.has(field.name))) throw Error('Source schema is outdated. Use the final SQLite application schema before importing.');
+      const records = source.prepare(`SELECT * FROM "${name}"`).all().map(row => Object.fromEntries(fields.map(field => [field.name, columns.has(field.name) ? normalize(field, row[field.name]) : field.name === 'pmsPropertyCodes' ? (row.pmsPropertyCode ? [row.pmsPropertyCode] : []) : null])));
       return { name, delegate: name[0].toLowerCase() + name.slice(1), fields, records };
     });
     await target.$transaction(async tx => {

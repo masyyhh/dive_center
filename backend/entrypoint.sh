@@ -6,4 +6,9 @@ if [ -n "${DATABASE_URL_FILE:-}" ]; then
   export DATABASE_URL
   unset DATABASE_URL_FILE
 fi
+if [ -z "${PRISMA_SCHEMA_ENGINE_BINARY:-}" ]; then
+  for f in /app/node_modules/@prisma/engines/schema-engine-*; do
+    if [ -f "$f" ]; then export PRISMA_SCHEMA_ENGINE_BINARY="$f"; break; fi
+  done
+fi
 exec "$@"

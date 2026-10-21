@@ -12,6 +12,7 @@ model Property {
   code                String         @unique // e.g. "SUN-MLE", "SUN-ARI"
   name                String         // e.g. "Sun Diving - Malé Atoll"
   deletedAt           DateTime?      // Removed from the workspace; historical records are retained.
+  pmsPropertyCodes    String[]       @default([])
   pmsPropertyCode     String?        // OLHU, SSO, SW, MLEIR, SAIV, VILU, AQUA
   location            String?
   currency            String         @default("USD")
@@ -40,6 +41,7 @@ model User {
   authenticator       Authenticator?
   name                String
   mustChangePassword  Boolean        @default(false)
+  staffMember         StaffMember?
   passwordReset       PasswordReset?
   passwordHash        String
   role                String         @default("CENTRE_STAFF") // "GLOBAL_ADMIN", "PROPERTY_MANAGER", "CENTRE_STAFF"
@@ -70,6 +72,8 @@ model UserProperty {
 }
 
 model StaffMember {
+  userId                String?       @unique
+  user                  User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   id                    String        @id @default(uuid())
   propertyId            String
   name                  String

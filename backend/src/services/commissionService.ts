@@ -1,3 +1,4 @@
+import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
 
 export interface StaffCommissionResult {
@@ -122,6 +123,11 @@ export const calculateCommissionForPeriod = async (
     const dayAttendance = attendanceByDate.get(date) || [];
     const dayAttendanceMap = new Map(dayAttendance.map((a) => [a.staffMemberId, a.status]));
 
+    const canReceiveCredit = (id: string) => {
+      const staff = staffMap.get(id);
+      return Boolean(staff && staff.hireDate <= date && (!staff.leavingDate || staff.leavingDate >= date) && !isExcludedFromCredit(dayAttendanceMap.get(id)));
+    };
+
     let dailyCoursePool = 0;
     let dailyDivePool = 0;
 
@@ -130,7 +136,7 @@ export const calculateCommissionForPeriod = async (
       // Process Tips (Page 7: Split equally among the staff you picked on the bill)
       if (bill.tipAmount > 0 && bill.tipStaffIdsJson) {
         try {
-          const tipStaffIds: string[] = JSON.parse(bill.tipStaffIdsJson);
+          const tipStaffIds: string[] = [...new Set<string>(JSON.parse(bill.tipStaffIdsJson))].filter(canReceiveCredit);
           if (Array.isArray(tipStaffIds) && tipStaffIds.length > 0) {
             const tipShare = bill.tipAmount / tipStaffIds.length;
             for (const staffId of tipStaffIds) {
@@ -165,7 +171,7 @@ export const calculateCommissionForPeriod = async (
           try {
             const rates = JSON.parse(line.personalCommissionsJson);
             // Seller
-            if (line.sellerStaffId && staffMap.has(line.sellerStaffId) && typeof rates.seller === 'number' && Number.isFinite(rates.seller) && rates.seller > 0) {
+            if (line.sellerStaffId && canReceiveCredit(line.sellerStaffId) && typeof rates.seller === 'number' && Number.isFinite(rates.seller) && rates.seller > 0) {
               const amt = Number(rates.seller) * line.quantity;
               const entry = commissionMap.get(line.sellerStaffId);
               if (entry) entry.personalCommission += amt;
@@ -184,7 +190,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Guide
-            if (line.guideStaffId && staffMap.has(line.guideStaffId) && typeof rates.guide === 'number' && Number.isFinite(rates.guide) && rates.guide > 0) {
+            if (line.guideStaffId && canReceiveCredit(line.guideStaffId) && typeof rates.guide === 'number' && Number.isFinite(rates.guide) && rates.guide > 0) {
               const amt = Number(rates.guide) * line.quantity;
               const entry = commissionMap.get(line.guideStaffId);
               if (entry) entry.personalCommission += amt;
@@ -203,7 +209,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Instructor
-            if (line.instructorStaffId && staffMap.has(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
+            if (line.instructorStaffId && canReceiveCredit(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
               const amt = Number(rates.instructor) * line.quantity;
               const entry = commissionMap.get(line.instructorStaffId);
               if (entry) entry.personalCommission += amt;
@@ -222,7 +228,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Photo
-            if (line.photoStaffId && staffMap.has(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
+            if (line.photoStaffId && canReceiveCredit(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
               const amt = Number(rates.photo) * line.quantity;
               const entry = commissionMap.get(line.photoStaffId);
               if (entry) entry.personalCommission += amt;
@@ -241,7 +247,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Video
-            if (line.videoStaffId && staffMap.has(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {
+            if (line.videoStaffId && canReceiveCredit(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {
               const amt = Number(rates.video) * line.quantity;
               const entry = commissionMap.get(line.videoStaffId);
               if (entry) entry.personalCommission += amt;

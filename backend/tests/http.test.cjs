@@ -10,7 +10,8 @@ process.env.CORS_ORIGIN = 'https://dive.example.test';
 process.env.TRUST_PROXY = '1';
 delete process.env.JWT_SECRET_FILE;
 let databaseAvailable = true;
-const prisma = { $queryRaw: async () => { if (!databaseAvailable) throw new Error('Private database connection details'); return [{ value: 1 }]; } };
+const auditEntries = [];
+const prisma = { auditLog: { create: async ({ data }) => { auditEntries.push(data); return data; } }, $queryRaw: async () => { if (!databaseAvailable) throw new Error('Private database connection details'); return [{ value: 1 }]; } };
 const { default: app } = loadTypeScript('src/app.ts', { './db': { prisma }, '../db': { prisma } });
 let server, origin;
 test.before(async () => {
@@ -39,4 +40,19 @@ test('only the configured frontend origin receives CORS permission', async () =>
   assert.equal(allowed.headers.get('access-control-allow-credentials'), null);
   const denied = await fetch(`${origin}/api/health`, { headers: { Origin: 'https://untrusted.example.test' } });
   assert.equal(denied.headers.get('access-control-allow-origin'), null);
+});
+
+test('HTTP audit records request outcomes and access times while omitting query secrets', async () => {
+  const before = auditEntries.length;
+  const response = await fetch(`${origin}/api/audit?secret=private-value`);
+  assert.equal(response.status, 401);
+  const entry = auditEntries.slice(before).find(entry => entry.action === 'API_REQUEST');
+  assert(entry);
+  assert.equal(entry.propertyId, null);
+  const details = JSON.parse(entry.details);
+  assert.equal(details.path, '/api/audit');
+  assert.equal(details.status, 401);
+  assert.equal(details.method, 'GET');
+  assert(!Number.isNaN(Date.parse(details.startedAt)));
+  assert(!entry.details.includes('private-value'));
 });

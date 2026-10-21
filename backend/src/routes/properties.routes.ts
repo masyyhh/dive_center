@@ -60,6 +60,7 @@ const propertySchema = z.object({
   name: z.string().trim().min(2),
   code: z.string().trim().min(2).max(10),
   location: z.string().optional(),
+  pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length, 'Choose each resort once.').optional(),
   pmsPropertyCode: pmsPropertyCodeSchema.nullish().or(z.literal('')).transform(value => value || null),
   currency: z.string().default('USD'),
   currencySymbol: z.string().default('$'),
@@ -76,7 +77,7 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
       return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
     }
 
-    const { name, code, pmsPropertyCode, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
+    const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
       parseResult.data;
 
     const existing = await prisma.property.findUnique({ where: { code: code.toUpperCase() } });
@@ -88,7 +89,8 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
       data: {
         name,
         code: code.toUpperCase(),
-        pmsPropertyCode,
+        pmsPropertyCodes: pmsPropertyCodes ?? (pmsPropertyCode ? [pmsPropertyCode] : []),
+        pmsPropertyCode: pmsPropertyCodes ? pmsPropertyCodes[0] ?? null : pmsPropertyCode,
         location,
         currency,
         currencySymbol,
@@ -140,9 +142,9 @@ propertiesRouter.put(
         return res.status(403).json({ error: 'Unauthorized to modify this property.' });
       }
 
-      const pmsCode = z.object({ pmsPropertyCode: pmsPropertyCodeSchema.nullable().or(z.literal('')).optional() }).safeParse(req.body);
+      const pmsCode = z.object({ pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length).optional(), pmsPropertyCode: pmsPropertyCodeSchema.nullable().or(z.literal('')).optional() }).safeParse(req.body);
       if (!pmsCode.success) return res.status(400).json({ error: 'Select a valid PMS resort code.' });
-      if (req.user!.role !== 'GLOBAL_ADMIN' && pmsCode.data.pmsPropertyCode !== undefined) {
+      if (req.user!.role !== 'GLOBAL_ADMIN' && (pmsCode.data.pmsPropertyCode !== undefined || pmsCode.data.pmsPropertyCodes !== undefined)) {
         return res.status(403).json({ error: 'Only global administrators can change the PMS resort mapping.' });
       }
       const current = await prisma.property.findUnique({ where: { id }, select: { deletedAt: true } });
@@ -151,7 +153,9 @@ propertiesRouter.put(
       const updated = await prisma.property.update({
         where: { id },
         data: {
-          pmsPropertyCode: pmsCode.data.pmsPropertyCode === '' ? null : pmsCode.data.pmsPropertyCode,
+          ...(pmsCode.data.pmsPropertyCodes !== undefined
+            ? { pmsPropertyCodes: pmsCode.data.pmsPropertyCodes, pmsPropertyCode: pmsCode.data.pmsPropertyCodes[0] ?? null }
+            : pmsCode.data.pmsPropertyCode !== undefined ? { pmsPropertyCode: pmsCode.data.pmsPropertyCode || null, pmsPropertyCodes: pmsCode.data.pmsPropertyCode ? [pmsCode.data.pmsPropertyCode] : [] } : {}),
           name: name ?? undefined,
           location: location ?? undefined,
           currency: currency ?? undefined,
@@ -169,7 +173,7 @@ propertiesRouter.put(
         action: 'PROPERTY_UPDATE',
         targetType: 'Property',
         targetId: updated.id,
-        details: { name: updated.name },
+        details: { name: updated.name, pmsPropertyCodes: updated.pmsPropertyCodes },
       });
 
       return res.json({ property: updated });

@@ -1,3 +1,8 @@
+import bcrypt from 'bcryptjs';
+import { usernameSchema } from '../utils/identity';
+import { passwordSchema } from '../utils/password';
+import { isBusinessDate } from '../utils/dates';
+import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -10,7 +15,11 @@ export const staffRouter = Router();
 // GET /api/staff?propertyId=...&diveStaffOnly=...&activeOnDate=...
 staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
-    const { propertyId, diveStaffOnly, activeOnDate } = req.query;
+    const { propertyId, diveStaffOnly, activeOnDate, creditOnDate } = req.query;
+
+    if (creditOnDate !== undefined && !isBusinessDate(creditOnDate)) {
+      return res.status(400).json({ error: 'Valid creditOnDate (YYYY-MM-DD) is required.' });
+    }
 
     const where: any = {
       propertyId: String(propertyId),
@@ -34,6 +43,12 @@ staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       });
     }
 
+    if (typeof creditOnDate === 'string') {
+      const attendance = await prisma.attendance.findMany({ where: { propertyId: String(propertyId), date: creditOnDate } });
+      const excluded = new Set(attendance.filter(a => isExcludedFromCredit(a.status)).map(a => a.staffMemberId));
+      staff = staff.filter(s => s.hireDate <= creditOnDate && (!s.leavingDate || s.leavingDate >= creditOnDate) && !excluded.has(s.id));
+    }
+
     return res.json({ staff });
   } catch (error) {
     console.error('Fetch staff error:', error);
@@ -50,8 +65,9 @@ const staffSchema = z.object({
   isCoursePoolSharing: z.boolean().default(false),
   isDivePoolSharing: z.boolean().default(true),
   isBaseLeaderOverride: z.boolean().default(false),
-  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
-  leavingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD').optional().nullable(),
+  hireDate: z.string().refine(isBusinessDate, 'Enter a valid hire date.'),
+  leavingDate: z.preprocess(value => value === '' ? null : value, z.string().refine(isBusinessDate, 'Enter a valid leaving date.').nullish()),
+  loginAccess: z.object({ username: usernameSchema, password: passwordSchema }).optional(),
 });
 
 // POST /api/staff (GLOBAL_ADMIN or PROPERTY_MANAGER)
@@ -67,10 +83,22 @@ staffRouter.post(
         return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
       }
 
-      const data = parseResult.data;
+      const { loginAccess, ...data } = parseResult.data;
+      if (data.leavingDate && data.leavingDate < data.hireDate) return res.status(400).json({ error: 'Leaving date cannot be before the hire date.' });
+      const property = await prisma.property.findUnique({ where: { id: data.propertyId } });
+      if (!property?.isActive || property.deletedAt) return res.status(400).json({ error: 'Select an active property.' });
+      if (loginAccess && await prisma.user.findFirst({ where: { OR: [{ username: loginAccess.username }, { email: loginAccess.username }] } })) return res.status(409).json({ error: 'This username is already in use.' });
+      const passwordHash = loginAccess ? await bcrypt.hash(loginAccess.password, 12) : undefined;
+      const { propertyId, ...staffFields } = data;
       const staff = await prisma.staffMember.create({
         data: {
-          ...data,
+          ...staffFields,
+          property: { connect: { id: propertyId } },
+          ...(loginAccess ? { user: { create: {
+            username: loginAccess.username, passwordHash: passwordHash!, name: data.name, email: data.email || null,
+            role: 'CENTRE_STAFF', mustChangePassword: true,
+            assignedProperties: { create: { propertyId: data.propertyId } },
+          } } } : {}),
           email: data.email || null,
           leavingDate: data.leavingDate || null,
         },
@@ -82,11 +110,13 @@ staffRouter.post(
         action: 'STAFF_CREATE',
         targetType: 'StaffMember',
         targetId: staff.id,
-        details: { name: staff.name, role: staff.roleTitle },
+        details: { name: staff.name, role: staff.roleTitle, loginAccess: Boolean(loginAccess) },
       });
 
+      if (staff.userId) await logAuditEvent({ req, propertyId: staff.propertyId, action: 'USER_CREATE', targetType: 'User', targetId: staff.userId, details: { role: 'CENTRE_STAFF', source: 'staff-create' } });
       return res.status(201).json({ staff });
     } catch (error) {
+      if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This username is already in use.' });
       console.error('Create staff error:', error);
       return res.status(500).json({ error: 'Failed to create staff member.' });
     }

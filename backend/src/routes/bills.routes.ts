@@ -1,3 +1,4 @@
+import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
@@ -244,9 +245,14 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
         return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
       }
       const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
-      const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true }, select: { id: true } });
+      const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true, hireDate: { lte: data.businessDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: data.businessDate } }] }, select: { id: true } });
       if (creditedStaff.length !== creditedIds.length || new Set(data.tipStaffIds).size !== data.tipStaffIds.length) {
         return payrollReply(400, { error: 'Choose unique tip recipients and credited staff from this property.' });
+      }
+
+      const attendance = await prisma.attendance.findMany({ where: { propertyId: data.propertyId, date: data.businessDate, staffMemberId: { in: creditedIds } } });
+      if (attendance.some(a => isExcludedFromCredit(a.status))) {
+        return payrollReply(400, { error: 'Staff excluded by attendance on the business date cannot receive line commission or share tips. Remove them before saving.' });
       }
 
       // Mathematical calculations per PDF Page 3 & 4:
@@ -365,7 +371,7 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
     const target = await prisma.bill.findUnique({ where: { id }, select: { propertyId: true } });
     if (!target) return res.status(404).json({ error: 'Bill not found.' });
     const result = await withPropertyPayrollTransaction(prisma, target.propertyId, async prisma => {
-      const bill = await prisma.bill.findUnique({ where: { id }, include: { property: { select: { deletedAt: true } } } });
+      const bill = await prisma.bill.findUnique({ where: { id }, include: { items: true, property: { select: { deletedAt: true } } } });
       if (!bill) return payrollReply(404, { error: 'Bill not found.' });
 
       // Property authorization
@@ -384,6 +390,17 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
         return payrollReply(423, { error: 'Cannot re-date: Target month is locked for payroll.' });
       }
 
+      const creditedIds = [...new Set([
+        ...(bill.tipStaffIdsJson ? JSON.parse(bill.tipStaffIdsJson) as string[] : []),
+        ...bill.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id))),
+      ])];
+      if (creditedIds.length) {
+        const staff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: bill.propertyId, isActive: true, hireDate: { lte: newDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: newDate } }] } });
+        const attendance = await prisma.attendance.findMany({ where: { propertyId: bill.propertyId, date: newDate, staffMemberId: { in: creditedIds } } });
+        if (staff.length !== creditedIds.length || attendance.some(a => isExcludedFromCredit(a.status))) {
+          return payrollReply(400, { error: 'Cannot re-date: credited staff or tip recipients are unavailable on the target date.' });
+        }
+      }
       const oldDate = bill.businessDate;
       const updated = await prisma.bill.update({
         where: { id },

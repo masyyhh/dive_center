@@ -93,3 +93,24 @@ test('a 503 retries once; repeated 503, malformed JSON, and connection errors st
   assert.equal((await fixture([new Response('not json', { status: 200 })]).query()).status, 502);
   assert.equal((await fixture([new Error('private key or host detail')]).query()).status, 503);
 });
+
+test('multiple assigned resorts are searched, combined and deduplicated; client resort overrides are ignored', async () => {
+  const shared = guest('Shared guest', '2', '2026-10-24', { propertyCode: 'SSO' });
+  const f = fixture([
+    new Response(JSON.stringify(reply([data[0], shared])), { status: 200 }),
+    new Response(JSON.stringify(reply([shared], { property_code: 'SSO' })), { status: 200 }),
+  ]);
+  f.prisma.property.findUnique = async () => ({ code: 'DIVE-CENTRE', pmsPropertyCode: 'OLHU', pmsPropertyCodes: ['OLHU', 'SSO'], isActive: true });
+  const result = await f.query({ propertyCode: 'AQUA', pmsPropertyCodes: ['AQUA'] });
+  assert.equal(result.status, 200);
+  assert.deepEqual(f.calls.map(call => new URL(call.url).searchParams.get('property_code')), ['OLHU', 'SSO']);
+  assert.equal(result.body.count, 2);
+  assert.deepEqual(result.body.guests.map(guest => guest.propertyCode), ['OLHU', 'SSO']);
+});
+test('a failed resort lookup does not return a misleading partial guest list', async () => {
+  const f = fixture([new Response(JSON.stringify(reply()), { status: 200 }), new Response('{}', { status: 403 })]);
+  f.prisma.property.findUnique = async () => ({ code: 'DIVE-CENTRE', pmsPropertyCodes: ['OLHU', 'SSO'], isActive: true });
+  const result = await f.query();
+  assert.equal(result.status, 502);
+  assert.equal(result.body.guests, undefined);
+});

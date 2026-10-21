@@ -30,11 +30,13 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
     });
 
     if (!user) {
+      await logAuditEvent({ req, action: 'LOGIN_FAILED', targetType: 'User', details: { identifier, reason: 'Unknown account' } });
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
 
     // Check account lockout
     if (user.lockedUntil && user.lockedUntil > new Date()) {
+      await logAuditEvent({ req, userId: user.id, action: 'LOGIN_BLOCKED', targetType: 'User', targetId: user.id, details: { reason: 'Account locked' } });
       const minutesRemaining = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / (60 * 1000)));
       return res.status(423).json({
         error: `Account is temporarily locked due to 5 consecutive wrong passwords. Please wait ${minutesRemaining} minute(s) or contact your administrator.`,
@@ -42,6 +44,7 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
     }
 
     if (!user.isActive) {
+      await logAuditEvent({ req, userId: user.id, action: 'LOGIN_BLOCKED', targetType: 'User', targetId: user.id, details: { reason: 'Account deactivated' } });
       return res.status(403).json({ error: 'Your account is deactivated. Please contact your administrator.' });
     }
 
@@ -100,6 +103,7 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
     });
 
     if (user.mustChangePassword) {
+      await logAuditEvent({ req, userId: user.id, action: 'LOGIN_PASSWORD_CHANGE_REQUIRED', targetType: 'User', targetId: user.id });
       return res.json({ passwordChangeRequired: true, changeToken: signToken({
         id: user.id, email: user.email, role: user.role, passwordHash: user.passwordHash, purpose: 'password-change',
       }) });
@@ -196,4 +200,10 @@ authRouter.get('/me', requireAccountAuth, async (req: Request, res: Response) =>
     console.error('Auth /me error:', error);
     return res.status(500).json({ error: 'Failed to fetch current user profile.' });
   }
+});
+
+// The client calls this before removing its local token.
+authRouter.post('/logout', requireAccountAuth, async (req: Request, res: Response) => {
+  await logAuditEvent({ req, action: 'LOGOUT', targetType: 'User', targetId: req.user!.id });
+  return res.json({ message: 'Signed out.' });
 });

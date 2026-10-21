@@ -30,7 +30,7 @@ const snapshot = (filename, badReference = false) => {
     PasswordReset: { userId: 'u', credentialHash: 'preserved-credential', tokenHash: 'preserved-token', authenticatorVersion: 'binding-v1' },
   };
   for (const model of Prisma.dmmf.datamodel.models) {
-    const fields = model.fields.filter(field => field.kind === 'scalar');
+    const fields = model.fields.filter(field => field.kind === 'scalar' && !(model.name === 'Property' && field.name === 'pmsPropertyCodes') && !(model.name === 'StaffMember' && field.name === 'userId'));
     sqlite.exec(`CREATE TABLE "${model.name}" (${fields.map(field => `"${field.name}" ${field.type === 'Float' ? 'REAL' : ['Int', 'Boolean'].includes(field.type) ? 'INTEGER' : 'TEXT'}`).join(',')})`);
     const values = fields.map(field => {
       if (field.name in samples[model.name]) return samples[model.name][field.name];

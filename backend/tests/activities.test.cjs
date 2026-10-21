@@ -37,7 +37,7 @@ test('a manager can create, read, update, delete and restore their property acti
   assert.equal(created.status, 201);
   const id = created.body.item.id;
   assert.ok((await catalogue()).body.items.some(item => item.id === id));
-  const edited = await call('PUT', `/${id}`, { name: 'Weekend offer', price: 29, code: 'WEEKEND' });
+  const edited = await call('PUT', `/${id}`, { name: 'Weekend offer', price: 29, code: created.body.item.code });
   assert.equal(edited.status, 200); assert.equal(edited.body.item.price, 29);
   assert.equal(edited.body.item.poolType, 'DIVE_POOL'); assert.equal(edited.body.item.poolContribution, 5);
   assert.equal((await call('DELETE', `/${id}`)).status, 200);
@@ -104,10 +104,14 @@ test('invalid prices, rates, flags and duplicate codes cannot corrupt the catalo
   assert.equal((await call('POST', '/', { ...activity(), price: -1 })).status, 400);
   const free = await call('POST', '/', { ...activity(), price: 0 });
   assert.equal(free.status, 201); assert.equal(free.body.item.price, 0);
-  assert.equal((await call('POST', '/', activity())).status, 409);
+  const second = await call('POST', '/', activity());
+  assert.equal(second.status, 201);
+  assert.notEqual(second.body.item.code, free.body.item.code);
   await call('DELETE', `/${free.body.item.id}`);
-  assert.equal((await call('PUT', '/item-a', { code: 'PROMO' })).status, 409);
-  assert.equal((await call('POST', '/', activity())).status, 409);
+  assert.equal((await call('PUT', '/item-a', { code: 'PROMO' })).status, 400);
+  const third = await call('POST', '/', activity());
+  assert.equal(third.status, 201);
+  assert.notEqual(third.body.item.code, free.body.item.code);
 });
 
 test('price edits and deletion retain saved bill snapshots; deleted activities cannot be billed until restored', async () => {

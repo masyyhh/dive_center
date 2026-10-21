@@ -1,18 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
 
 // Exercise the real Express route and RBAC middleware with an isolated database double.
 // No listening server or production database is used.
-function loadTypeScript(relativePath, stubs = {}) {
-  const source = fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
-  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } });
-  const module = { exports: {} };
-  new Function('require', 'module', 'exports', outputText)(name => name in stubs ? stubs[name] : require(name), module, module.exports);
-  return module.exports;
-}
+const { loadTypeScript } = require('./helpers/runtime.cjs');
+
 const audit = [];
 let categories = [];
 const prisma = {

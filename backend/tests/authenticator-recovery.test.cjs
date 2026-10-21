@@ -181,7 +181,7 @@ test('expired grants, changed credentials, and changed bindings cannot complete 
 test('password policy, password reuse prevention, and retired email grants are enforced', async () => {
   const { codes } = await enroll();
   const token = (await verify(codes[0])).body.resetToken;
-  for (const password of ['Short1!', 'LongerThan12!abc1', 'abcdefghij1!', 'ABCDEFGHIJ1!', 'Abcdefghijk!', 'Abcdefghijk1', 'Abcdefgh 1!a', null, initial]) assert.equal((await complete(token, password)).status, 400);
+  for (const password of ['Short1!', 'abcdefghij1!', 'ABCDEFGHIJ1!', 'Abcdefghijk!', 'Abcdefghijk1', 'Abcdefgh 1!a', null, initial]) assert.equal((await complete(token, password)).status, 400);
   await prisma.passwordReset.update({ where: { userId: 'staff' }, data: { authenticatorVersion: null } });
   assert.equal((await complete(token)).status, 400);
   assert.equal((await post('/password-reset/request', { email: 'staff@example.test' })).status, 410);

@@ -1,3 +1,4 @@
+import { auditApiActivity } from './middleware/audit';
 import express, { Request, Response, NextFunction } from 'express';
 
 import { prisma } from './db';
@@ -26,6 +27,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // Apply general API rate limiter
+app.use('/api', auditApiActivity);
 app.use('/api', apiLimiter);
 
 // Health check endpoint

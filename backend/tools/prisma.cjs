@@ -10,5 +10,13 @@ if (process.env.DATABASE_URL_FILE) {
   try { process.env.DATABASE_URL = fs.readFileSync(process.env.DATABASE_URL_FILE, 'utf8').trim(); delete process.env.DATABASE_URL_FILE; }
   catch { console.error('Unable to read DATABASE_URL_FILE.'); process.exit(1); }
 }
+const enginesDir = path.join(root, 'node_modules/@prisma/engines');
+if (fs.existsSync(enginesDir)) {
+  const files = fs.readdirSync(enginesDir);
+  const schemaEngine = files.find(f => f.startsWith('schema-engine-') && !f.endsWith('.gz') && !f.endsWith('.sha256'));
+  if (schemaEngine && !process.env.PRISMA_SCHEMA_ENGINE_BINARY) {
+    process.env.PRISMA_SCHEMA_ENGINE_BINARY = path.join(enginesDir, schemaEngine);
+  }
+}
 const child = spawnSync(process.execPath, [path.join(root, 'node_modules/prisma/build/index.js'), ...process.argv.slice(2)], { cwd: root, env: process.env, stdio: 'inherit' });
 process.exit(child.status ?? 1);
