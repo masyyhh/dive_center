@@ -11,4 +11,10 @@ if [ -z "${PRISMA_SCHEMA_ENGINE_BINARY:-}" ]; then
     if [ -f "$f" ]; then export PRISMA_SCHEMA_ENGINE_BINARY="$f"; break; fi
   done
 fi
+# Start the API only after its bundled migrations have been applied. One-off
+# tooling commands (migrations, bootstrap, backup checks) run without this step.
+if [ "${1:-}" = node ] && [ "${2:-}" = dist/index.js ]; then
+  echo 'Applying database migrations before starting the API...'
+  node tools/prisma.cjs migrate deploy
+fi
 exec "$@"
