@@ -5,13 +5,15 @@ import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider } from './context/AuthContext';
 import { PropertyProvider } from './context/PropertyContext';
 import './index.css';
+import './workspace.css';
+import { NavigationProvider } from './context/NavigationContext';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
         <PropertyProvider>
-          <AppContent />
+          <NavigationProvider><AppContent /></NavigationProvider>
         </PropertyProvider>
       </AuthProvider>
     </ThemeProvider>

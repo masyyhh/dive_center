@@ -1,15 +1,16 @@
+import { findLoginUser } from '../utils/identity';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../db';
-import { signToken, requireAuth } from '../middleware/auth';
+import { signToken, requireAccountAuth } from '../middleware/auth';
 import { authLimiter } from '../middleware/security';
 import { logAuditEvent } from '../services/auditService';
 
 export const authRouter = Router();
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  identifier: z.string().trim().min(1).max(254),
   password: z.string().min(1),
 });
 
@@ -17,23 +18,19 @@ const loginSchema = z.object({
 // Implements 5 wrong attempts lock out (PDF Page 2)
 authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
   try {
-    const parseResult = loginSchema.safeParse(req.body);
+    const parseResult = loginSchema.safeParse({ ...req.body, identifier: req.body.identifier ?? req.body.username ?? req.body.email });
     if (!parseResult.success) {
-      return res.status(400).json({ error: 'Please enter a valid email and password.' });
+      return res.status(400).json({ error: 'Please enter a valid username and password.' });
     }
 
-    const { email, password } = parseResult.data;
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-      include: {
-        assignedProperties: {
-          include: { property: true },
-        },
-      },
+    const { identifier, password } = parseResult.data;
+    const user = await findLoginUser(prisma, identifier, {
+      authenticator: { select: { enrolledAt: true } },
+      assignedProperties: { include: { property: true } },
     });
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+      return res.status(401).json({ error: 'Invalid username or password.' });
     }
 
     // Check account lockout
@@ -53,7 +50,7 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
     if (!isMatch) {
       const newAttempts = user.failedLoginAttempts + 1;
       let lockedUntil: Date | null = null;
-      let lockMessage = 'Invalid email or password.';
+      let lockMessage = 'Invalid username or password.';
 
       if (newAttempts >= 5) {
         // Lock for 15 minutes
@@ -102,10 +99,17 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
       },
     });
 
+    if (user.mustChangePassword) {
+      return res.json({ passwordChangeRequired: true, changeToken: signToken({
+        id: user.id, email: user.email, role: user.role, passwordHash: user.passwordHash, purpose: 'password-change',
+      }) });
+    }
+
     const token = signToken({
       id: user.id,
       email: user.email,
       role: user.role,
+      passwordHash: user.passwordHash,
     });
 
     // If Global Admin, list all properties, else list assigned properties
@@ -117,8 +121,8 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
       });
     } else {
       properties = user.assignedProperties
-        .filter((p) => p.property.isActive)
-        .map((p) => p.property);
+        .filter((p: any) => p.property.isActive)
+        .map((p: any) => p.property);
     }
 
     await logAuditEvent({
@@ -134,6 +138,8 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
       token,
       user: {
         id: user.id,
+        username: user.username,
+        authenticatorEnabled: Boolean(user.authenticator?.enrolledAt),
         email: user.email,
         name: user.name,
         role: user.role,
@@ -147,11 +153,12 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
 });
 
 // GET /api/auth/me
-authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
+authRouter.get('/me', requireAccountAuth, async (req: Request, res: Response) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
       include: {
+        authenticator: { select: { enrolledAt: true } },
         assignedProperties: {
           include: { property: true },
         },
@@ -170,13 +177,15 @@ authRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
       });
     } else {
       properties = user.assignedProperties
-        .filter((p) => p.property.isActive)
-        .map((p) => p.property);
+        .filter((p: any) => p.property.isActive)
+        .map((p: any) => p.property);
     }
 
     return res.json({
       user: {
         id: user.id,
+        username: user.username,
+        authenticatorEnabled: Boolean(user.authenticator?.enrolledAt),
         email: user.email,
         name: user.name,
         role: user.role,

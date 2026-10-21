@@ -4,6 +4,8 @@ export interface Property {
   id: string;
   code: string;
   name: string;
+  deletedAt?: string | null;
+  pmsPropertyCode?: string | null;
   location?: string | null;
   currency: string;
   currencySymbol: string;
@@ -21,7 +23,9 @@ export interface Property {
 
 export interface User {
   id: string;
-  email: string;
+  username: string;
+  authenticatorEnabled: boolean;
+  email?: string | null;
   name: string;
   role: UserRole;
   failedLoginAttempts?: number;
@@ -66,6 +70,7 @@ export interface Item {
   personalRoles?: string | null;
   personalRatesJson?: string | null;
   isActive: boolean;
+  hasBillHistory?: boolean;
 }
 
 export interface BillItem {
@@ -210,6 +215,18 @@ export interface AuditLog {
   details?: string | null;
   ipAddress?: string | null;
   createdAt: string;
-  user?: { id: string; name: string; email: string; role: string };
+  user?: { id: string; name: string; email: string | null; role: string };
   property?: { id: string; name: string; code: string };
+}
+
+export interface PmsGuest {
+  propertyCode: string;
+  roomNumber: string;
+  fullName: string;
+  guestType: 'main' | 'sharer';
+  nationality: string | null;
+  nationalityCode: string | null;
+  checkoutDate: string | null;
+  arrivalDate: string | null;
+  confirmationNumber: string | null;
 }

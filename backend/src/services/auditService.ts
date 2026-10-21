@@ -1,7 +1,9 @@
+import type { Prisma } from '@prisma/client';
 import { Request } from 'express';
 import { prisma } from '../db';
 
 interface AuditParams {
+  client?: Pick<Prisma.TransactionClient, 'auditLog'>;
   req?: Request;
   propertyId?: string | null;
   userId?: string | null;
@@ -12,6 +14,7 @@ interface AuditParams {
 }
 
 export const logAuditEvent = async ({
+  client = prisma,
   req,
   propertyId,
   userId,
@@ -22,19 +25,12 @@ export const logAuditEvent = async ({
 }: AuditParams) => {
   try {
     const effectiveUserId = userId || req?.user?.id || null;
-    const effectivePropertyId =
-      propertyId ||
-      (req?.headers['x-property-id'] as string) ||
-      (req?.query?.propertyId as string) ||
-      (req?.body?.propertyId as string) ||
-      null;
+    // Resource callers supply authorized context; account-wide events stay propertyless.
+    const effectivePropertyId = propertyId ?? null;
 
-    const ipAddress =
-      req?.headers['x-forwarded-for']?.toString().split(',')[0].trim() ||
-      req?.socket?.remoteAddress ||
-      '127.0.0.1';
+    const ipAddress = req?.ip || req?.socket?.remoteAddress || '127.0.0.1';
 
-    await prisma.auditLog.create({
+    await client.auditLog.create({
       data: {
         propertyId: effectivePropertyId,
         userId: effectiveUserId,

@@ -101,7 +101,7 @@ staffRouter.put(
   async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
-      const existing = await prisma.staffMember.findUnique({ where: { id } });
+      const existing = await prisma.staffMember.findUnique({ where: { id }, include: { property: { select: { deletedAt: true } } } });
       if (!existing) {
         return res.status(404).json({ error: 'Staff member not found.' });
       }
@@ -110,6 +110,8 @@ staffRouter.put(
       if (req.user!.role !== 'GLOBAL_ADMIN' && !req.user!.assignedPropertyIds.includes(existing.propertyId)) {
         return res.status(403).json({ error: 'Unauthorized for this property.' });
       }
+
+      if (existing.property?.deletedAt) return res.status(410).json({ error: 'This property has been removed. Its records are read-only.' });
 
       const {
         name,

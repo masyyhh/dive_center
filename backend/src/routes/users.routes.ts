@@ -1,3 +1,4 @@
+import { usernameSchema } from '../utils/identity';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
@@ -6,18 +7,31 @@ import { requireAuth } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 
+import { passwordSchema, passwordPolicyMessage } from '../utils/password';
+
 export const usersRouter = Router();
 
-// All user management routes require GLOBAL_ADMIN
-usersRouter.use(requireAuth, requireRole('GLOBAL_ADMIN'));
+// Managers may list and reset their staff accounts; other account management stays global-only.
+usersRouter.use(requireAuth);
+const accountManagers = requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER');
 
 // GET /api/users
-usersRouter.get('/', async (req: Request, res: Response) => {
+usersRouter.get('/', accountManagers, async (req: Request, res: Response) => {
   try {
+    const managerPropertyIds = req.user!.assignedPropertyIds;
     const users = await prisma.user.findMany({
+      // All assignments must be managed by the caller because a password controls the whole account.
+      where: req.user!.role === 'GLOBAL_ADMIN' ? {} : {
+        role: 'CENTRE_STAFF',
+        assignedProperties: {
+          some: { propertyId: { in: managerPropertyIds } },
+          every: { propertyId: { in: managerPropertyIds } },
+        },
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        username: true,
         email: true,
         name: true,
         role: true,
@@ -25,6 +39,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
         lockedUntil: true,
         isActive: true,
         createdAt: true,
+        authenticator: { select: { enrolledAt: true } },
         assignedProperties: {
           include: {
             property: {
@@ -35,7 +50,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       },
     });
 
-    return res.json({ users });
+    return res.json({ users: users.map(({ authenticator, ...user }) => ({ ...user, authenticatorEnabled: Boolean(authenticator?.enrolledAt), assignedProperties: user.assignedProperties.map(assignment => assignment.property) })) });
   } catch (error) {
     console.error('Fetch users error:', error);
     return res.status(500).json({ error: 'Failed to fetch users.' });
@@ -43,26 +58,34 @@ usersRouter.get('/', async (req: Request, res: Response) => {
 });
 
 const createUserSchema = z.object({
-  email: z.string().email(),
+  username: usernameSchema,
+  email: z.string().trim().email().optional().or(z.literal('')).transform(value => value?.toLowerCase() || null),
   name: z.string().min(2),
-  password: z.string().min(6, 'Password must be at least 6 characters long'),
+  password: passwordSchema,
   role: z.enum(['GLOBAL_ADMIN', 'PROPERTY_MANAGER', 'CENTRE_STAFF']),
   propertyIds: z.array(z.string()).optional(),
 });
 
 // POST /api/users
-usersRouter.post('/', async (req: Request, res: Response) => {
+usersRouter.post('/', accountManagers, async (req: Request, res: Response) => {
   try {
     const parseResult = createUserSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
+      return res.status(400).json({ error: parseResult.error.errors[0].message, details: parseResult.error.errors });
     }
 
-    const { email, name, password, role, propertyIds } = parseResult.data;
+    const { username, email, name, password, role, propertyIds } = parseResult.data;
 
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (req.user!.role === 'PROPERTY_MANAGER' && (role !== 'CENTRE_STAFF' || !propertyIds?.length || propertyIds.some(id => !req.user!.assignedPropertyIds.includes(id)))) {
+      return res.status(403).json({ error: 'You can only create centre staff assigned to properties you manage.' });
+    }
+    const assignments = [...new Set(propertyIds || [])];
+    if (assignments.length && await prisma.property.count({ where: { id: { in: assignments }, isActive: true } }) !== assignments.length) {
+      return res.status(400).json({ error: 'Select valid, active properties.' });
+    }
+    const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email: username }] } });
     if (existing) {
-      return res.status(400).json({ error: `User with email '${email}' already exists.` });
+      return res.status(400).json({ error: 'This username is already in use.' });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -70,21 +93,25 @@ usersRouter.post('/', async (req: Request, res: Response) => {
 
     const user = await prisma.user.create({
       data: {
-        email: email.toLowerCase(),
+        username,
+        email,
         name,
         passwordHash,
+        mustChangePassword: true,
         role,
         assignedProperties: {
-          create: (propertyIds || []).map((propertyId) => ({ propertyId })),
+          create: assignments.map((propertyId) => ({ propertyId })),
         },
       },
       select: {
         id: true,
+        username: true,
         email: true,
         name: true,
         role: true,
         isActive: true,
         createdAt: true,
+        authenticator: { select: { enrolledAt: true } },
         assignedProperties: {
           include: { property: true },
         },
@@ -102,13 +129,14 @@ usersRouter.post('/', async (req: Request, res: Response) => {
 
     return res.status(201).json({ user });
   } catch (error) {
-    console.error('Create user error:', error);
+    if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This username is already in use.' });
+    console.error('Create user error.');
     return res.status(500).json({ error: 'Failed to create user.' });
   }
 });
 
 // PUT /api/users/:id
-usersRouter.put('/:id', async (req: Request, res: Response) => {
+usersRouter.put('/:id', requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
     const { name, role, propertyIds, isActive } = req.body;
@@ -116,6 +144,12 @@ usersRouter.put('/:id', async (req: Request, res: Response) => {
     const existing = await prisma.user.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ error: 'User not found.' });
+    }
+
+    if (Array.isArray(propertyIds)) {
+      if (propertyIds.some(id => typeof id !== 'string') || new Set(propertyIds).size !== propertyIds.length || await prisma.property.count({ where: { id: { in: propertyIds }, isActive: true, deletedAt: null } }) !== propertyIds.length) {
+        return res.status(400).json({ error: 'Assign only valid, active properties.' });
+      }
     }
 
     // Update basic fields
@@ -140,6 +174,7 @@ usersRouter.put('/:id', async (req: Request, res: Response) => {
       where: { id },
       select: {
         id: true,
+        username: true,
         email: true,
         name: true,
         role: true,
@@ -167,27 +202,44 @@ usersRouter.put('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/reset-password
-// Admin sets new password (PDF Page 2: "Passwords are set by your administrator")
-usersRouter.post('/:id/reset-password', async (req: Request, res: Response) => {
+// Global administrators and the staff account's property manager can set a new password.
+usersRouter.post('/:id/reset-password', accountManagers, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const { password } = req.body;
+    const { password, resetAuthenticator } = req.body;
+    if (resetAuthenticator !== undefined && typeof resetAuthenticator !== 'boolean') return res.status(400).json({ error: 'Invalid authenticator reset option.' });
 
-    if (!password || password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    if (!passwordSchema.safeParse(password).success) {
+      return res.status(400).json({ error: passwordPolicyMessage });
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, assignedProperties: { select: { propertyId: true } } },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found.' });
+
+    if (req.user!.role === 'PROPERTY_MANAGER') {
+      const canReset = target.role === 'CENTRE_STAFF' && target.assignedProperties.length > 0 &&
+        target.assignedProperties.every(assignment => req.user!.assignedPropertyIds.includes(assignment.propertyId));
+      if (!canReset) {
+        return res.status(403).json({ error: 'You can only reset passwords for staff whose properties you manage.' });
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    await prisma.user.update({
-      where: { id },
-      data: {
-        passwordHash,
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-      },
-    });
+    const update = { where: { id }, data: { passwordHash, mustChangePassword: true, failedLoginAttempts: 0, lockedUntil: null } };
+    if (resetAuthenticator) {
+      await prisma.$transaction(async tx => {
+        await tx.user.update(update);
+        await tx.authenticator.deleteMany({ where: { userId: id } });
+        await tx.passwordReset.deleteMany({ where: { userId: id } });
+      });
+    } else {
+      await prisma.user.update(update);
+    }
 
     await logAuditEvent({
       req,
@@ -195,7 +247,8 @@ usersRouter.post('/:id/reset-password', async (req: Request, res: Response) => {
       action: 'PASSWORD_RESET',
       targetType: 'User',
       targetId: id,
-      details: { message: 'Password reset by administrator' },
+      propertyId: target.assignedProperties[0]?.propertyId,
+      details: { message: 'Password reset by account manager', actorRole: req.user!.role, authenticatorCleared: Boolean(resetAuthenticator) },
     });
 
     return res.json({ message: 'Password updated successfully. Account lock has been cleared.' });
@@ -207,7 +260,7 @@ usersRouter.post('/:id/reset-password', async (req: Request, res: Response) => {
 
 // POST /api/users/:id/unlock
 // Admin manually unlocks a locked account
-usersRouter.post('/:id/unlock', async (req: Request, res: Response) => {
+usersRouter.post('/:id/unlock', requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
 

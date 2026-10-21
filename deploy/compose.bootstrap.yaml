@@ -1,0 +1,9 @@
+# Use only with a one-off `run --rm backend` command, never with `up`.
+services:
+  backend:
+    environment:
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env.production}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrator}
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    secrets:
+      - admin_password

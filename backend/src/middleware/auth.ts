@@ -1,12 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { loadJwtSecret } from '../config/secrets';
 import { prisma } from '../db';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dive-center-default-secret-change-in-prod';
+const JWT_SECRET = loadJwtSecret();
+const credentialBinding = (id: string, hash: string) => createHmac('sha256', JWT_SECRET).update(JSON.stringify([id, hash])).digest('hex');
 
 export interface AuthenticatedUser {
   id: string;
-  email: string;
+  email: string | null;
   name: string;
   role: 'GLOBAL_ADMIN' | 'PROPERTY_MANAGER' | 'CENTRE_STAFF';
   assignedPropertyIds: string[];
@@ -16,18 +19,21 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
+      authenticatedPasswordHash?: string;
     }
   }
 }
 
-export const signToken = (payload: { id: string; email: string; role: string }) => {
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: (process.env.JWT_EXPIRES_IN || '12h') as any,
+export const signToken = (payload: { id: string; email: string | null; role: string; passwordHash: string; purpose?: 'password-change' }) => {
+  const { passwordHash, ...identity } = payload;
+  return jwt.sign({ ...identity, credential: credentialBinding(identity.id, passwordHash) }, JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: (payload.purpose ? '10m' : process.env.JWT_EXPIRES_IN || '12h') as any,
   });
 };
 
 
-export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+const authenticate = (mode: 'workspace' | 'account' | 'initial') => async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -37,16 +43,21 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     const token = authHeader.split(' ')[1];
     let decoded: any;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     } catch (err) {
       return res.status(401).json({ error: 'Session expired or invalid token. Please sign in again.' });
+    }
+
+    if (!decoded || typeof decoded !== 'object' || typeof decoded.id !== 'string' || typeof decoded.credential !== 'string' || !/^[a-f0-9]{64}$/.test(decoded.credential)) {
+      return res.status(401).json({ error: 'Session expired. Please sign in again.' });
     }
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       include: {
+        authenticator: { select: { enrolledAt: true } },
         assignedProperties: {
-          select: { propertyId: true },
+          select: { propertyId: true, property: { select: { deletedAt: true } } },
         },
       },
     });
@@ -54,6 +65,26 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     if (!user || !user.isActive) {
       return res.status(401).json({ error: 'User account is inactive or no longer exists.' });
     }
+
+    if (!timingSafeEqual(Buffer.from(decoded.credential, 'hex'), Buffer.from(credentialBinding(user.id, user.passwordHash), 'hex'))) {
+      return res.status(401).json({ error: 'Password changed. Please sign in again.' });
+    }
+
+    if (mode === 'initial' ? decoded.purpose !== 'password-change' || !user.mustChangePassword : decoded.purpose !== undefined || user.mustChangePassword) {
+      return res.status(403).json({ error: 'You must change your initial password before continuing.' });
+    }
+
+    if (mode === 'workspace' && !user.authenticator?.enrolledAt) {
+      return res.status(403).json({ error: 'Set up your personal authenticator before entering the workspace.', code: 'AUTHENTICATOR_SETUP_REQUIRED' });
+    }
+    // Global administrators retain read access to historical data, but cannot add work to a removed property.
+    if (user.role === 'GLOBAL_ADMIN' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      const selectedIds = [req.body?.propertyId, req.query?.propertyId].filter((id): id is string => typeof id === 'string' && Boolean(id));
+      if (selectedIds.length && await prisma.property.findFirst({ where: { id: { in: selectedIds }, deletedAt: { not: null } }, select: { id: true } })) {
+        return res.status(410).json({ error: 'This property has been removed from the workspace. Its history is retained.' });
+      }
+    }
+    req.authenticatedPasswordHash = user.passwordHash;
 
     // Check account lockout
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -68,7 +99,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       email: user.email,
       name: user.name,
       role: user.role as any,
-      assignedPropertyIds: user.assignedProperties.map((p) => p.propertyId),
+      assignedPropertyIds: user.assignedProperties.filter(p => !p.property?.deletedAt).map((p) => p.propertyId),
     };
 
     next();
@@ -77,3 +108,8 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     return res.status(500).json({ error: 'Internal server error during authentication.' });
   }
 };
+
+export const requireAuth = authenticate('workspace');
+export const requirePasswordChangeAuth = authenticate('initial');
+
+export const requireAccountAuth = authenticate('account');

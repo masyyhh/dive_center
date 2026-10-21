@@ -5,11 +5,14 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && prisma generate",
-    "prisma:generate": "prisma generate",
-    "prisma:push": "prisma db push",
-    "prisma:seed": "tsx src/seed.ts",
-    "start": "node dist/index.js"
+    "build": "npm run prisma:generate && tsc",
+    "prisma:generate": "node tools/prisma.cjs generate",
+    "prisma:push": "node tools/prisma.cjs db push",
+    "start": "node dist/index.js",
+    "test": "node --test tests/*.test.cjs",
+    "migrate:deploy": "node tools/prisma.cjs migrate deploy",
+    "bootstrap:admin": "node dist/scripts/bootstrap-admin.js",
+    "import:sqlite": "node tools/import-sqlite.cjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -21,6 +24,9 @@
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "otpauth": "^9.5.2",
+    "prisma": "^5.22.0",
+    "qrcode": "^1.5.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -29,8 +35,16 @@
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.8.7",
-    "prisma": "^5.22.0",
+    "@types/qrcode": "^1.5.6",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=22.13 <25"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
   }
 }

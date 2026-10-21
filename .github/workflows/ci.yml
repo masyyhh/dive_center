@@ -1,0 +1,55 @@
+name: Application checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: dive_center_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dive_center_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      TEST_DATABASE_URL: postgresql://postgres:ci-test-password@127.0.0.1:5432/dive_center_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm audit --prefix backend --audit-level=high
+      - run: npm audit --prefix frontend --audit-level=high
+      - run: node --test tests/*.test.cjs
+      - run: npm test --prefix backend
+      - run: npm test --prefix frontend
+      - run: npm run build --prefix backend
+      - run: npm run build --prefix frontend
+      - run: node scripts/prepare-production.cjs ci.example.test ci@example.test
+      - run: docker compose --env-file .env.production build
+      - name: Exercise container startup and backup restore
+        env:
+          COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: sh scripts/smoke-production.sh
+      - name: Container diagnostics
+        if: failure()
+        env:
+          COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: docker compose --env-file .env.production -f compose.yaml -f deploy/compose.smoke.yaml logs --no-color --tail=100
+      - name: Remove disposable CI volumes
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: docker compose --env-file .env.production -f compose.yaml -f deploy/compose.smoke.yaml down --volumes --remove-orphans

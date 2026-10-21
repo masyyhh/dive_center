@@ -147,9 +147,12 @@ export const calculateCommissionForPeriod = async (
 
       // Process Line items: pools and personal commissions
       for (const line of bill.items) {
+        // Ignore inconsistent historical cross-property item relations.
+        if (line.item && line.item.propertyId !== propertyId) continue;
         // Pool contributions
-        const poolType = line.item?.poolType || (line.categoryName === 'Courses' ? 'COURSE_POOL' : line.categoryName === 'Dives' ? 'DIVE_POOL' : 'NONE');
-        const contribution = (line.item?.poolContribution ?? (poolType === 'COURSE_POOL' ? 25 : poolType === 'DIVE_POOL' ? 10 : 0)) * line.quantity;
+        const ownedItem = line.item?.propertyId === propertyId ? line.item : null;
+        const poolType = ownedItem?.poolType || 'NONE';
+        const contribution = ownedItem && Number.isFinite(ownedItem.poolContribution) && ownedItem.poolContribution >= 0 ? ownedItem.poolContribution * line.quantity : 0;
 
         if (poolType === 'COURSE_POOL') {
           dailyCoursePool += contribution;
@@ -162,7 +165,7 @@ export const calculateCommissionForPeriod = async (
           try {
             const rates = JSON.parse(line.personalCommissionsJson);
             // Seller
-            if (line.sellerStaffId && rates.seller) {
+            if (line.sellerStaffId && staffMap.has(line.sellerStaffId) && typeof rates.seller === 'number' && Number.isFinite(rates.seller) && rates.seller > 0) {
               const amt = Number(rates.seller) * line.quantity;
               const entry = commissionMap.get(line.sellerStaffId);
               if (entry) entry.personalCommission += amt;
@@ -181,7 +184,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Guide
-            if (line.guideStaffId && rates.guide) {
+            if (line.guideStaffId && staffMap.has(line.guideStaffId) && typeof rates.guide === 'number' && Number.isFinite(rates.guide) && rates.guide > 0) {
               const amt = Number(rates.guide) * line.quantity;
               const entry = commissionMap.get(line.guideStaffId);
               if (entry) entry.personalCommission += amt;
@@ -200,7 +203,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Instructor
-            if (line.instructorStaffId && rates.instructor) {
+            if (line.instructorStaffId && staffMap.has(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
               const amt = Number(rates.instructor) * line.quantity;
               const entry = commissionMap.get(line.instructorStaffId);
               if (entry) entry.personalCommission += amt;
@@ -219,7 +222,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Photo
-            if (line.photoStaffId && rates.photo) {
+            if (line.photoStaffId && staffMap.has(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
               const amt = Number(rates.photo) * line.quantity;
               const entry = commissionMap.get(line.photoStaffId);
               if (entry) entry.personalCommission += amt;
@@ -238,7 +241,7 @@ export const calculateCommissionForPeriod = async (
               });
             }
             // Video
-            if (line.videoStaffId && rates.video) {
+            if (line.videoStaffId && staffMap.has(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {
               const amt = Number(rates.video) * line.quantity;
               const entry = commissionMap.get(line.videoStaffId);
               if (entry) entry.personalCommission += amt;
@@ -301,15 +304,13 @@ export const calculateCommissionForPeriod = async (
     // 3. Base-Leader Override (+10% of total pool, paid regardless of attendance)
     // Page 7: "An extra 10% of the pool, paid to the base leader(s) — regardless of attendance."
     const totalDayPool = dailyCoursePool + dailyDivePool;
-    if (totalDayPool > 0 && baseLeaders.length > 0) {
+    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date));
+    if (totalDayPool > 0 && employedBaseLeaders.length > 0) {
       const overrideTotal = totalDayPool * 0.10;
-      const overrideShare = overrideTotal / baseLeaders.length;
-      for (const bl of baseLeaders) {
-        // Must be employed on that date
-        if (bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date)) {
-          const entry = commissionMap.get(bl.id);
-          if (entry) entry.overrideCommission += overrideShare;
-        }
+      const overrideShare = overrideTotal / employedBaseLeaders.length;
+      for (const bl of employedBaseLeaders) {
+        const entry = commissionMap.get(bl.id);
+        if (entry) entry.overrideCommission += overrideShare;
       }
     }
   }

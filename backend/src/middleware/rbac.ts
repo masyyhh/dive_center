@@ -29,11 +29,8 @@ export const requirePropertyAccess = (propertyIdSource: 'query' | 'body' | 'para
       return next();
     }
 
-    const propertyId =
-      req[propertyIdSource]?.[fieldName] ||
-      req.headers['x-property-id'] ||
-      req.query[fieldName] ||
-      req.body?.[fieldName];
+    // Authorize the exact selector consumed by the handler, never a fallback header.
+    const propertyId = req[propertyIdSource]?.[fieldName];
 
     if (!propertyId || typeof propertyId !== 'string') {
       return res.status(400).json({ error: 'Property ID is required for this operation.' });

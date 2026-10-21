@@ -22,7 +22,7 @@ auditRouter.get(
 
       const logs = await prisma.auditLog.findMany({
         where,
-        take: parseInt(String(limit), 10) || 100,
+        take: Math.min(500, Math.max(1, parseInt(String(limit), 10) || 100)),
         orderBy: { createdAt: 'desc' },
         include: {
           user: { select: { id: true, name: true, email: true, role: true } },

@@ -1,12 +1,5 @@
-const getBaseUrl = (): string => {
-  if (typeof window !== 'undefined' && window.location.port === '5173') {
-    const host = window.location.hostname || 'localhost';
-    return `http://${host}:5001/api`;
-  }
-  return '/api';
-};
-
-const API_BASE = getBaseUrl();
+// Vite proxies /api in development; production uses the same origin.
+const API_BASE = '/api';
 
 export const getAuthToken = (): string | null => {
   return localStorage.getItem('dcm_auth_token');
@@ -32,6 +25,10 @@ export const setStoredPropertyId = (id: string | null) => {
   }
 };
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public requestId?: string) { super(message); }
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -44,7 +41,7 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  if (token) {
+  if (token && !headers.Authorization) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -52,32 +49,19 @@ export async function apiFetch<T>(
     headers['X-Property-Id'] = activePropertyId;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers,
-    });
-  } catch (err) {
-    // If connection to API_BASE fails, fallback to local loopback directly
-    const fallbackBase = API_BASE.includes('localhost')
-      ? 'http://127.0.0.1:5001/api'
-      : 'http://localhost:5001/api';
-    response = await fetch(`${fallbackBase}${endpoint}`, {
-      ...options,
-      headers,
-    });
-  }
+  const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
 
   if (!response.ok) {
     let errorMessage = `Request failed (${response.status})`;
+    let requestId: string | undefined;
     try {
       const errorJson = await response.json();
       errorMessage = errorJson.error || errorMessage;
+      if (typeof errorJson.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(errorJson.requestId)) requestId = errorJson.requestId;
     } catch {
       // ignore
     }
-    throw new Error(errorMessage);
+    throw new ApiError(errorMessage, response.status, requestId);
   }
 
   return response.json();
@@ -92,15 +76,7 @@ export async function downloadFile(endpoint: string, filename: string) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (activePropertyId) headers['X-Property-Id'] = activePropertyId;
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${endpoint}`, { headers });
-  } catch {
-    const fallbackBase = API_BASE.includes('localhost')
-      ? 'http://127.0.0.1:5001/api'
-      : 'http://localhost:5001/api';
-    response = await fetch(`${fallbackBase}${endpoint}`, { headers });
-  }
+  const response = await fetch(`${API_BASE}${endpoint}`, { headers });
 
   if (!response.ok) {
     throw new Error('Failed to download file');

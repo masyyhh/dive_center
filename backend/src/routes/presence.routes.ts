@@ -1,3 +1,4 @@
+import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -5,13 +6,15 @@ import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 
+import { businessToday, isBusinessDate, isYearMonth } from '../utils/dates';
+
 export const presenceRouter = Router();
 
 // GET /api/presence/month-status?propertyId=...&yearMonth=... (e.g. 2026-10)
 presenceRouter.get('/month-status', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, yearMonth } = req.query;
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(String(yearMonth))) {
+    if (!isYearMonth(yearMonth)) {
       return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
     }
 
@@ -46,7 +49,7 @@ presenceRouter.get('/month-status', requireAuth, requirePropertyAccess('query', 
       attMapByDate.set(a.date, list);
     }
 
-    const todayStr = new Date().toISOString().substring(0, 10);
+    const todayStr = businessToday();
     const dayStatuses: Record<string, { status: 'recorded' | 'partial' | 'missing' | 'future'; markedCount: number; expectedCount: number }> = {};
     let missingDaysCount = 0;
 
@@ -63,7 +66,8 @@ presenceRouter.get('/month-status', requireAuth, requirePropertyAccess('query', 
 
       const marked = attMapByDate.get(dateStr) || [];
       const expectedCount = employedStaffToday.length;
-      const markedCount = marked.length;
+      const employedIds = new Set(employedStaffToday.map(staff => staff.id));
+      const markedCount = new Set(marked.filter(record => employedIds.has(record.staffMemberId)).map(record => record.staffMemberId)).size;
 
       if (dateStr > todayStr) {
         dayStatuses[dateStr] = { status: 'future', markedCount, expectedCount };
@@ -95,7 +99,7 @@ presenceRouter.get('/month-status', requireAuth, requirePropertyAccess('query', 
 presenceRouter.get('/day', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, date } = req.query;
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+    if (!isBusinessDate(date)) {
       return res.status(400).json({ error: 'Valid date (YYYY-MM-DD) is required.' });
     }
 
@@ -151,7 +155,7 @@ presenceRouter.get('/day', requireAuth, requirePropertyAccess('query', 'property
 
 const saveDayPresenceSchema = z.object({
   propertyId: z.string(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().refine(isBusinessDate, 'Valid calendar date (YYYY-MM-DD) is required.'),
   records: z.array(
     z.object({
       staffMemberId: z.string(),
@@ -180,53 +184,66 @@ presenceRouter.post('/day', requireAuth, requirePropertyAccess('body', 'property
 
     const { propertyId, date, records } = parseResult.data;
 
-    // Check if month is locked for payroll
-    const yearMonth = date.substring(0, 7);
-    const lock = await prisma.monthLock.findUnique({
-      where: { propertyId_yearMonth: { propertyId, yearMonth } },
-    });
-    if (lock && lock.isLocked) {
-      return res.status(423).json({
-        error: `Cannot modify attendance: The month (${yearMonth}) is locked for payroll.`,
+    const result = await withPropertyPayrollTransaction(prisma, propertyId, async prisma => {
+      // Check if month is locked for payroll
+      const yearMonth = date.substring(0, 7);
+      const lock = await prisma.monthLock.findUnique({
+        where: { propertyId_yearMonth: { propertyId, yearMonth } },
       });
-    }
+      if (lock && lock.isLocked) {
+        return payrollReply(423, {
+          error: `Cannot modify attendance: The month (${yearMonth}) is locked for payroll.`,
+        });
+      }
 
-    // Upsert each record
-    await prisma.$transaction(
-      records.map((r) =>
-        prisma.attendance.upsert({
-          where: {
-            propertyId_staffMemberId_date: {
+      const ids = [...new Set(records.map(record => record.staffMemberId))];
+      const eligible = await prisma.staffMember.findMany({
+        where: { id: { in: ids }, propertyId, isActive: true, isDiveStaff: true, hireDate: { lte: date }, OR: [{ leavingDate: null }, { leavingDate: { gte: date } }] },
+        select: { id: true },
+      });
+      if (ids.length !== records.length || eligible.length !== ids.length) {
+        return payrollReply(400, { error: 'Attendance must contain unique staff employed at this property on the selected date.' });
+      }
+
+      // Upsert each record
+      await Promise.all(
+        records.map((r) =>
+          prisma.attendance.upsert({
+            where: {
+              propertyId_staffMemberId_date: {
+                propertyId,
+                staffMemberId: r.staffMemberId,
+                date,
+              },
+            },
+            create: {
               propertyId,
               staffMemberId: r.staffMemberId,
               date,
+              status: r.status,
+              note: r.note || null,
             },
-          },
-          create: {
-            propertyId,
-            staffMemberId: r.staffMemberId,
-            date,
-            status: r.status,
-            note: r.note || null,
-          },
-          update: {
-            status: r.status,
-            note: r.note || null,
-          },
-        })
-      )
-    );
+            update: {
+              status: r.status,
+              note: r.note || null,
+            },
+          })
+        )
+      );
 
-    await logAuditEvent({
-      req,
-      propertyId,
-      action: 'ATTENDANCE_UPDATE',
-      targetType: 'Attendance',
-      targetId: date,
-      details: { date, count: records.length },
+      await logAuditEvent({
+        client: prisma,
+        req,
+        propertyId,
+        action: 'ATTENDANCE_UPDATE',
+        targetType: 'Attendance',
+        targetId: date,
+        details: { date, count: records.length },
+      });
+
+      return payrollReply(200, { message: 'Attendance recorded successfully.', date, count: records.length });
     });
-
-    return res.json({ message: 'Attendance recorded successfully.', date, count: records.length });
+    return res.status(result.status).json(result.body);
   } catch (error) {
     console.error('Save presence error:', error);
     return res.status(500).json({ error: 'Failed to record attendance.' });

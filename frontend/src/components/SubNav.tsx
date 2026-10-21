@@ -1,51 +1,47 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, PlusCircle, Receipt, CalendarCheck, BarChart3, Settings } from 'lucide-react';
+import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X } from 'lucide-react';
 
 export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin';
+export const navLabels: Record<NavTab, string> = { home: 'Overview', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
+interface SubNavProps { currentTab: NavTab; onTabChange: (tab: NavTab) => void; open: boolean; onClose: () => void; }
 
-interface SubNavProps {
-  currentTab: NavTab;
-  onTabChange: (tab: NavTab) => void;
-}
-
-export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange }) => {
+export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, onClose }) => {
+  const sidebarRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const sidebar = sidebarRef.current;
+    const previous = document.activeElement as HTMLElement | null;
+    const workspace = document.querySelector<HTMLElement>('.workspace');
+    if (workspace) workspace.inert = true;
+    sidebar?.querySelector<HTMLElement>('.sidebar-close')?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const elements = Array.from(sidebar?.querySelectorAll<HTMLElement>('a[href], button:not([disabled])') || []).filter(el => el.getClientRects().length);
+      const first = elements[0], last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', trap);
+    return () => { document.removeEventListener('keydown', trap); if (workspace) workspace.inert = false; previous?.focus(); };
+  }, [open]);
   const { user } = useAuth();
-  const canAccessAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
-
-  const navItems = [
-    { id: 'home' as NavTab, label: 'Home', icon: LayoutDashboard },
-    { id: 'new-bill' as NavTab, label: 'New Bill', icon: PlusCircle },
-    { id: 'bills' as NavTab, label: 'Bills', icon: Receipt },
-    { id: 'presence' as NavTab, label: 'Presence', icon: CalendarCheck },
-    { id: 'reporting' as NavTab, label: 'Reporting', icon: BarChart3 },
-    ...(canAccessAdmin ? [{ id: 'admin' as NavTab, label: 'Admin', icon: Settings }] : []),
+  const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
+  const items = [
+    { id: 'home' as NavTab, icon: LayoutDashboard }, { id: 'bills' as NavTab, icon: Receipt },
+    { id: 'presence' as NavTab, icon: CalendarCheck }, { id: 'reporting' as NavTab, icon: BarChart3 },
   ];
-
-  return (
-    <nav className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm sticky top-16 z-40">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex space-x-1 sm:space-x-4 overflow-x-auto py-2">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onTabChange(item.id)}
-                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${
-                  isActive
-                    ? 'bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800/80 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-sky-600 dark:text-sky-400' : 'text-slate-400 dark:text-slate-500'}`} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </nav>
-  );
+  const navigate = (tab: NavTab) => { onTabChange(tab); onClose(); };
+  return <>
+    {open && <button className="sidebar-scrim" aria-label="Close navigation" onClick={onClose} />}
+    <aside ref={sidebarRef} className={`sidebar ${open ? 'is-open' : ''}`} aria-label="Workspace navigation">
+      <a className="brand" href="#home" onClick={event => { event.preventDefault(); navigate('home'); }}><span className="brand-symbol"><Waves size={24} /></span><span>Dive Centre<span className="brand-subtitle">Workspace</span></span></a>
+      <button className="sidebar-close icon-button" aria-label="Close navigation" onClick={onClose}><X size={20} /></button>
+      <button className={`sidebar-create ${currentTab === 'new-bill' ? 'selected' : ''}`} aria-current={currentTab === 'new-bill' ? 'page' : undefined} onClick={() => navigate('new-bill')}><Plus size={18} />New bill</button>
+      <span className="eyebrow nav-caption">Workspace</span>
+      <nav className="sidebar-links">{items.map(({ id, icon: Icon }) => <button key={id} onClick={() => navigate(id)} aria-current={currentTab === id ? 'page' : undefined} className={currentTab === id ? 'active' : ''}><Icon size={19} /><span>{navLabels[id]}</span>{currentTab === id && <span className="nav-dot" />}</button>)}</nav>
+      {canAdmin && <><span className="eyebrow nav-caption">Settings</span><nav className="sidebar-links"><button className={currentTab === 'admin' ? 'active' : ''} aria-current={currentTab === 'admin' ? 'page' : undefined} onClick={() => navigate('admin')}><Settings size={19} /><span>Administration</span></button></nav></>}
+      <div className="sidebar-bottom"><a href="mailto:dive@devsabah.net"><span>Help & support</span><ArrowUpRight size={16} /></a><span className="sidebar-signature">Sun Diving</span></div>
+    </aside>
+  </>;
 };

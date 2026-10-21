@@ -5,7 +5,7 @@ import { apiFetch, getAuthToken, setAuthToken } from '../services/api';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; attemptsRemaining?: number }>;
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string; attemptsRemaining?: number; changeToken?: string }>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -39,12 +39,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshUser();
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (username: string, password: string) => {
     try {
-      const data = await apiFetch<{ token: string; user: User }>('/auth/login', {
+      const data = await apiFetch<{ token: string; user: User; passwordChangeRequired?: boolean; changeToken?: string }>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       });
+      if (data.passwordChangeRequired) {
+        setAuthToken(null); setUser(null);
+        return { success: true, changeToken: data.changeToken };
+      }
       setAuthToken(data.token);
       setUser(data.user);
       return { success: true };

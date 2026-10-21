@@ -1,3 +1,4 @@
+import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
@@ -6,6 +7,8 @@ import { calculateCommissionForPeriod } from '../services/commissionService';
 import { generateDailyExcelReport, generateMonthlyExcelWorkbook } from '../services/excelService';
 import { logAuditEvent } from '../services/auditService';
 
+import { isBusinessDate, isYearMonth, isDateRange } from '../utils/dates';
+
 export const reportsRouter = Router();
 
 // GET /api/reports/dashboard?propertyId=...&startDate=...&endDate=...
@@ -13,8 +16,8 @@ reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'pro
   try {
     const { propertyId, startDate, endDate } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: 'startDate and endDate are required.' });
+    if (!isDateRange(startDate, endDate)) {
+      return res.status(400).json({ error: 'Valid startDate and endDate are required, with startDate on or before endDate.' });
     }
 
     const propId = String(propertyId);
@@ -43,7 +46,7 @@ reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'pro
     const locks = await prisma.monthLock.findMany({
       where: {
         propertyId: propId,
-        yearMonth: { in: [startYm, endYm] },
+        yearMonth: { gte: startYm, lte: endYm },
         isLocked: true,
       },
     });
@@ -178,25 +181,29 @@ reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'pro
 reportsRouter.post('/recompute', requireAuth, requirePropertyAccess('body', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, startDate, endDate } = req.body;
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: 'startDate and endDate are required.' });
+    if (!isDateRange(startDate, endDate)) {
+      return res.status(400).json({ error: 'Valid startDate and endDate are required, with startDate on or before endDate.' });
     }
 
-    // Check if month is locked
-    const ym = String(startDate).substring(0, 7);
-    const lock = await prisma.monthLock.findUnique({
-      where: { propertyId_yearMonth: { propertyId: String(propertyId), yearMonth: ym } },
+    // Every month intersecting the selected period must be unlocked.
+    const locks = await prisma.monthLock.findMany({
+      where: {
+        propertyId: String(propertyId),
+        yearMonth: { gte: String(startDate).slice(0, 7), lte: String(endDate).slice(0, 7) },
+        isLocked: true,
+      },
     });
 
-    if (lock && lock.isLocked) {
+    if (locks.length > 0) {
       return res.status(423).json({
-        error: `Recompute disabled: Month ${ym} is locked for payroll.`,
+        error: `Recompute disabled: Month ${locks[0].yearMonth} is locked for payroll.`,
       });
     }
 
     const result = await calculateCommissionForPeriod(String(propertyId), String(startDate), String(endDate));
 
     await logAuditEvent({
+      client: prisma,
       req,
       propertyId: String(propertyId),
       action: 'COMMISSION_RECOMPUTE',
@@ -221,45 +228,49 @@ reportsRouter.post(
   async (req: Request, res: Response) => {
     try {
       const { propertyId, yearMonth, lock } = req.body;
-      if (!yearMonth || !/^\d{4}-\d{2}$/.test(String(yearMonth))) {
+      if (!isYearMonth(yearMonth)) {
         return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
       }
 
-      const shouldLock = lock !== undefined ? Boolean(lock) : true;
+      const result = await withPropertyPayrollTransaction(prisma, String(propertyId), async prisma => {
+        const shouldLock = lock !== undefined ? Boolean(lock) : true;
 
-      const record = await prisma.monthLock.upsert({
-        where: {
-          propertyId_yearMonth: {
+        const record = await prisma.monthLock.upsert({
+          where: {
+            propertyId_yearMonth: {
+              propertyId: String(propertyId),
+              yearMonth: String(yearMonth),
+            },
+          },
+          create: {
             propertyId: String(propertyId),
             yearMonth: String(yearMonth),
+            isLocked: shouldLock,
+            lockedById: req.user!.id,
           },
-        },
-        create: {
+          update: {
+            isLocked: shouldLock,
+            lockedAt: new Date(),
+            lockedById: req.user!.id,
+          },
+        });
+
+        await logAuditEvent({
+          client: prisma,
+          req,
           propertyId: String(propertyId),
-          yearMonth: String(yearMonth),
-          isLocked: shouldLock,
-          lockedById: req.user!.id,
-        },
-        update: {
-          isLocked: shouldLock,
-          lockedAt: new Date(),
-          lockedById: req.user!.id,
-        },
-      });
+          action: shouldLock ? 'MONTH_LOCK' : 'MONTH_UNLOCK',
+          targetType: 'MonthLock',
+          targetId: yearMonth,
+          details: { yearMonth, isLocked: shouldLock },
+        });
 
-      await logAuditEvent({
-        req,
-        propertyId: String(propertyId),
-        action: shouldLock ? 'MONTH_LOCK' : 'MONTH_UNLOCK',
-        targetType: 'MonthLock',
-        targetId: yearMonth,
-        details: { yearMonth, isLocked: shouldLock },
+        return payrollReply(200, {
+          message: `Month ${yearMonth} is now ${shouldLock ? 'locked (frozen for payroll)' : 'unlocked'}.`,
+          monthLock: record,
+        });
       });
-
-      return res.json({
-        message: `Month ${yearMonth} is now ${shouldLock ? 'locked (frozen for payroll)' : 'unlocked'}.`,
-        monthLock: record,
-      });
+      return res.status(result.status).json(result.body);
     } catch (error) {
       console.error('Month lock error:', error);
       return res.status(500).json({ error: 'Failed to update month lock status.' });
@@ -272,7 +283,7 @@ reportsRouter.post(
 reportsRouter.get('/export/daily', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, date } = req.query;
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+    if (!isBusinessDate(date)) {
       return res.status(400).json({ error: 'Valid date (YYYY-MM-DD) is required.' });
     }
 
@@ -295,7 +306,7 @@ reportsRouter.get('/export/daily', requireAuth, requirePropertyAccess('query', '
 reportsRouter.get('/export/monthly', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, yearMonth } = req.query;
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(String(yearMonth))) {
+    if (!isYearMonth(yearMonth)) {
       return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
     }
 

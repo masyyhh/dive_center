@@ -1,3 +1,8 @@
+import { pmsResortCodes } from '../utils/pmsGuests';
+import { passwordHelp, passwordPattern } from './PasswordRecoveryView';
+import { formatMoney } from '../utils/format';
+import { Modal } from './Modal';
+import { businessToday } from '../utils/dates';
 import React, { useState, useEffect } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { useAuth } from '../context/AuthContext';
@@ -22,20 +27,30 @@ import {
   Lock,
 } from 'lucide-react';
 
-export const AdminView: React.FC = () => {
+export const AdminView: React.FC<{ section?: string; onSectionChange: (section: string) => void }> = ({ section, onSectionChange }) => {
   const { user } = useAuth();
   const { activeProperty, properties, refreshProperties } = useProperty();
 
   const isGlobalAdmin = user?.role === 'GLOBAL_ADMIN';
+  const canManageAccounts = isGlobalAdmin || user?.role === 'PROPERTY_MANAGER';
 
   type AdminTab = 'properties' | 'users' | 'staff' | 'items' | 'audit';
-  const [activeTab, setActiveTab] = useState<AdminTab>(isGlobalAdmin ? 'properties' : 'staff');
+  const [activeTab, setActiveTab] = useState<AdminTab>(section === 'items' || section === 'staff' || section === 'audit' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && section === 'properties')) ? section : isGlobalAdmin ? 'properties' : 'staff');
 
+  useEffect(() => {
+    if (section === 'items' || section === 'staff' || section === 'audit' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && section === 'properties'))) setActiveTab(section);
+  }, [section, isGlobalAdmin, canManageAccounts]);
   // Properties state
+  const [propertyCreating, setPropertyCreating] = useState(false);
+  const [deletePropertyTarget, setDeletePropertyTarget] = useState<Property | null>(null);
+  const [deletePropertyCode, setDeletePropertyCode] = useState('');
+  const [propertyDeleting, setPropertyDeleting] = useState(false);
+  const closePropertyDelete = () => { if (!propertyDeleting) { setDeletePropertyTarget(null); setDeletePropertyCode(''); setErrorMsg(null); } };
   const [showPropertyModal, setShowPropertyModal] = useState<boolean>(false);
   const [propForm, setPropForm] = useState({
     name: '',
     code: '',
+    pmsPropertyCode: '',
     location: '',
     currency: 'USD',
     currencySymbol: '$',
@@ -48,6 +63,7 @@ export const AdminView: React.FC = () => {
   const [usersList, setUsersList] = useState<User[]>([]);
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
   const [userForm, setUserForm] = useState({
+    username: '',
     name: '',
     email: '',
     password: '',
@@ -58,6 +74,10 @@ export const AdminView: React.FC = () => {
   // Password Reset state
   const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetAuthenticator, setResetAuthenticator] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const closePasswordReset = () => { setResetTargetUser(null); setResetAuthenticator(false); setNewPassword(''); setConfirmPassword(''); setErrorMsg(null); };
 
   // Staff state
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -70,13 +90,20 @@ export const AdminView: React.FC = () => {
     isCoursePoolSharing: true,
     isDivePoolSharing: true,
     isBaseLeaderOverride: false,
-    hireDate: new Date().toISOString().substring(0, 10),
+    hireDate: businessToday(),
     leavingDate: '',
   });
 
   // Items & Categories state
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [showCategoryInput, setShowCategoryInput] = useState(false);
+  const [categoryBusy, setCategoryBusy] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [showArchivedItems, setShowArchivedItems] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
+  const [itemBusy, setItemBusy] = useState(false);
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
   const [itemForm, setItemForm] = useState({
     categoryId: '',
@@ -93,22 +120,24 @@ export const AdminView: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   const [loading, setLoading] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const showNotification = (msg: string) => {
     setSuccessMsg(msg);
+    setErrorMsg(null);
     setTimeout(() => setSuccessMsg(null), 3500);
   };
 
   // Fetch Users
   const loadUsers = async () => {
-    if (!isGlobalAdmin) return;
+    if (!canManageAccounts) return;
     try {
       setLoading(true);
       const res = await apiFetch<{ users: User[] }>('/users');
       setUsersList(res.users);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -124,7 +153,7 @@ export const AdminView: React.FC = () => {
       );
       setStaffList(res.staff);
     } catch (err) {
-      console.error('Failed to load staff:', err);
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -136,7 +165,7 @@ export const AdminView: React.FC = () => {
     try {
       setLoading(true);
       const res = await apiFetch<{ categories: Category[]; items: Item[] }>(
-        `/items?propertyId=${activeProperty.id}`
+        `/items?propertyId=${activeProperty.id}&includeInactive=true`
       );
       setCategories(res.categories);
       setItems(res.items);
@@ -144,7 +173,7 @@ export const AdminView: React.FC = () => {
         setItemForm((prev) => ({ ...prev, categoryId: res.categories[0].id }));
       }
     } catch (err) {
-      console.error('Failed to load items:', err);
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -160,22 +189,34 @@ export const AdminView: React.FC = () => {
       );
       setAuditLogs(res.logs);
     } catch (err) {
-      console.error('Failed to load audit logs:', err);
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (activeTab === 'users' && isGlobalAdmin) loadUsers();
+    if (activeTab === 'users' && canManageAccounts) loadUsers();
     if (activeTab === 'staff') loadStaff();
     if (activeTab === 'items') loadItems();
     if (activeTab === 'audit') loadAuditLogs();
   }, [activeTab, activeProperty]);
 
+  const [pmsSavingProperty, setPmsSavingProperty] = useState<string | null>(null);
+  const updatePmsCode = async (id: string, pmsPropertyCode: string) => {
+    setPmsSavingProperty(id); setErrorMsg(null);
+    try {
+      await apiFetch(`/properties/${id}`, { method: 'PUT', body: JSON.stringify({ pmsPropertyCode: pmsPropertyCode || null }) });
+      await refreshProperties(); showNotification('PMS resort setting saved.');
+    } catch (err: any) { setErrorMsg(err.message || 'Unable to update PMS resort.'); }
+    finally { setPmsSavingProperty(null); }
+  };
+
   // Create Property Handler (Global Admin)
   const handleCreateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isGlobalAdmin || propertyCreating) return;
+    setPropertyCreating(true); setErrorMsg(null);
     try {
       await apiFetch('/properties', {
         method: 'POST',
@@ -183,10 +224,25 @@ export const AdminView: React.FC = () => {
       });
       setShowPropertyModal(false);
       showNotification(`Property '${propForm.name}' created successfully.`);
-      refreshProperties();
+      setPropForm({ name: '', code: '', pmsPropertyCode: '', location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001 });
+      await refreshProperties();
     } catch (err: any) {
-      alert(err.message || 'Failed to create property.');
-    }
+      setErrorMsg(err.message || 'Failed to create property.');
+    } finally { setPropertyCreating(false); }
+  };
+
+  const handleDeleteProperty = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isGlobalAdmin || !deletePropertyTarget || propertyDeleting || deletePropertyCode.trim().toUpperCase() !== deletePropertyTarget.code) return;
+    setPropertyDeleting(true); setErrorMsg(null);
+    try {
+      await apiFetch(`/properties/${deletePropertyTarget.id}`, { method: 'DELETE', body: JSON.stringify({ confirmationCode: deletePropertyCode }) });
+      const name = deletePropertyTarget.name;
+      setDeletePropertyTarget(null); setDeletePropertyCode('');
+      await refreshProperties();
+      showNotification(`Property '${name}' removed from the workspace. Its history has been retained.`);
+    } catch (err: any) { setErrorMsg(err.message || 'Failed to delete property.'); }
+    finally { setPropertyDeleting(false); }
   };
 
   // Create User Handler (Global Admin)
@@ -199,6 +255,7 @@ export const AdminView: React.FC = () => {
       });
       setShowUserModal(false);
       setUserForm({
+        username: '',
         name: '',
         email: '',
         password: '',
@@ -208,25 +265,30 @@ export const AdminView: React.FC = () => {
       showNotification(`User created successfully with role ${userForm.role}.`);
       loadUsers();
     } catch (err: any) {
-      alert(err.message || 'Failed to create user.');
+      setErrorMsg(err.message || 'Failed to create user.');
     }
   };
 
-  // Reset Password Handler (Global Admin)
+  // Reset password for an account permitted by the server
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!resetTargetUser || !newPassword) return;
+    if (!resetTargetUser || resetBusy) return;
+    if (!new RegExp(`^${passwordPattern}$`).test(newPassword)) { setErrorMsg(passwordHelp); return; }
+    if (newPassword !== confirmPassword) { setErrorMsg('Passwords do not match.'); return; }
+    setResetBusy(true);
+    setErrorMsg(null);
     try {
       await apiFetch(`/users/${resetTargetUser.id}/reset-password`, {
         method: 'POST',
-        body: JSON.stringify({ password: newPassword }),
+        body: JSON.stringify({ password: newPassword, resetAuthenticator }),
       });
-      setResetTargetUser(null);
-      setNewPassword('');
+      closePasswordReset();
       showNotification(`Password for ${resetTargetUser.name} updated. Account lock cleared.`);
       loadUsers();
     } catch (err: any) {
-      alert(err.message || 'Failed to reset password.');
+      setErrorMsg(err.message || 'Failed to reset password.');
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -237,7 +299,7 @@ export const AdminView: React.FC = () => {
       showNotification('Account unlocked successfully.');
       loadUsers();
     } catch (err: any) {
-      alert(err.message || 'Failed to unlock account.');
+      setErrorMsg(err.message || 'Failed to unlock account.');
     }
   };
 
@@ -257,52 +319,93 @@ export const AdminView: React.FC = () => {
       showNotification(`Staff member '${staffForm.name}' added.`);
       loadStaff();
     } catch (err: any) {
-      alert(err.message || 'Failed to add staff member.');
+      setErrorMsg(err.message || 'Failed to add staff member.');
     }
   };
 
-  // Create Catalogue Item Handler
-  const handleCreateItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeProperty) return;
+  const handleCreateCategory = async () => {
+    if (!activeProperty || !newCategoryName.trim() || categoryBusy) return;
+    setCategoryBusy(true); setErrorMsg(null);
     try {
-      await apiFetch('/items', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...itemForm,
-          propertyId: activeProperty.id,
-        }),
+      const result = await apiFetch<{ category: Category }>('/items/categories', { method: 'POST', body: JSON.stringify({ propertyId: activeProperty.id, name: newCategoryName.trim() }) });
+      setCategories(current => [...current, result.category]);
+      setItemForm(form => ({ ...form, categoryId: result.category.id }));
+      setNewCategoryName(''); setShowCategoryInput(false);
+    } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not create the category.'); }
+    finally { setCategoryBusy(false); }
+  };
+
+  const openItemEditor = (item?: Item) => {
+    setEditingItem(item || null); setErrorMsg(null); setShowCategoryInput(false); setNewCategoryName('');
+    setItemForm(item ? {
+      categoryId: item.categoryId, code: item.code, name: item.name, price: item.price,
+      poolType: item.poolType, poolContribution: item.poolContribution,
+      personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '',
+    } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}' });
+    setShowItemModal(true);
+  };
+  const closeItemEditor = () => { if (!itemBusy && !categoryBusy) { setShowItemModal(false); setEditingItem(null); setErrorMsg(null); } };
+
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeProperty || itemBusy || categoryBusy) return;
+    setItemBusy(true); setErrorMsg(null);
+    try {
+      await apiFetch(editingItem ? `/items/${editingItem.id}` : '/items', {
+        method: editingItem ? 'PUT' : 'POST',
+        body: JSON.stringify(editingItem ? itemForm : { ...itemForm, propertyId: activeProperty.id }),
       });
-      setShowItemModal(false);
-      showNotification(`Item '${itemForm.name}' added to catalogue.`);
-      loadItems();
+      setShowItemModal(false); setEditingItem(null);
+      showNotification(`Activity '${itemForm.name}' ${editingItem ? 'updated' : 'added'} for ${activeProperty.name}.`);
+      await loadItems();
     } catch (err: any) {
-      alert(err.message || 'Failed to add item.');
-    }
+      setErrorMsg(err.message || 'Failed to save activity.');
+    } finally { setItemBusy(false); }
+  };
+
+  const handleDeleteItem = async () => {
+    if (!deleteItemTarget || itemBusy) return;
+    setItemBusy(true); setErrorMsg(null);
+    try {
+      await apiFetch(`/items/${deleteItemTarget.id}`, { method: 'DELETE' });
+      setDeleteItemTarget(null); showNotification('Activity removed from new bills. Existing bills are retained.');
+      await loadItems();
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not delete activity.'); }
+    finally { setItemBusy(false); }
+  };
+  const handleRestoreItem = async (item: Item) => {
+    if (itemBusy) return;
+    setItemBusy(true); setErrorMsg(null);
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ isActive: true }) });
+      showNotification(`Activity '${item.name}' restored.`); await loadItems();
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not restore activity.'); }
+    finally { setItemBusy(false); }
   };
 
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="feature-heading bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center space-x-2 text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider">
+          <div className="flex items-center space-x-2 text-sm font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider">
             <Shield className="w-4 h-4" />
-            <span>Administration & System Configuration</span>
+            <span>WORKSPACE SETTINGS</span>
           </div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white mt-1">
-            Dive Centre Management Portal
+            Administration
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Role-based multi-tenancy, user provisioning, staff rosters, catalogue & audit logs.
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Manage your properties, people, catalogue, and account access.
           </p>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex flex-wrap gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
+        <div className="flex flex-wrap gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-sm font-bold">
           {isGlobalAdmin && (
             <button
-              onClick={() => setActiveTab('properties')}
+              onClick={() => onSectionChange('properties')}
+              aria-pressed={activeTab === 'properties'}
               className={`px-3 py-1.5 rounded-lg transition ${
                 activeTab === 'properties'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
@@ -313,9 +416,10 @@ export const AdminView: React.FC = () => {
             </button>
           )}
 
-          {isGlobalAdmin && (
+          {canManageAccounts && (
             <button
-              onClick={() => setActiveTab('users')}
+              onClick={() => onSectionChange('users')}
+              aria-pressed={activeTab === 'users'}
               className={`px-3 py-1.5 rounded-lg transition ${
                 activeTab === 'users'
                   ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
@@ -327,7 +431,8 @@ export const AdminView: React.FC = () => {
           )}
 
           <button
-            onClick={() => setActiveTab('staff')}
+            onClick={() => onSectionChange('staff')}
+              aria-pressed={activeTab === 'staff'}
             className={`px-3 py-1.5 rounded-lg transition ${
               activeTab === 'staff'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
@@ -338,7 +443,8 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('items')}
+            onClick={() => onSectionChange('items')}
+              aria-pressed={activeTab === 'items'}
             className={`px-3 py-1.5 rounded-lg transition ${
               activeTab === 'items'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
@@ -349,7 +455,8 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('audit')}
+            onClick={() => onSectionChange('audit')}
+              aria-pressed={activeTab === 'audit'}
             className={`px-3 py-1.5 rounded-lg transition ${
               activeTab === 'audit'
                 ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
@@ -361,8 +468,9 @@ export const AdminView: React.FC = () => {
         </div>
       </div>
 
+      {errorMsg && <div role="alert" className="notice notice-error"><AlertCircle size={18} /><span>{errorMsg}</span><button onClick={() => setErrorMsg(null)}>Dismiss</button></div>}
       {successMsg && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs flex items-center space-x-2">
+        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm flex items-center space-x-2">
           <CheckCircle className="w-4 h-4 text-emerald-500" />
           <span>{successMsg}</span>
         </div>
@@ -376,19 +484,20 @@ export const AdminView: React.FC = () => {
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Dive Centres / Properties ({properties.length})
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Each centre operates with dedicated bills, staff rosters, and Micros check ranges.
               </p>
             </div>
             <button
-              onClick={() => setShowPropertyModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs shadow-xs transition flex items-center space-x-1.5"
+              onClick={() => { setErrorMsg(null); setShowPropertyModal(true); }}
+              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
               <span>New Property</span>
             </button>
           </div>
 
+          {!properties.length && <p className="empty-state">No properties yet. Select New Property to create your first dive centre.</p>}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {properties.map((p) => (
               <div
@@ -397,30 +506,36 @@ export const AdminView: React.FC = () => {
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="font-mono text-xs font-bold text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded">
+                    <span className="font-mono text-sm font-bold text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded">
                       {p.code}
                     </span>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-1">
                       {p.name}
                     </h4>
-                    <span className="text-[11px] text-slate-400">{p.location || 'Maldives'}</span>
+                    <span className="text-xs text-slate-400">{p.location || 'Maldives'}</span>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                    Active
+                  <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    {p.isActive ? 'Active' : 'Inactive'}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-xs">
+                <button type="button" className="text-button text-red-600 dark:text-red-400" aria-label={`Delete property ${p.name}`} onClick={() => { setErrorMsg(null); setDeletePropertyCode(''); setDeletePropertyTarget(p); }}><Trash2 size={15} /> Delete property</button>
+                <label className="block text-sm">PMS resort for room lookups
+                  <select aria-label={`PMS resort for ${p.name}`} value={p.pmsPropertyCode || ''} disabled={pmsSavingProperty !== null} onChange={e => void updatePmsCode(p.id, e.target.value)} className="w-full mt-1 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                    <option value="">Use centre code if supported</option>{pmsResortCodes.map(code => <option key={code} value={code}>{code}</option>)}
+                  </select>
+                </label>
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-sm">
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Tax Rate:</span>
+                    <span className="text-slate-400 block text-xs">Tax Rate:</span>
                     <span className="font-semibold">{p.taxRate}%</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Service Charge:</span>
+                    <span className="text-slate-400 block text-xs">Service Charge:</span>
                     <span className="font-semibold">{p.serviceChargeRate}%</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Next Check #:</span>
+                    <span className="text-slate-400 block text-xs">Next Check #:</span>
                     <span className="font-mono font-bold text-sky-500">#{p.nextCheckNumber}</span>
                   </div>
                 </div>
@@ -431,28 +546,28 @@ export const AdminView: React.FC = () => {
       )}
 
       {/* TAB 2: USER MANAGEMENT (Global Admin) */}
-      {activeTab === 'users' && isGlobalAdmin && (
+      {activeTab === 'users' && canManageAccounts && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 User Accounts & Access Control ({usersList.length})
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Per PDF manual: Passwords are administrator-set. 5 consecutive wrong passwords trigger a security lockout.
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {isGlobalAdmin ? 'Manage account access and passwords.' : 'Create accounts and set temporary passwords for staff assigned exclusively to properties you manage.'}
               </p>
             </div>
-            <button
-              onClick={() => setShowUserModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs shadow-xs transition flex items-center space-x-1.5"
+            {canManageAccounts && <button
+              onClick={() => { setErrorMsg(null); setShowUserModal(true); }}
+              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
               <span>Create User</span>
-            </button>
+            </button>}
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Name & Email</th>
@@ -463,6 +578,7 @@ export const AdminView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {usersList.length === 0 && <tr><td colSpan={10} className="py-12 text-center text-slate-500">{isGlobalAdmin ? 'No user accounts yet. Create an account to give your team access.' : 'No staff accounts yet. Create an account and assign it to your properties.'}</td></tr>}
                 {usersList.map((u) => {
                   const isLocked = u.lockedUntil && new Date(u.lockedUntil) > new Date();
 
@@ -470,10 +586,10 @@ export const AdminView: React.FC = () => {
                     <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900 dark:text-white">{u.name}</div>
-                        <div className="text-[11px] text-slate-400">{u.email}</div>
+                        <div className="text-xs text-slate-400">{u.username}{u.email ? ` · ${u.email}` : ''}</div><div className="text-xs text-slate-400">Authenticator: {u.authenticatorEnabled ? 'bound' : 'setup required'}</div>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700">
+                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700">
                           {u.role}
                         </span>
                       </td>
@@ -487,7 +603,7 @@ export const AdminView: React.FC = () => {
                             {u.assignedProperties.map((p) => (
                               <span
                                 key={p.id}
-                                className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 text-[10px] font-medium"
+                                className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 text-xs font-medium"
                               >
                                 {p.name}
                               </span>
@@ -497,7 +613,7 @@ export const AdminView: React.FC = () => {
                       </td>
                       <td className="py-3 px-4">
                         {isLocked ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center space-x-1 w-max">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center space-x-1 w-max">
                             <Lock className="w-3 h-3" />
                             <span>Locked (5 wrong passwords)</span>
                           </span>
@@ -510,7 +626,7 @@ export const AdminView: React.FC = () => {
                       <td className="py-3 px-4 text-right space-x-2">
                         {/* Reset Password Button */}
                         <button
-                          onClick={() => setResetTargetUser(u)}
+                          onClick={() => { setNewPassword(''); setConfirmPassword(''); setErrorMsg(null); setResetTargetUser(u); }}
                           className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-semibold transition inline-flex items-center space-x-1"
                           title="Set user password"
                         >
@@ -519,7 +635,7 @@ export const AdminView: React.FC = () => {
                         </button>
 
                         {/* Unlock Account Button */}
-                        {isLocked && (
+                        {isLocked && isGlobalAdmin && (
                           <button
                             onClick={() => handleUnlockUser(u.id)}
                             className="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold transition inline-flex items-center space-x-1 shadow-xs"
@@ -547,13 +663,13 @@ export const AdminView: React.FC = () => {
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Staff Roster for {activeProperty?.name} ({staffList.length})
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-sm text-slate-500 dark:text-slate-400">
                 Configure roles, hire/leaving dates, course pool, dive pool, and base-leader override (+10%).
               </p>
             </div>
             <button
-              onClick={() => setShowStaffModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs shadow-xs transition flex items-center space-x-1.5"
+              onClick={() => { setErrorMsg(null); setShowStaffModal(true); }}
+              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
               <span>Add Staff</span>
@@ -561,7 +677,7 @@ export const AdminView: React.FC = () => {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Name & Title</th>
@@ -573,11 +689,12 @@ export const AdminView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {staffList.length === 0 && <tr><td colSpan={10} className="py-12 text-center text-slate-500">No team members yet. Add dive staff to start recording attendance.</td></tr>}
                 {staffList.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 dark:text-white">{s.name}</div>
-                      <div className="text-[11px] text-slate-400">{s.roleTitle}</div>
+                      <div className="text-xs text-slate-400">{s.roleTitle}</div>
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">
                       Hired: {s.hireDate} {s.leavingDate ? `• Left: ${s.leavingDate}` : '• Active'}
@@ -607,7 +724,7 @@ export const AdminView: React.FC = () => {
                     </td>
                     <td className="py-3 px-4">
                       {s.isBaseLeaderOverride ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                           +10% Extra
                         </span>
                       ) : (
@@ -628,23 +745,25 @@ export const AdminView: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Catalogue & Commission Rules for {activeProperty?.name} ({items.length})
+                Bill Activities for {activeProperty?.name} ({items.filter(item => item.isActive).length} active)
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Define price, pool share contribution, and personal commission roles.
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Manage this property's activities, prices and promotional offers. Changes apply to new bills.
               </p>
             </div>
             <button
-              onClick={() => setShowItemModal(true)}
-              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-xs shadow-xs transition flex items-center space-x-1.5"
+              onClick={() => openItemEditor()}
+              disabled={!activeProperty || loading || itemBusy}
+              className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
-              <span>Add Item</span>
+              <span>Add activity</span>
             </button>
           </div>
 
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" checked={showArchivedItems} onChange={event => setShowArchivedItems(event.target.checked)} />Show deleted activities</label>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Code & Item</th>
@@ -652,10 +771,13 @@ export const AdminView: React.FC = () => {
                   <th className="py-3 px-4">Price</th>
                   <th className="py-3 px-4">Pool Contribution</th>
                   <th className="py-3 px-4">Personal Roles & Fixed Amounts</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {items.map((it) => (
+                {!items.some(item => showArchivedItems || item.isActive) && <tr><td colSpan={7} className="py-12 text-center text-slate-500">No active activities. Add activities and prices to start writing bills, or show deleted activities to restore them.</td></tr>}
+                {items.filter(item => showArchivedItems || item.isActive).map((it) => (
                   <tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4">
                       <span className="font-mono text-sky-500 font-bold mr-2">[{it.code}]</span>
@@ -665,12 +787,12 @@ export const AdminView: React.FC = () => {
                       {it.category?.name || 'General'}
                     </td>
                     <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                      ${it.price.toFixed(2)}
+                      {formatMoney(it.price, activeProperty?.currencySymbol || '$')}
                     </td>
                     <td className="py-3 px-4">
                       {it.poolType !== 'NONE' ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-                          {it.poolType}: ${it.poolContribution.toFixed(2)}
+                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
+                          {it.poolType}: {formatMoney(it.poolContribution, activeProperty?.currencySymbol || '$')}
                         </span>
                       ) : (
                         <span className="text-slate-400">None</span>
@@ -682,7 +804,7 @@ export const AdminView: React.FC = () => {
                           <span className="font-semibold text-purple-600 dark:text-purple-400">
                             {it.personalRoles}
                           </span>
-                          <span className="text-[10px] text-slate-400 font-mono block">
+                          <span className="text-xs text-slate-400 font-mono block">
                             Rates: {it.personalRatesJson || 'N/A'}
                           </span>
                         </div>
@@ -690,6 +812,11 @@ export const AdminView: React.FC = () => {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
+                    <td className="py-3 px-4">{it.isActive ? 'Active' : 'Deleted'}</td>
+                    <td className="py-3 px-4"><div className="flex gap-2">
+                      <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => openItemEditor(it)} aria-label={`Edit ${it.name}`}><Edit2 size={14} />Edit</button>
+                      {it.isActive ? <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(it); setErrorMsg(null); }} aria-label={`Delete ${it.name}`}><Trash2 size={14} />Delete</button> : <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => handleRestoreItem(it)} aria-label={`Restore ${it.name}`}>Restore</button>}
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
@@ -706,13 +833,13 @@ export const AdminView: React.FC = () => {
               <History className="w-5 h-5 text-sky-500" />
               <span>Administrator Change Log & Audit Trail</span>
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Tracks re-dates, rebates, soft-deletions, password resets, failed login locks, and payroll freezes.
             </p>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Timestamp</th>
@@ -729,17 +856,17 @@ export const AdminView: React.FC = () => {
                       {new Date(log.createdAt).toLocaleString()}
                     </td>
                     <td className="py-3 px-4">
-                      <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                      <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
                         {log.action}
                       </span>
                     </td>
                     <td className="py-3 px-4 font-medium text-slate-800 dark:text-slate-200">
                       {log.user?.name || 'System / Guest'}
                     </td>
-                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                    <td className="py-3 px-4 font-mono text-xs text-slate-400">
                       {log.ipAddress || '127.0.0.1'}
                     </td>
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-mono text-[11px] max-w-md truncate">
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-mono text-xs max-w-md truncate">
                       {log.details || '—'}
                     </td>
                   </tr>
@@ -750,19 +877,30 @@ export const AdminView: React.FC = () => {
         </div>
       )}
 
+      {isGlobalAdmin && deletePropertyTarget && <Modal label={`Delete property ${deletePropertyTarget.name}`} onClose={closePropertyDelete} busy={propertyDeleting} error={errorMsg}>
+        <form className="surface guard-dialog" onSubmit={handleDeleteProperty} aria-busy={propertyDeleting}>
+          <h2>Delete {deletePropertyTarget.name}?</h2>
+          <p id="delete-property-explanation">This removes the property from the workspace and revokes staff and manager access to it. Its bills, staff records, payroll and audit history will be retained.</p>
+          <p>{deletePropertyTarget._count?.bills ?? 0} bills and {deletePropertyTarget._count?.staffMembers ?? 0} staff records will stay in history. User login accounts will remain.</p>
+          <label htmlFor="delete-property-code">Type <strong>{deletePropertyTarget.code}</strong> to confirm.</label>
+          <input id="delete-property-code" className="field-input" autoComplete="off" spellCheck={false} aria-describedby="delete-property-explanation" required value={deletePropertyCode} onChange={e => setDeletePropertyCode(e.target.value)} disabled={propertyDeleting} />
+          <div className="dialog-actions"><button type="button" className="secondary-button" disabled={propertyDeleting} onClick={closePropertyDelete}>Cancel</button><button type="submit" className="danger-button" disabled={propertyDeleting || deletePropertyCode.trim().toUpperCase() !== deletePropertyTarget.code}>{propertyDeleting ? 'Deleting…' : 'Delete property'}</button></div>
+        </form>
+      </Modal>}
+
       {/* MODAL: CREATE PROPERTY */}
       {showPropertyModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <Modal label="Create property" busy={propertyCreating} onClose={() => { if (!propertyCreating) { setShowPropertyModal(false); setErrorMsg(null); } } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Create Dive Centre Property
             </h3>
-            <form onSubmit={handleCreateProperty} className="space-y-3 text-xs">
+            <form onSubmit={handleCreateProperty} className="space-y-3 text-sm" aria-busy={propertyCreating}>
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-1" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Property Name *
                 </label>
-                <input
+                <input id="adminview-field-1"
                   type="text"
                   required
                   value={propForm.name}
@@ -772,12 +910,15 @@ export const AdminView: React.FC = () => {
                 />
               </div>
 
+              <label className="block">PMS resort (optional)
+                <select value={propForm.pmsPropertyCode} onChange={e => setPropForm({ ...propForm, pmsPropertyCode: e.target.value })} className="w-full mt-1 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"><option value="">Use centre code if supported</option>{pmsResortCodes.map(code => <option key={code} value={code}>{code}</option>)}</select>
+              </label>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Property Code *
                   </label>
-                  <input
+                  <input id="adminview-field-2"
                     type="text"
                     required
                     value={propForm.code}
@@ -787,10 +928,10 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Currency Symbol
                   </label>
-                  <input
+                  <input id="adminview-field-3"
                     type="text"
                     value={propForm.currencySymbol}
                     onChange={(e) => setPropForm({ ...propForm, currencySymbol: e.target.value })}
@@ -801,10 +942,10 @@ export const AdminView: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-4" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Tax (%)
                   </label>
-                  <input
+                  <input id="adminview-field-4"
                     type="number"
                     step="0.1"
                     value={propForm.taxRate}
@@ -813,10 +954,10 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-5" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     SC (%)
                   </label>
-                  <input
+                  <input id="adminview-field-5"
                     type="number"
                     step="0.1"
                     value={propForm.serviceChargeRate}
@@ -825,10 +966,10 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-6" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Start Check #
                   </label>
-                  <input
+                  <input id="adminview-field-6"
                     type="number"
                     value={propForm.nextCheckNumber}
                     onChange={(e) => setPropForm({ ...propForm, nextCheckNumber: parseInt(e.target.value, 10) || 1001 })}
@@ -840,6 +981,7 @@ export const AdminView: React.FC = () => {
               <div className="flex space-x-2 pt-3">
                 <button
                   type="button"
+                  disabled={propertyCreating}
                   onClick={() => setShowPropertyModal(false)}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
@@ -847,29 +989,31 @@ export const AdminView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
+                  disabled={propertyCreating}
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  Save Property
+                  {propertyCreating ? 'Creating…' : 'Save Property'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* MODAL: CREATE USER */}
       {showUserModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <Modal label="Create account" onClose={() => { setShowUserModal(false); setErrorMsg(null); } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Create New User Account
             </h3>
-            <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
+            <p className="text-sm text-slate-500">{passwordHelp} Share the username and temporary password directly with the user. They must change their password and bind their own authenticator before using the workspace.</p>
+            <form onSubmit={handleCreateUser} className="space-y-3 text-sm">
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-7" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Full Name *
                 </label>
-                <input
+                <input id="adminview-field-7"
                   type="text"
                   required
                   value={userForm.name}
@@ -880,12 +1024,16 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Email Address *
+                <label htmlFor="account-username" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Unique Username *</label>
+                <input id="account-username" autoComplete="off" required minLength={3} maxLength={100} pattern="[A-Za-z0-9._@+\-]+" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} placeholder="e.g. hassan.male" className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />
+                <p className="text-xs text-slate-500 mt-1">Every person needs their own username and authenticator, even when sharing an email address.</p>
+              </div>
+              <div>
+                <label htmlFor="adminview-field-8" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Email Address (optional; shared addresses allowed)
                 </label>
-                <input
+                <input id="adminview-field-8"
                   type="email"
-                  required
                   value={userForm.email}
                   onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
                   placeholder="hassan@sundiving.com"
@@ -894,32 +1042,32 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Initial Password (Admin-set) *
+                <label htmlFor="adminview-field-9" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Temporary Password *
                 </label>
-                <input
+                <input id="adminview-field-9"
                   type="password"
                   required
-                  minLength={6}
+                  minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp}
                   value={userForm.password}
                   onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                  placeholder="Minimum 6 characters"
+                  placeholder="12 characters, Aa, number, symbol"
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-10" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Role *
                 </label>
-                <select
+                <select id="adminview-field-10"
                   value={userForm.role}
                   onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                 >
                   <option value="CENTRE_STAFF">Centre Staff (Fixed to assigned centre)</option>
-                  <option value="PROPERTY_MANAGER">Property Manager (Multiple assigned centres)</option>
-                  <option value="GLOBAL_ADMIN">Global Admin (Unrestricted system-wide)</option>
+                  {isGlobalAdmin && <option value="PROPERTY_MANAGER">Property Manager (Multiple assigned centres)</option>}
+                  {isGlobalAdmin && <option value="GLOBAL_ADMIN">Global Admin (Unrestricted system-wide)</option>}
                 </select>
               </div>
 
@@ -929,10 +1077,10 @@ export const AdminView: React.FC = () => {
                     Assign Properties:
                   </label>
                   <div className="space-y-1 bg-slate-50 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 max-h-36 overflow-y-auto">
-                    {properties.map((p) => {
+                    {properties.filter(p => isGlobalAdmin || user?.assignedProperties.some(assigned => assigned.id === p.id)).map((p) => {
                       const isChecked = userForm.propertyIds.includes(p.id);
                       return (
-                        <label key={p.id} className="flex items-center space-x-2 cursor-pointer text-xs">
+                        <label key={p.id} className="flex items-center space-x-2 cursor-pointer text-sm">
                           <input
                             type="checkbox"
                             checked={isChecked}
@@ -972,30 +1120,35 @@ export const AdminView: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* MODAL: RESET PASSWORD */}
       {resetTargetUser && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <Modal label="Reset password" onClose={closePasswordReset} busy={resetBusy} error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-sm w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
               <KeyRound className="w-5 h-5 text-amber-500" />
               <span>Set Password for {resetTargetUser.name}</span>
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Per PDF manual: Passwords are set by administrator. Setting a new password clears any active 5-wrong-passwords lock.
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Set a temporary password and share it directly with the user. They must change it at next sign-in. This also clears the sign-in lock.
             </p>
 
-            <form onSubmit={handleResetPassword} className="space-y-3 text-xs">
+            <p className="text-sm text-slate-500">{passwordHelp}</p>
+            <form onSubmit={handleResetPassword} className="space-y-3 text-sm">
+              <label className="flex items-start gap-2"><input type="checkbox" checked={resetAuthenticator} disabled={resetBusy} onChange={e => setResetAuthenticator(e.target.checked)} /><span>User lost their authenticator and recovery codes. Clear their binding so they can bind a new authenticator after changing this temporary password.</span></label>
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="reset-new-password" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   New Password:
                 </label>
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp}
+                  id="reset-new-password"
+                  autoComplete="new-password"
+                  disabled={resetBusy}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="Enter new password"
@@ -1003,39 +1156,48 @@ export const AdminView: React.FC = () => {
                 />
               </div>
 
+              <div>
+                <label htmlFor="reset-confirm-password" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Confirm password:</label>
+                <input id="reset-confirm-password" type="password" autoComplete="new-password" required minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp} disabled={resetBusy}
+                  value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />
+              </div>
+
               <div className="flex space-x-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setResetTargetUser(null)}
+                  disabled={resetBusy}
+                  onClick={closePasswordReset}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={resetBusy}
                   className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold transition"
                 >
-                  Update Password
+                  {resetBusy ? 'Updating…' : 'Update Password'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* MODAL: ADD STAFF */}
       {showStaffModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <Modal label="Add team member" onClose={() => { setShowStaffModal(false); setErrorMsg(null); } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Add Staff Member to {activeProperty?.name}
             </h3>
-            <form onSubmit={handleCreateStaff} className="space-y-3 text-xs">
+            <form onSubmit={handleCreateStaff} className="space-y-3 text-sm">
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-11" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Full Name *
                 </label>
-                <input
+                <input id="adminview-field-11"
                   type="text"
                   required
                   value={staffForm.name}
@@ -1046,10 +1208,10 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-12" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Role Title *
                 </label>
-                <select
+                <select id="adminview-field-12"
                   value={staffForm.roleTitle}
                   onChange={(e) => {
                     const title = e.target.value;
@@ -1076,10 +1238,10 @@ export const AdminView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-13" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Hire Date *
                   </label>
-                  <input
+                  <input id="adminview-field-13"
                     type="date"
                     required
                     value={staffForm.hireDate}
@@ -1088,10 +1250,10 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-14" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Leaving Date (optional)
                   </label>
-                  <input
+                  <input id="adminview-field-14"
                     type="date"
                     value={staffForm.leavingDate}
                     onChange={(e) => setStaffForm({ ...staffForm, leavingDate: e.target.value })}
@@ -1158,25 +1320,33 @@ export const AdminView: React.FC = () => {
               </div>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* MODAL: ADD CATALOGUE ITEM */}
+      {deleteItemTarget && <Modal label="Delete activity" busy={itemBusy} onClose={() => { if (!itemBusy) { setDeleteItemTarget(null); setErrorMsg(null); } }} error={errorMsg}>
+        <div className="p-6 space-y-4"><h3 className="text-lg font-bold">Delete {deleteItemTarget.name}?</h3><p>This removes the activity from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore it from the deleted activities list.</p><div className="flex gap-2"><button className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(null); setErrorMsg(null); }}>Cancel</button><button className="primary-button" disabled={itemBusy} onClick={handleDeleteItem}>{itemBusy ? 'Deleting…' : 'Delete activity'}</button></div></div>
+      </Modal>}
+
+      {/* MODAL: ADD / EDIT CATALOGUE ACTIVITY */}
       {showItemModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+        <Modal label={editingItem ? 'Edit activity' : 'Add activity'} busy={itemBusy || categoryBusy} onClose={closeItemEditor} error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Add Item to Catalogue
+              {editingItem ? 'Edit activity' : 'Add activity'} · {activeProperty?.name}
             </h3>
-            <form onSubmit={handleCreateItem} className="space-y-3 text-xs">
+            <p className="text-sm text-slate-500">Use a separate activity code for a promotional offer, then delete it when the offer ends.</p>
+            <form onSubmit={handleSaveItem} className="space-y-3 text-sm">
+              <fieldset disabled={itemBusy} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="activity-code" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Item Code *
                   </label>
                   <input
+                    id="activity-code"
                     type="text"
                     required
+                    maxLength={50}
                     value={itemForm.code}
                     onChange={(e) => setItemForm({ ...itemForm, code: e.target.value.toUpperCase() })}
                     placeholder="e.g. DIVE-05"
@@ -1184,30 +1354,38 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-15" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Category *
                   </label>
-                  <select
+                  <select id="adminview-field-15"
                     value={itemForm.categoryId}
+                    required
+                    disabled={categoryBusy}
                     onChange={(e) => setItemForm({ ...itemForm, categoryId: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                   >
+                    {!categories.length && <option value="">Add a category first</option>}
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>
                     ))}
                   </select>
+                  <button type="button" className="text-button mt-2" onClick={() => setShowCategoryInput(value => !value)}>Add a category</button>
+                  {(showCategoryInput || !categories.length) && <div className="category-create"><label htmlFor="new-category-name">New category name</label><input id="new-category-name" maxLength={80} value={newCategoryName} disabled={categoryBusy} placeholder="e.g. Dives" onChange={event => setNewCategoryName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); handleCreateCategory(); } }} /><button type="button" className="secondary-button" disabled={categoryBusy || !newCategoryName.trim()} onClick={handleCreateCategory}>{categoryBusy ? 'Creating…' : 'Create category'}</button></div>}
+
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-16" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Item Name *
                 </label>
-                <input
+                <input id="adminview-field-16"
                   type="text"
                   required
+                  minLength={2}
+                  maxLength={200}
                   value={itemForm.name}
                   onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
                   placeholder="e.g. Wreck Dive Special"
@@ -1217,12 +1395,13 @@ export const AdminView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Price ($) *
+                  <label htmlFor="adminview-field-17" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Price ({activeProperty?.currencySymbol || '$'}) *
                   </label>
-                  <input
+                  <input id="adminview-field-17"
                     type="number"
                     step="0.01"
+                    min="0"
                     required
                     value={itemForm.price}
                     onChange={(e) => setItemForm({ ...itemForm, price: parseFloat(e.target.value) || 0 })}
@@ -1230,10 +1409,11 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  <label htmlFor="adminview-field-18" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Pool Type
                   </label>
-                  <select
+                  <select id="adminview-field-18"
+                    disabled={editingItem?.hasBillHistory}
                     value={itemForm.poolType}
                     onChange={(e) => setItemForm({ ...itemForm, poolType: e.target.value as any })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
@@ -1245,11 +1425,13 @@ export const AdminView: React.FC = () => {
                 </div>
               </div>
 
+              <div><label htmlFor="activity-pool-contribution" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Pool contribution ({activeProperty?.currencySymbol || '$'})</label><input id="activity-pool-contribution" type="number" min="0" step="0.01" required disabled={editingItem?.hasBillHistory} value={itemForm.poolContribution} onChange={event => setItemForm({ ...itemForm, poolContribution: Number(event.target.value) })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />{editingItem?.hasBillHistory && <p className="text-xs text-slate-500 mt-1">Pool rules are fixed for activities used on saved bills. Create a new activity to use different rules.</p>}</div>
+
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-19" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Personal Commission Roles (comma-separated, e.g. seller,guide)
                 </label>
-                <input
+                <input id="adminview-field-19"
                   type="text"
                   value={itemForm.personalRoles}
                   onChange={(e) => setItemForm({ ...itemForm, personalRoles: e.target.value })}
@@ -1259,10 +1441,10 @@ export const AdminView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                <label htmlFor="adminview-field-20" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Personal Commission Rates JSON (e.g. {`{"seller": 10, "guide": 15}`})
                 </label>
-                <input
+                <input id="adminview-field-20"
                   type="text"
                   value={itemForm.personalRatesJson}
                   onChange={(e) => setItemForm({ ...itemForm, personalRatesJson: e.target.value })}
@@ -1274,21 +1456,24 @@ export const AdminView: React.FC = () => {
               <div className="flex space-x-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setShowItemModal(false)}
+                  onClick={closeItemEditor}
+                  disabled={itemBusy || categoryBusy}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={!itemForm.categoryId || categoryBusy || itemBusy}
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  Save Item
+                  {itemBusy ? 'Saving…' : editingItem ? 'Save changes' : 'Add activity'}
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

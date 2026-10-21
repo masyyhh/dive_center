@@ -1,0 +1,6 @@
+# CI only: disable public ACME for a disposable container smoke test.
+# Never include this override in a public deployment.
+services:
+  web:
+    environment:
+      APP_DOMAIN: ":80"

@@ -17,6 +17,8 @@ export const configureSecurity = (app: Express) => {
     ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
     : ['http://localhost:5173', 'http://127.0.0.1:5173'];
 
+  if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) throw new Error('CORS_ORIGIN is required in production.');
+
   app.use(
     cors({
       origin: (origin, callback) => {
@@ -24,10 +26,10 @@ export const configureSecurity = (app: Express) => {
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
-          callback(null, true); // Permissive in dev/local environment
+          callback(null, false);
         }
       },
-      credentials: true,
+      credentials: false,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Property-Id'],
     })
@@ -50,4 +52,14 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts, please try again in 5 minutes.' },
+});
+
+// Authenticated per-account limiter protects the upstream hotel service quota.
+export const pmsLookupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: req => req.user!.id,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many guest lookups. Wait a minute before trying again.' },
 });

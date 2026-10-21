@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -11,6 +11,8 @@ model Property {
   id                  String         @id @default(uuid())
   code                String         @unique // e.g. "SUN-MLE", "SUN-ARI"
   name                String         // e.g. "Sun Diving - Malé Atoll"
+  deletedAt           DateTime?      // Removed from the workspace; historical records are retained.
+  pmsPropertyCode     String?        // OLHU, SSO, SW, MLEIR, SAIV, VILU, AQUA
   location            String?
   currency            String         @default("USD")
   currencySymbol      String         @default("$")
@@ -33,8 +35,12 @@ model Property {
 
 model User {
   id                  String         @id @default(uuid())
-  email               String         @unique
+  username            String         @unique
+  email               String?
+  authenticator       Authenticator?
   name                String
+  mustChangePassword  Boolean        @default(false)
+  passwordReset       PasswordReset?
   passwordHash        String
   role                String         @default("CENTRE_STAFF") // "GLOBAL_ADMIN", "PROPERTY_MANAGER", "CENTRE_STAFF"
   failedLoginAttempts Int            @default(0)
@@ -47,6 +53,8 @@ model User {
   createdBills        Bill[]         @relation("CreatedBills")
   auditLogs           AuditLog[]
   monthLocksCreated   MonthLock[]
+
+  @@index([email])
 }
 
 model UserProperty {
@@ -157,6 +165,7 @@ model Bill {
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
+  // Partial live-check uniqueness is enforced by SQL migration; Prisma 5 cannot model it.
   @@index([propertyId, businessDate])
   @@index([propertyId, status])
 }
@@ -241,4 +250,32 @@ model AuditLog {
   user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, createdAt])
+}
+
+// One current password-reset grant per account. Tokens are stored only as keyed digests.
+model PasswordReset {
+  userId         String   @id
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  otpHash        String?
+  tokenHash      String?  @unique
+  credentialHash String
+  authenticatorVersion String?
+  attempts       Int      @default(0)
+  requestedAt    DateTime
+  expiresAt      DateTime
+}
+
+model Authenticator {
+  userId                String   @id
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  secretCiphertext      String?
+  pendingCiphertext     String?
+  pendingExpiresAt      DateTime?
+  pendingCredentialHash String?
+  enrolledAt            DateTime?
+  version               String   @default(uuid())
+  lastUsedStep          Int      @default(-1)
+  failedAttempts        Int      @default(0)
+  lockedUntil           DateTime?
+  recoveryCodeHashes    String   @default("[]")
 }

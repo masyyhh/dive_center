@@ -143,6 +143,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
   const attendances = await prisma.attendance.findMany({
     where: {
       propertyId,
+      staffMember: { propertyId },
       date: { gte: startDate, lte: endDate },
     },
     include: { staffMember: true },

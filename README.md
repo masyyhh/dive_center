@@ -1,127 +1,61 @@
-# 🌊 Dive Centre Manager (Multi-Property Edition)
+# Dive Centre Manager
 
-A full-stack web application designed and built in strict accordance with the **Dive Centre Manager Front-Desk Operations Handbook (v1.0)** and multi-property enterprise requirements.
+Multi-property dive-centre billing, attendance, commissions and monthly reports. The application uses a React/Vite frontend, an Express/TypeScript API, Prisma and **PostgreSQL 18**.
 
----
+## Local development
 
-## 🚀 System Architecture
+Use Node.js 22.13+ (22 or 24 LTS), npm and PostgreSQL 18 tools on PATH. Run from the repository root:
 
-- **Backend**: Node.js, Express, TypeScript, Prisma ORM, SQLite (`file:./dev.db`), ExcelJS, JWT, Bcrypt, Helmet, Express-Rate-Limit, Zod.
-- **Frontend**: Vite, React 18, TypeScript, Tailwind CSS, Lucide Icons, Recharts.
-- **Portals**: Multi-property tenant isolation with Role-Based Access Control (**Global Admin**, **Property Manager**, **Centre Staff**).
-
----
-
-## 🔑 Demo User Accounts
-
-| Role | Email | Password | Permissions & Scope |
-|---|---|---|---|
-| **👑 Global Admin** | `admin@sundiving.com` | `AdminPassword123!` | Manages all properties, creates users, sets passwords, unlocks accounts, freezes/locks months, views audit change log. |
-| **🏢 Property Manager** | `manager@sundiving.com` | `ManagerPass123!` | Assigned to multiple properties (Malé & Ari Atolls), manages catalogue, staff rosters, views reports, locks months. |
-| **🤿 Centre Staff (Malé)** | `staff@sundiving.com` | `StaffPass123!` | Tied strictly to **Sun Diving - Malé Atoll**. Centre switcher disabled per handbook. Writes bills, records presence, views centre reports. |
-| **🏝️ Centre Staff (Ari)** | `staff.ari@sundiving.com` | `StaffPass123!` | Tied strictly to **Sun Diving - Ari Atoll**. Isolated data scope. |
-
----
-
-## 📋 PDF Requirement Mapping & Features
-
-### 1. Signing in & Getting Around (PDF Page 2)
-- Sign in with email and administrator-set password.
-- **No self-service reset**: Passwords are administrator-provisioned.
-- **Account Lockout**: 5 consecutive incorrect passwords temporarily locks the account. Administrators can manually unlock accounts with one click.
-- **Tenancy Scoping**: Centre staff accounts are locked to their specific dive centre; property switcher is disabled for them.
-- Top bar carries active centre badge, user name, role badge, light/dark theme toggle, and Sign Out.
-
-### 2. Home Dashboard (PDF Page 2)
-- Shows current day revenue, today's bill count, and gross figures.
-- **Daily Turnover Chart**: Toggleable between **Line Chart** and **Bar Chart**.
-- **Running Totals**: Month-to-date turnover, service charge, tax, tip, and average bill check.
-- Real-time updates as bills are saved.
-
-### 3. Writing a Bill (`New Bill`) (PDF Pages 3 & 4)
-- **Split Layout**: Left half catalogue with category chips & search; right half bill builder.
-- **Check Numbers**: Pre-filled from the last saved bill, editable via `+ / -` stepper to match the Micros check. Validates unique numbers per centre.
-- **Smart Room Auto-fill**: Typing the room number automatically detects if a bill was created for that room today and offers a 1-click auto-fill for guest name, departure date, and nationality.
-- **Running Totals Flow**:
-  $$\text{Gross} \longrightarrow -\text{Discount} \longrightarrow +\text{Service Charge (10\%)} \longrightarrow +\text{Tax (16\%)} \longrightarrow +\text{Tip} \longrightarrow \text{Net Total}$$
-  *(Note: Service charge is never paid to staff and never part of commission).*
-- **Personal Commission on a Line**: If an activity pays a commission (e.g., photo shoot, course sale, guided dive), dropdown selectors for seller, guide, instructor, photo, or video appear on that line.
-- **Tip Distribution**: Select which staff members split the guest's tip equally.
-
-### 4. Finding & Fixing Bills (`Bills`) (PDF Page 4)
-- Filter by date range, search query (room, guest, check number), and status (`ALL`, `ACTIVE`, `REBATED`, `DELETED`).
-- Modal bill inspection with printable receipt layout.
-- **Three Handbook Actions**:
-  1. **Re-date**: Moves bill to another business date while preserving check number.
-  2. **Rebate**: Reverses bill with a required reason. Original stays on record; rebated bills earn **no commission**.
-  3. **Delete**: Soft deletes the bill, removes it from revenue totals, and **releases the check number** for reuse.
-- All actions are written to the **Administrator's Change Log**.
-
-### 5. Recording Attendance (`Presence`) (PDF Page 5)
-- Attendance drives daily commission pool distributions.
-- **Filtered Roster**: Only dive-centre staff appear (receptionists and non-diving staff excluded).
-- **Employment Filtering**: Staff appear only from their hire date and drop off after their leaving date.
-- **Calendar Day Indicators**:
-  - 🟢 **Recorded**: Everyone employed that day is marked.
-  - 🟡 **Partial**: Some, but not all, are marked.
-  - 🔴 **Missing**: Past day with nothing recorded.
-  - **"N days missing this month"** counter badge at the top.
-- **Bulk Action**: *"All present"* button to mark all staff present with one click.
-- **Commission Rules by Status**:
-  - `Present`: Counts in full.
-  - `Off` / `Off (half day)`: Counts in full.
-  - `Annual leave`, `Sick`, `Absent`, `Emergency leave`: Excluded from pools.
-
-### 6. Reporting, Commission & Payroll Lock (PDF Pages 6 & 7)
-- **Headline Numbers**: Turnover, service charge, tax, bill count, average bill, and total commission.
-- **Charts with Instant CSV Export**:
-  - Revenue by Category
-  - Revenue by Guest Nationality
-  - Top Items by Revenue
-  - Revenue by Weekday
-  - Daily Trends
-- **5 Commission Channels (PDF Page 7)**:
-  1. **Course Pool**: Shared equally among sharing positions present that day (Base Leader, Asst Base Leader, Instructor).
-  2. **Dive Pool**: Shared equally among all dive staff present that day.
-  3. **Base-Leader Override**: Extra 10% of total pool paid to Base Leader(s) regardless of attendance.
-  4. **Tips**: Split equally among picked staff on the bill.
-  5. **Personal**: Fixed per-line amount to the credited staff member.
-- **"Who Did What" Table**: Complete line-item audit of personal commissions.
-- **Payroll Freeze (Month Lock)**: Administrator can freeze a month for payroll. Once locked, figures cannot change, bills cannot be edited, and Recompute is disabled.
-- **Excel Exports (.xlsx)**:
-  - **Daily Report**: Download single-day workbook.
-  - **Monthly Payroll Workbook**: Download full multi-sheet Excel workbook (Overview, Bills, Staff Commissions, Personal Detail, Attendance Register).
-
----
-
-## 🔒 Security Architecture
-
-1. **Helmet & Security Headers**: Content security policy, XSS protection, MIME type sniffing protection.
-2. **Rate Limiting**:
-   - `authLimiter`: Max 20 login attempts per 5 minutes per IP to block brute-force attacks.
-   - `apiLimiter`: 1,000 requests per 15 minutes per IP.
-3. **Account Lockout Policy**: 5 consecutive wrong passwords locks the account for 15 minutes.
-4. **Tenant Isolation**: Every database operation is scoped by `propertyId`. Centre staff cannot view or alter other dive centres.
-5. **Auditing**: Sensitive operations (re-dates, rebates, deletions, unlocks, password resets) are tracked in `AuditLog` with IP addresses.
-
----
-
-## 💻 Running the Application
-
-### Backend:
-```bash
-cd backend
-npm install
-npx prisma db push
-npx tsx src/seed.ts
-npm run dev
-# Running on http://localhost:5001
+```sh
+npm ci --prefix backend
+npm ci --prefix frontend
+node scripts/setup-local-secrets.cjs
+node scripts/setup-authenticator-key.cjs
+node scripts/local-postgres.cjs start
+npm run migrate:deploy --prefix backend
+npm run dev --prefix backend
 ```
 
-### Frontend:
-```bash
-cd frontend
-npm install
-npm run dev
-# Running on http://localhost:5173
+In another terminal:
+
+```sh
+npm run dev --prefix frontend
 ```
+
+The API listens on `127.0.0.1:5001`; Vite serves `http://localhost:5173` and proxies API requests. The local database helper creates private app/test connection URLs in `backend/.env.local`, stores the PostgreSQL cluster under `.local/`, and listens only on `127.0.0.1:55432`. Use `node scripts/local-postgres.cjs status` or `stop` to manage it. Stop retains data. PostgreSQL does not start automatically after reboot; run `start` again. `PG_BINDIR` can select the PostgreSQL tools; `LOCAL_POSTGRES_PORT` selects another port.
+
+For an independently managed PostgreSQL server, configure `DATABASE_URL` in the process environment or private `backend/.env.local`. `backend/.env.example` documents other settings. Environment variables take precedence over local files. Production can supply `DATABASE_URL_FILE` instead; set only one form. Never commit connection passwords or encryption keys.
+
+A fresh database has no demo accounts. Build the backend and run `npm run bootstrap:admin --prefix backend` with private `ADMIN_EMAIL`, `ADMIN_NAME` and `ADMIN_PASSWORD_FILE` environment settings to create its first administrator. Bootstrap refuses to replace an existing administrator. Imported databases keep their existing accounts and password hashes.
+
+## Accounts and properties
+
+- Accounts use unique usernames; contact email is optional and may be shared. Each user binds their own authenticator and saves private one-time recovery codes. Password recovery does not send email.
+- Administrators create property managers; managers create staff accounts within their assigned properties. Provisioned accounts must change their initial password before enrolling an authenticator and entering the workspace. The current password-change policy requires exactly 12 characters, including uppercase, lowercase, a number and a symbol, without spaces.
+- Global administrators create properties and remove them from the workspace. Removal retains bills, staff, payroll and audit history, revokes assignments, and reserves the property code.
+- Property managers manage bill activities through Administration → Catalogue for their assigned properties. They can add activities, edit prices and details, delete activities from new bills and restore them. Each property's codes and prices are independent. Use a separate activity code for a promotional offer and delete it when it ends; promotions are managed manually. Saved bill prices remain unchanged. Pool rules on billed activities are fixed to preserve historical payroll, so create a new activity for different pool rules. Centre staff can read active activities but cannot manage the catalogue; global administrators retain access across properties.
+- Room lookup uses the server-only PMS key and each property's PMS resort mapping, which only global administrators can change. Users choose the correct guest when a room has multiple occupants before applying guest details.
+
+Keep `AUTHENTICATOR_ENCRYPTION_KEY` stable and backed up with the database; replacing it makes existing authenticator bindings unreadable. Login accounts and staff roster entries are separate resources.
+
+Authenticator enrollment supports recovery and gates workspace access; normal sign-in does not require an OTP challenge. It is not enforced MFA on every login.
+
+## Verification
+
+Start PostgreSQL before running backend tests. `TEST_DATABASE_URL` must point to a separate database with a name ending in `_test`. Each database integration suite creates and removes its own random schema; tests refuse the application database.
+
+```sh
+node --test tests/*.test.cjs
+npm test --prefix backend
+npm test --prefix frontend
+npm run build --prefix backend
+npm run build --prefix frontend
+```
+
+CI runs tests against PostgreSQL 18, builds both production images and exercises a disposable Compose installation, including backup/restore checks. Require a successful run for the exact release commit. Build outputs and dependencies are ignored by Git; lockfiles pin npm dependencies, while base images should be pinned by reviewed digest for reproducible releases. Tests remain in source control but are excluded from production images.
+
+## Production and existing data
+
+Use the [production runbook](deploy/PRODUCTION.md) for Docker Compose, HTTPS, secrets, backups and restores. Use the [SQLite migration guide](deploy/SQLITE-TO-POSTGRESQL.md) for an existing installation. PostgreSQL has its own migration history; SQLite migrations must not be replayed against it.
+
+Private backups, reference materials and the previous SQLite schema are retained under ignored `backups/`. Local databases, credentials, reference PDFs, development dependencies and build outputs are excluded from production build contexts. Production uses compiled backend code with runtime dependencies and a static frontend served by Caddy.

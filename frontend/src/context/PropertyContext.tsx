@@ -25,9 +25,10 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const refreshProperties = async () => {
-    if (!user) {
+    if (!user || !user.authenticatorEnabled) {
       setProperties([]);
       setActivePropertyState(null);
+      setStoredPropertyId(null);
       setLoading(false);
       return;
     }
@@ -50,10 +51,8 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         matched = data.properties[0];
       }
 
-      if (matched) {
-        setActivePropertyState(matched);
-        setStoredPropertyId(matched.id);
-      }
+      setActivePropertyState(matched || null);
+      setStoredPropertyId(matched?.id || null);
     } catch (err) {
       console.error('Failed to load properties:', err);
     } finally {

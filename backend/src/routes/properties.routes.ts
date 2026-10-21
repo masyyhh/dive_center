@@ -1,3 +1,4 @@
+import { pmsPropertyCodeSchema } from '../services/pmsService';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -18,6 +19,7 @@ propertiesRouter.get('/', requireAuth, async (req: Request, res: Response) => {
 
     if (userRole === 'GLOBAL_ADMIN') {
       properties = await prisma.property.findMany({
+        where: { deletedAt: null },
         orderBy: { name: 'asc' },
         include: {
           _count: {
@@ -33,6 +35,7 @@ propertiesRouter.get('/', requireAuth, async (req: Request, res: Response) => {
         where: {
           id: { in: req.user!.assignedPropertyIds },
           isActive: true,
+          deletedAt: null,
         },
         orderBy: { name: 'asc' },
         include: {
@@ -54,9 +57,10 @@ propertiesRouter.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 const propertySchema = z.object({
-  name: z.string().min(2),
-  code: z.string().min(2).max(10),
+  name: z.string().trim().min(2),
+  code: z.string().trim().min(2).max(10),
   location: z.string().optional(),
+  pmsPropertyCode: pmsPropertyCodeSchema.nullish().or(z.literal('')).transform(value => value || null),
   currency: z.string().default('USD'),
   currencySymbol: z.string().default('$'),
   taxRate: z.number().min(0).max(100).default(16.0),
@@ -72,18 +76,19 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
       return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
     }
 
-    const { name, code, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
+    const { name, code, pmsPropertyCode, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
       parseResult.data;
 
     const existing = await prisma.property.findUnique({ where: { code: code.toUpperCase() } });
     if (existing) {
-      return res.status(400).json({ error: `A property with code '${code.toUpperCase()}' already exists.` });
+      return res.status(409).json({ error: `Property code '${code.toUpperCase()}' is already in use, including retained historical properties. Choose another code.` });
     }
 
     const property = await prisma.property.create({
       data: {
         name,
         code: code.toUpperCase(),
+        pmsPropertyCode,
         location,
         currency,
         currencySymbol,
@@ -113,7 +118,8 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
 
     return res.status(201).json({ property });
   } catch (error) {
-    console.error('Create property error:', error);
+    if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This property code is already in use. Choose another code.' });
+    console.error('Create property error.');
     return res.status(500).json({ error: 'Failed to create property.' });
   }
 });
@@ -134,9 +140,18 @@ propertiesRouter.put(
         return res.status(403).json({ error: 'Unauthorized to modify this property.' });
       }
 
+      const pmsCode = z.object({ pmsPropertyCode: pmsPropertyCodeSchema.nullable().or(z.literal('')).optional() }).safeParse(req.body);
+      if (!pmsCode.success) return res.status(400).json({ error: 'Select a valid PMS resort code.' });
+      if (req.user!.role !== 'GLOBAL_ADMIN' && pmsCode.data.pmsPropertyCode !== undefined) {
+        return res.status(403).json({ error: 'Only global administrators can change the PMS resort mapping.' });
+      }
+      const current = await prisma.property.findUnique({ where: { id }, select: { deletedAt: true } });
+      if (!current) return res.status(404).json({ error: 'Property not found.' });
+      if (current.deletedAt) return res.status(410).json({ error: 'This property has been removed from the workspace. Its history is retained.' });
       const updated = await prisma.property.update({
         where: { id },
         data: {
+          pmsPropertyCode: pmsCode.data.pmsPropertyCode === '' ? null : pmsCode.data.pmsPropertyCode,
           name: name ?? undefined,
           location: location ?? undefined,
           currency: currency ?? undefined,
@@ -164,3 +179,32 @@ propertiesRouter.put(
     }
   }
 );
+
+// DELETE archives the property and revokes its login assignments while retaining business history.
+propertiesRouter.delete('/:id', requireAuth, requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
+  const parsed = z.object({ confirmationCode: z.string().trim().min(1).max(10) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Enter the property code to confirm deletion.' });
+  const id = String(req.params.id);
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const property = await tx.property.findUnique({ where: { id } });
+      if (!property || property.deletedAt) return 'missing';
+      if (parsed.data.confirmationCode.toUpperCase() !== property.code) return 'confirmation';
+      const changed = await tx.property.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), isActive: false } });
+      if (!changed.count) return 'missing';
+      const assignments = await tx.userProperty.deleteMany({ where: { propertyId: id } });
+      await tx.auditLog.create({ data: {
+        propertyId: id, userId: req.user!.id, action: 'PROPERTY_DELETE', targetType: 'Property', targetId: id,
+        details: JSON.stringify({ name: property.name, code: property.code, historyRetained: true, removedAssignments: assignments.count }),
+        ipAddress: req.ip || req.socket?.remoteAddress || null,
+      } });
+      return 'deleted';
+    });
+    if (result === 'missing') return res.status(404).json({ error: 'Property not found or already removed.' });
+    if (result === 'confirmation') return res.status(400).json({ error: 'The confirmation code does not match this property.' });
+    return res.json({ message: 'Property removed from the workspace. Bills, staff records, payroll and audit history have been retained.' });
+  } catch {
+    console.error('Property deletion failed.');
+    return res.status(500).json({ error: 'Unable to delete this property. Please try again.' });
+  }
+});
