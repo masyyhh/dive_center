@@ -6,7 +6,7 @@ import { businessToday } from '../utils/dates';
 import React, { useState, useEffect } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../services/api';
+import { apiFetch, downloadFile } from '../services/api';
 import { Property, User, StaffMember, Item, Category, AuditLog } from '../types';
 import {
   Building,
@@ -50,7 +50,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [propForm, setPropForm] = useState({
     name: '',
     code: '',
-    pmsPropertyCode: '',
+    pmsPropertyCodes: [] as string[],
     location: '',
     currency: 'USD',
     currencySymbol: '$',
@@ -79,6 +79,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [resetBusy, setResetBusy] = useState(false);
   const closePasswordReset = () => { setResetTargetUser(null); setResetAuthenticator(false); setNewPassword(''); setConfirmPassword(''); setErrorMsg(null); };
 
+  const [staffBusy, setStaffBusy] = useState(false);
+  const [giveStaffLogin, setGiveStaffLogin] = useState(false);
+  const [staffLogin, setStaffLogin] = useState({ username: '', password: '' });
+
   // Staff state
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [showStaffModal, setShowStaffModal] = useState<boolean>(false);
@@ -94,6 +98,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     leavingDate: '',
   });
 
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [catalogueImport, setCatalogueImport] = useState<{ propertyId: string; content: string; format: 'csv' | 'xlsx'; created: number; updated: number; total: number; previewRows: { code: string; name: string; category: string; price: number; isActive: boolean; commission: { poolType: string; poolContribution: number; personalRates: Record<string, number> } }[] } | null>(null);
   // Items & Categories state
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showCategoryInput, setShowCategoryInput] = useState(false);
@@ -118,6 +124,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
   // Audit Logs state
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditCursor, setAuditCursor] = useState<string | null>(null);
+  const auditGeneration = React.useRef(0);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -180,18 +188,22 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   };
 
   // Fetch Audit Logs
-  const loadAuditLogs = async () => {
-    if (!activeProperty) return;
+  const loadAuditLogs = async (cursor?: string) => {
+    if (!isGlobalAdmin && !activeProperty) return;
+    const generation = ++auditGeneration.current;
     try {
       setLoading(true);
-      const res = await apiFetch<{ logs: AuditLog[] }>(
-        `/audit?propertyId=${activeProperty.id}`
-      );
-      setAuditLogs(res.logs);
+      if (!cursor) { setAuditLogs([]); setAuditCursor(null); }
+      const params = new URLSearchParams({ propertyId: isGlobalAdmin ? 'all' : activeProperty!.id });
+      if (cursor) params.set('cursor', cursor);
+      const res = await apiFetch<{ logs: AuditLog[]; nextCursor: string | null }>(`/audit?${params}`);
+      if (generation !== auditGeneration.current) return;
+      setAuditLogs(previous => cursor ? [...previous, ...res.logs] : res.logs);
+      setAuditCursor(res.nextCursor);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
+      if (generation === auditGeneration.current) setErrorMsg(err instanceof Error ? err.message : 'Could not load the audit log.');
     } finally {
-      setLoading(false);
+      if (generation === auditGeneration.current) setLoading(false);
     }
   };
 
@@ -203,10 +215,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   }, [activeTab, activeProperty]);
 
   const [pmsSavingProperty, setPmsSavingProperty] = useState<string | null>(null);
-  const updatePmsCode = async (id: string, pmsPropertyCode: string) => {
+  const updatePmsCode = async (id: string, pmsPropertyCodes: string[]) => {
     setPmsSavingProperty(id); setErrorMsg(null);
     try {
-      await apiFetch(`/properties/${id}`, { method: 'PUT', body: JSON.stringify({ pmsPropertyCode: pmsPropertyCode || null }) });
+      await apiFetch(`/properties/${id}`, { method: 'PUT', body: JSON.stringify({ pmsPropertyCodes }) });
       await refreshProperties(); showNotification('PMS resort setting saved.');
     } catch (err: any) { setErrorMsg(err.message || 'Unable to update PMS resort.'); }
     finally { setPmsSavingProperty(null); }
@@ -224,7 +236,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       });
       setShowPropertyModal(false);
       showNotification(`Property '${propForm.name}' created successfully.`);
-      setPropForm({ name: '', code: '', pmsPropertyCode: '', location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001 });
+      setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001 });
       await refreshProperties();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to create property.');
@@ -306,21 +318,27 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   // Create Staff Member Handler
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeProperty) return;
+    if (!activeProperty || staffBusy) return;
+    setStaffBusy(true); setErrorMsg(null);
     try {
       await apiFetch('/staff', {
         method: 'POST',
         body: JSON.stringify({
           ...staffForm,
+          leavingDate: staffForm.leavingDate || null,
+          ...(giveStaffLogin ? { loginAccess: staffLogin } : {}),
           propertyId: activeProperty.id,
         }),
       });
       setShowStaffModal(false);
+      setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false);
+      setStaffForm(form => ({ ...form, name: '', email: '', hireDate: businessToday(), leavingDate: '' }));
+      if (giveStaffLogin) void loadUsers();
       showNotification(`Staff member '${staffForm.name}' added.`);
       loadStaff();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to add staff member.');
-    }
+    } finally { setStaffBusy(false); }
   };
 
   const handleCreateCategory = async () => {
@@ -333,6 +351,37 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       setNewCategoryName(''); setShowCategoryInput(false);
     } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not create the category.'); }
     finally { setCategoryBusy(false); }
+  };
+
+  const exportCatalogue = async (format: 'csv' | 'xlsx', template = false) => {
+    if (!activeProperty || transferBusy) return;
+    setTransferBusy(true); setErrorMsg(null);
+    try { await downloadFile(`/items/export?propertyId=${encodeURIComponent(activeProperty.id)}&format=${format}&template=${template}`, `catalogue${template ? '-template' : ''}.${format}`); }
+    catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not export catalogue.'); }
+    finally { setTransferBusy(false); }
+  };
+  const previewCatalogue = async (file?: File) => {
+    if (!file || !activeProperty || transferBusy) return;
+    setCatalogueImport(null); setErrorMsg(null);
+    if (file.size > 3 * 1024 * 1024 || !/\.(csv|xlsx)$/i.test(file.name)) { setErrorMsg('Choose a CSV or Excel file up to 3 MB.'); return; }
+    setTransferBusy(true);
+    const propertyId = activeProperty.id;
+    try {
+      const content = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Could not read this file.')); reader.readAsDataURL(file); });
+      const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' as const : 'xlsx' as const;
+      const result = await apiFetch<{ created: number; updated: number; total: number; previewRows: { code: string; name: string; category: string; price: number; isActive: boolean; commission: { poolType: string; poolContribution: number; personalRates: Record<string, number> } }[] }>('/items/import', { method: 'POST', body: JSON.stringify({ propertyId, content, format, preview: true }) });
+      setCatalogueImport({ propertyId, content, format, ...result });
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not read catalogue.'); }
+    finally { setTransferBusy(false); }
+  };
+  const commitCatalogue = async () => {
+    if (!catalogueImport || catalogueImport.propertyId !== activeProperty?.id || transferBusy) return;
+    setTransferBusy(true); setErrorMsg(null);
+    try {
+      const result = await apiFetch<{ total: number }>('/items/import', { method: 'POST', body: JSON.stringify({ propertyId: catalogueImport.propertyId, content: catalogueImport.content, format: catalogueImport.format, preview: false }) });
+      setCatalogueImport(null); showNotification(`Imported ${result.total} catalogue items.`); await loadItems();
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not import catalogue.'); }
+    finally { setTransferBusy(false); }
   };
 
   const openItemEditor = (item?: Item) => {
@@ -353,7 +402,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     try {
       await apiFetch(editingItem ? `/items/${editingItem.id}` : '/items', {
         method: editingItem ? 'PUT' : 'POST',
-        body: JSON.stringify(editingItem ? itemForm : { ...itemForm, propertyId: activeProperty.id }),
+        body: JSON.stringify(editingItem ? itemForm : { ...itemForm, code: undefined, propertyId: activeProperty.id }),
       });
       setShowItemModal(false); setEditingItem(null);
       showNotification(`Activity '${itemForm.name}' ${editingItem ? 'updated' : 'added'} for ${activeProperty.name}.`);
@@ -520,11 +569,14 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </div>
 
                 <button type="button" className="text-button text-red-600 dark:text-red-400" aria-label={`Delete property ${p.name}`} onClick={() => { setErrorMsg(null); setDeletePropertyCode(''); setDeletePropertyTarget(p); }}><Trash2 size={15} /> Delete property</button>
-                <label className="block text-sm">PMS resort for room lookups
-                  <select aria-label={`PMS resort for ${p.name}`} value={p.pmsPropertyCode || ''} disabled={pmsSavingProperty !== null} onChange={e => void updatePmsCode(p.id, e.target.value)} className="w-full mt-1 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-                    <option value="">Use centre code if supported</option>{pmsResortCodes.map(code => <option key={code} value={code}>{code}</option>)}
-                  </select>
-                </label>
+                <fieldset disabled={pmsSavingProperty !== null} className="space-y-2 text-sm">
+                  <legend>PMS resorts for room lookups</legend>
+                  <div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => {
+                    const selected = p.pmsPropertyCodes?.length ? p.pmsPropertyCodes : p.pmsPropertyCode ? [p.pmsPropertyCode] : [];
+                    return <label key={code} className="flex items-center gap-1"><input type="checkbox" aria-label={`${code} for ${p.name}`} checked={selected.includes(code)} onChange={e => void updatePmsCode(p.id, e.target.checked ? [...selected, code] : selected.filter(value => value !== code))} />{code}</label>;
+                  })}</div>
+                  <p className="text-xs text-slate-500">Room lookups search every selected resort. With none selected, the centre code is used if supported.</p>
+                </fieldset>
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-sm">
                   <div>
                     <span className="text-slate-400 block text-xs">Tax Rate:</span>
@@ -682,6 +734,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Name & Title</th>
                   <th className="py-3 px-4">Employment Window</th>
+                  <th className="py-3 px-4">Login access</th>
                   <th className="py-3 px-4">Dive Staff?</th>
                   <th className="py-3 px-4">Course Pool</th>
                   <th className="py-3 px-4">Dive Pool</th>
@@ -699,6 +752,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">
                       Hired: {s.hireDate} {s.leavingDate ? `• Left: ${s.leavingDate}` : '• Active'}
                     </td>
+                    <td className="py-3 px-4">{s.userId ? 'Login account created' : 'No linked login'}</td>
                     <td className="py-3 px-4">
                       {s.isDiveStaff ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">
@@ -760,6 +814,22 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               <span>Add activity</span>
             </button>
           </div>
+
+          <div className="flex flex-wrap gap-3 items-center">
+            <button type="button" className="secondary-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('xlsx')}>Export Excel</button>
+            <button type="button" className="secondary-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('csv')}>Export CSV</button>
+            <button type="button" className="text-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('xlsx', true)}>Download import template</button>
+            <label className="text-sm" htmlFor="catalogue-file">Import catalogue<input id="catalogue-file" type="file" accept=".csv,.xlsx" className="block mt-1" disabled={!activeProperty || transferBusy} onChange={e => { void previewCatalogue(e.target.files?.[0]); e.target.value = ''; }} /></label>
+          </div>
+          <p className="text-xs text-slate-500">Columns: Item Code, Items, Category, Price, Commission, Status. Leave Item Code blank for new items; existing codes update this property's items. Status: Active or Inactive. Commission accepts a pool amount (courses use the course pool; other categories use the dive pool), or the full settings object from an export. Up to 2,000 items / 3 MB. Imports are checked before saving.</p>
+          {transferBusy && <p role="status">Processing catalogue…</p>}
+          {catalogueImport?.propertyId === activeProperty?.id && catalogueImport && <div className="surface p-4 space-y-3">
+            <h4 className="font-bold">Review catalogue import</h4>
+            <p>{catalogueImport.created} new items, {catalogueImport.updated} updates. New categories will be added and new item codes generated on save.</p>
+            <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Item Code</th><th>Items</th><th>Category</th><th>Price</th><th>Commission</th><th>Status</th></tr></thead><tbody>{catalogueImport.previewRows.map((row, index) => <tr key={index}><td>{row.code || 'Generated on save'}</td><td>{row.name}</td><td>{row.category}</td><td>{row.price}</td><td>{JSON.stringify(row.commission)}</td><td>{row.isActive ? 'Active' : 'Inactive'}</td></tr>)}</tbody></table></div>
+            {catalogueImport.total > 20 && <p>Showing the first 20 of {catalogueImport.total} validated rows.</p>}
+            <div className="flex gap-3"><button type="button" className="primary-button" disabled={transferBusy} onClick={commitCatalogue}>Import {catalogueImport.total} items</button><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => setCatalogueImport(null)}>Cancel import</button></div>
+          </div>}
 
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" checked={showArchivedItems} onChange={event => setShowArchivedItems(event.target.checked)} />Show deleted activities</label>
           <div className="overflow-x-auto">
@@ -834,7 +904,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               <span>Administrator Change Log & Audit Trail</span>
             </h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-              Tracks re-dates, rebates, soft-deletions, password resets, failed login locks, and payroll freezes.
+              {isGlobalAdmin ? 'All properties and account activity, including sign-ins, sign-outs, changes, and API activity.' : 'Activity for this property.'} Times shown in Maldives time (UTC+05:00).
             </p>
           </div>
 
@@ -843,6 +913,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Timestamp</th>
+                  <th className="py-3 px-4">Property</th>
                   <th className="py-3 px-4">Action</th>
                   <th className="py-3 px-4">User</th>
                   <th className="py-3 px-4">IP Address</th>
@@ -853,8 +924,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 {auditLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">
-                      {new Date(log.createdAt).toLocaleString()}
+                      {new Date(log.createdAt).toLocaleString('en-GB', { timeZone: 'Indian/Maldives', hour12: false })}
                     </td>
+                    <td className="py-3 px-4">{log.property?.name || 'Account / System'}</td>
                     <td className="py-3 px-4">
                       <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
                         {log.action}
@@ -866,13 +938,18 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4 font-mono text-xs text-slate-400">
                       {log.ipAddress || '127.0.0.1'}
                     </td>
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-mono text-xs max-w-md truncate">
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-mono text-xs max-w-md break-words">
                       {log.details || '—'}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+          {!loading && !auditLogs.length && <p>No audit activity recorded.</p>}
+          <div className="flex gap-3">
+            <button type="button" disabled={loading} onClick={() => loadAuditLogs()}>Refresh</button>
+            {auditCursor && <button type="button" disabled={loading} onClick={() => loadAuditLogs(auditCursor)}>Load older entries</button>}
           </div>
         </div>
       )}
@@ -910,35 +987,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 />
               </div>
 
-              <label className="block">PMS resort (optional)
-                <select value={propForm.pmsPropertyCode} onChange={e => setPropForm({ ...propForm, pmsPropertyCode: e.target.value })} className="w-full mt-1 px-3 py-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"><option value="">Use centre code if supported</option>{pmsResortCodes.map(code => <option key={code} value={code}>{code}</option>)}</select>
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Property Code *
-                  </label>
-                  <input id="adminview-field-2"
-                    type="text"
-                    required
-                    value={propForm.code}
-                    onChange={(e) => setPropForm({ ...propForm, code: e.target.value.toUpperCase() })}
-                    placeholder="SUN-BAA"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Currency Symbol
-                  </label>
-                  <input id="adminview-field-3"
-                    type="text"
-                    value={propForm.currencySymbol}
-                    onChange={(e) => setPropForm({ ...propForm, currencySymbol: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                  />
-                </div>
-              </div>
+              <fieldset className="space-y-2"><legend>PMS resorts (optional)</legend><div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => <label key={code} className="flex items-center gap-1"><input type="checkbox" checked={propForm.pmsPropertyCodes.includes(code)} onChange={e => setPropForm({ ...propForm, pmsPropertyCodes: e.target.checked ? [...propForm.pmsPropertyCodes, code] : propForm.pmsPropertyCodes.filter(value => value !== code) })} />{code}</label>)}</div></fieldset>
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
@@ -1048,7 +1097,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 <input id="adminview-field-9"
                   type="password"
                   required
-                  minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp}
+                  minLength={12} pattern={passwordPattern} title={passwordHelp}
                   value={userForm.password}
                   onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
                   placeholder="12 characters, Aa, number, symbol"
@@ -1145,7 +1194,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 <input
                   type="password"
                   required
-                  minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp}
+                  minLength={12} pattern={passwordPattern} title={passwordHelp}
                   id="reset-new-password"
                   autoComplete="new-password"
                   disabled={resetBusy}
@@ -1158,7 +1207,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
               <div>
                 <label htmlFor="reset-confirm-password" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Confirm password:</label>
-                <input id="reset-confirm-password" type="password" autoComplete="new-password" required minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp} disabled={resetBusy}
+                <input id="reset-confirm-password" type="password" autoComplete="new-password" required minLength={12} pattern={passwordPattern} title={passwordHelp} disabled={resetBusy}
                   value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />
               </div>
@@ -1187,12 +1236,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
       {/* MODAL: ADD STAFF */}
       {showStaffModal && (
-        <Modal label="Add team member" onClose={() => { setShowStaffModal(false); setErrorMsg(null); } } error={errorMsg}>
+        <Modal label="Add team member" busy={staffBusy} onClose={() => { if (!staffBusy) { setShowStaffModal(false); setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false); setErrorMsg(null); } } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               Add Staff Member to {activeProperty?.name}
             </h3>
-            <form onSubmit={handleCreateStaff} className="space-y-3 text-sm">
+            <form onSubmit={handleCreateStaff} className="space-y-3 text-sm"><fieldset disabled={staffBusy} className="space-y-3">
               <div>
                 <label htmlFor="adminview-field-11" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Full Name *
@@ -1262,6 +1311,16 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </div>
               </div>
 
+              <fieldset className="space-y-3 border-t border-slate-200 pt-3">
+                <legend>Workspace access</legend>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={giveStaffLogin} onChange={e => setGiveStaffLogin(e.target.checked)} />Give this staff member login access</label>
+                {giveStaffLogin && <>
+                  <label className="block" htmlFor="staff-login-username">Unique username<input id="staff-login-username" className="w-full border rounded p-2 mt-1" required minLength={3} maxLength={100} pattern="[A-Za-z0-9._@+\-]+" autoComplete="off" value={staffLogin.username} onChange={e => setStaffLogin({ ...staffLogin, username: e.target.value })} /></label>
+                  <label className="block" htmlFor="staff-login-password">Temporary password<input id="staff-login-password" className="w-full border rounded p-2 mt-1" type="password" autoComplete="new-password" required minLength={12} pattern={passwordPattern} title={passwordHelp} value={staffLogin.password} onChange={e => setStaffLogin({ ...staffLogin, password: e.target.value })} /></label>
+                  <p className="text-xs text-slate-500">{passwordHelp} This grants centre staff access to {activeProperty?.name}. They must change the temporary password and set up their own authenticator.</p>
+                </>}
+              </fieldset>
+
               {/* Pool checkboxes */}
               <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <label className="flex items-center space-x-2 cursor-pointer">
@@ -1306,7 +1365,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               <div className="flex space-x-2 pt-3">
                 <button
                   type="button"
-                  onClick={() => setShowStaffModal(false)}
+                  onClick={() => { setShowStaffModal(false); setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false); }}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
                   Cancel
@@ -1315,9 +1374,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   type="submit"
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  Add Staff Member
+                  {staffBusy ? 'Adding…' : 'Add Staff Member'}
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
         </Modal>
@@ -1334,22 +1394,20 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               {editingItem ? 'Edit activity' : 'Add activity'} · {activeProperty?.name}
             </h3>
-            <p className="text-sm text-slate-500">Use a separate activity code for a promotional offer, then delete it when the offer ends.</p>
+            <p className="text-sm text-slate-500">Create a separate activity for a promotional offer. Its code is generated automatically; delete the activity when the offer ends.</p>
             <form onSubmit={handleSaveItem} className="space-y-3 text-sm">
               <fieldset disabled={itemBusy} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="activity-code" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Item Code *
+                    Item Code (system generated)
                   </label>
                   <input
                     id="activity-code"
                     type="text"
-                    required
-                    maxLength={50}
-                    value={itemForm.code}
-                    onChange={(e) => setItemForm({ ...itemForm, code: e.target.value.toUpperCase() })}
-                    placeholder="e.g. DIVE-05"
+                    readOnly
+                    value={editingItem ? itemForm.code : ''}
+                    placeholder="Assigned on save, e.g. DIV-001"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
                   />
                 </div>

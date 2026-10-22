@@ -2,7 +2,7 @@ import { PasswordRecoveryView } from './PasswordRecoveryView';
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { Waves, Sun, Moon } from 'lucide-react';
+import { Sun, Moon } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
   const { login } = useAuth();
@@ -44,7 +44,7 @@ export const LoginView: React.FC = () => {
       </button>
 
       <main className="signin-card" aria-labelledby="signin-heading">
-        <div className="signin-mark" aria-hidden="true"><Waves size={24} /></div>
+        <img className="signin-mark" src={`${import.meta.env.BASE_URL}logo.png`} alt="Dive Centre logo" width={297} height={170} />
         <p className="signin-brand">DIVE CENTRE MANAGER</p>
         <h1 id="signin-heading">Welcome back</h1>
         <p className="signin-intro">Sign in with your unique username and password. Existing email-shaped sign-in IDs still work.</p>

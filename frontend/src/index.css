@@ -245,15 +245,11 @@
   box-shadow: 0 1px 3px #172f4c20;
 }
 .signin-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: #eaf3f8;
-  color: #007eaf;
+  display: block;
+  width: 88px;
+  height: auto;
+  object-fit: contain;
 }
-.dark .signin-mark { background: #213c50; color: #77c9ec; }
 .signin-brand {
   margin: 22px 0 10px;
   font-size: 10px;

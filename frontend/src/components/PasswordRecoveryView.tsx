@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { apiFetch } from '../services/api';
 
-export const passwordHelp = 'Exactly 12 characters, including uppercase and lowercase letters, a number, and a symbol. No spaces.';
-export const passwordPattern = '(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[^A-Za-z0-9\\s])\\S{12}';
+export const passwordHelp = 'At least 12 characters, including uppercase and lowercase letters, a number, and a symbol. No spaces.';
+export const passwordPattern = '(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[^A-Za-z0-9\\s])\\S{12,}';
 
 export const PasswordRecoveryView: React.FC<{ initialToken?: string; onDone: (message?: string) => void }> = ({ initialToken, onDone }) => {
   const [step, setStep] = useState<'verify' | 'password'>(initialToken ? 'password' : 'verify');
@@ -31,6 +31,7 @@ export const PasswordRecoveryView: React.FC<{ initialToken?: string; onDone: (me
     finally { setBusy(false); }
   };
   return <div className="signin-page"><main className="signin-card" aria-labelledby="password-heading">
+    <img className="signin-mark" src={`${import.meta.env.BASE_URL}logo.png`} alt="Dive Centre logo" width={297} height={170} />
     <p className="signin-brand">DIVE CENTRE MANAGER</p>
     <h1 id="password-heading">{initialToken ? 'Change your initial password' : step === 'verify' ? 'Reset your password' : 'Create a new password'}</h1>
     <p className="signin-intro">{initialToken ? 'Create your own password before entering your workspace.' : step === 'verify' ? 'Enter your username and a code from the authenticator bound to your account, or one of your saved recovery codes.' : 'Your code is verified. Create your new password within 10 minutes.'}</p>
@@ -44,8 +45,8 @@ export const PasswordRecoveryView: React.FC<{ initialToken?: string; onDone: (me
         </>}
         {step === 'password' && <>
           <p id="password-rules" className="signin-help">{passwordHelp}</p>
-          <div className="signin-field"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" aria-describedby="password-rules" required minLength={12} maxLength={12} pattern={passwordPattern} title={passwordHelp} value={password} onChange={e => setPassword(e.target.value)} /></div>
-          <div className="signin-field"><label htmlFor="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autoComplete="new-password" required minLength={12} maxLength={12} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></div>
+          <div className="signin-field"><label htmlFor="new-password">New password</label><input id="new-password" type="password" autoComplete="new-password" aria-describedby="password-rules" required minLength={12} pattern={passwordPattern} title={passwordHelp} value={password} onChange={e => setPassword(e.target.value)} /></div>
+          <div className="signin-field"><label htmlFor="confirm-password">Confirm new password</label><input id="confirm-password" type="password" autoComplete="new-password" required minLength={12} value={confirmation} onChange={e => setConfirmation(e.target.value)} /></div>
         </>}
         <button className="signin-submit" type="submit">{busy ? 'Please wait…' : step === 'verify' ? 'Verify code' : 'Save new password'}</button>
       </fieldset>

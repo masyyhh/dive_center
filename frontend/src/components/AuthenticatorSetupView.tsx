@@ -33,6 +33,7 @@ export const AuthenticatorSetupView: React.FC<{ onComplete: () => void; onCancel
     const link = document.createElement('a'); link.href = url; link.download = 'dive-centre-recovery-codes.txt'; link.click(); URL.revokeObjectURL(url);
   };
   return <main className="signin-card authenticator-card" aria-labelledby="authenticator-heading">
+    <img className="signin-mark" src={`${import.meta.env.BASE_URL}logo.png`} alt="Dive Centre logo" width={297} height={170} />
     <p className="signin-brand">DIVE CENTRE MANAGER · {user?.username}</p>
     <h1 id="authenticator-heading">{codes.length ? 'Save your recovery codes' : user?.authenticatorEnabled ? 'Replace your authenticator' : 'Bind your authenticator'}</h1>
     <p className="signin-intro">{codes.length ? 'These codes are shown once. Each can recover your account if you lose your device. Store them somewhere private, away from your phone.' : setup ? 'Scan this QR code in your authenticator app, or enter the setup key manually. Enter a code from the app within 10 minutes to finish.' : 'Connect your own authenticator app to this account for password recovery. No email or shared mailbox is needed.'}</p>

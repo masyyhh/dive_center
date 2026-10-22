@@ -5,6 +5,7 @@ export interface Property {
   code: string;
   name: string;
   deletedAt?: string | null;
+  pmsPropertyCodes?: string[];
   pmsPropertyCode?: string | null;
   location?: string | null;
   currency: string;
@@ -36,6 +37,7 @@ export interface User {
 }
 
 export interface StaffMember {
+  userId?: string | null;
   id: string;
   propertyId: string;
   name: string;

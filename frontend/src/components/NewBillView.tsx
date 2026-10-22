@@ -48,6 +48,10 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [staffNotice, setStaffNotice] = useState('');
+  const [loadedStaffKey, setLoadedStaffKey] = useState('');
+  const [staffReload, setStaffReload] = useState(0);
 
   // Bill state
   const [checkNumber, setCheckNumber] = useState<number>(restoredDraft?.checkNumber ?? 1001);
@@ -99,7 +103,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     setTipAmount(0); setTipStaffIds([]); setNotes(''); setBusinessDate(businessToday()); setCheckNumber(nextCheck);
     setCheckEdited(false); setRestored(false); setAttemptedReview(false); setErrorMsg(null); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); cancelPmsLookup(); setDiscardOpen(false);
   };
-  // Load items, categories, next check number, and staff members
+  // Load the catalogue and next check number
   useEffect(() => {
     if (!activeProperty) return;
 
@@ -107,15 +111,12 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
       setSetupLoading(true);
       setErrorMsg(null);
       try {
-        const [itemsData, nextCheckData, staffData] = await Promise.all([
+        const [itemsData, nextCheckData] = await Promise.all([
           apiFetch<{ categories: Category[]; items: Item[] }>(
             `/items?propertyId=${activeProperty.id}`
           ),
           apiFetch<{ nextCheckNumber: number }>(
             `/bills/next-check?propertyId=${activeProperty.id}`
-          ),
-          apiFetch<{ staff: StaffMember[] }>(
-            `/staff?propertyId=${activeProperty.id}`
           ),
         ]);
 
@@ -123,7 +124,6 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
         setItems(itemsData.items);
         setNextCheck(nextCheckData.nextCheckNumber);
         if (!restoredDraft) setCheckNumber(nextCheckData.nextCheckNumber);
-        setStaffList(staffData.staff);
       } catch (err) {
         setErrorMsg('Unable to load the catalogue. Please reload this page to try again.');
       } finally {
@@ -133,6 +133,46 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
     loadData();
   }, [activeProperty]);
+
+  const staffKey = `${activeProperty?.id || ''}:${businessDate}`;
+  const staffReady = !staffLoading && loadedStaffKey === staffKey;
+  useEffect(() => {
+    let cancelled = false;
+    let generation = 0;
+    const loadEligibleStaff = async () => {
+      const current = ++generation;
+      setStaffLoading(true);
+      setStaffList([]);
+      if (!activeProperty || !isBusinessDate(businessDate)) return;
+      try {
+        const { staff } = await apiFetch<{ staff: StaffMember[] }>(`/staff?propertyId=${encodeURIComponent(activeProperty.id)}&creditOnDate=${businessDate}`);
+        if (cancelled || current !== generation) return;
+        const ids = new Set(staff.map(s => s.id));
+        setStaffList(staff);
+        setTipStaffIds(previous => previous.filter(id => ids.has(id)));
+        setBillLines(previous => previous.map(line => {
+          const updated = { ...line };
+          for (const role of ['seller', 'guide', 'instructor', 'photo', 'video'] as const) {
+            const field = `${role}StaffId` as const;
+            if (updated[field] && !ids.has(updated[field]!)) updated[field] = null;
+          }
+          return updated;
+        }));
+        setLoadedStaffKey(staffKey);
+        setStaffNotice('Only staff employed and not excluded by saved attendance on the business date can receive commission or tips. Unavailable selections are cleared.');
+      } catch {
+        if (!cancelled && current === generation) {
+          setLoadedStaffKey('');
+          setStaffNotice('Unable to check staff availability. Retry before saving.');
+        }
+      } finally {
+        if (!cancelled && current === generation) setStaffLoading(false);
+      }
+    };
+    loadEligibleStaff();
+    window.addEventListener('focus', loadEligibleStaff);
+    return () => { cancelled = true; window.removeEventListener('focus', loadEligibleStaff); };
+  }, [activeProperty?.id, businessDate, staffReload]);
 
   useEffect(() => {
     cancelPmsLookup(); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); setSelectedPmsGuest(null); setPmsBusy(false);
@@ -283,6 +323,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   const handleSaveBill = async () => {
     if (!activeProperty || monthLock.locked !== false) return;
+    if (!staffReady) { setErrorMsg('Wait for staff availability to load before saving.'); return; }
     setErrorMsg(null);
 
     if (!roomNumber.trim()) {
@@ -354,12 +395,14 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     }
     if (!billLines.length) { document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     if (monthLock.locked !== false) { setErrorMsg(monthLock.locked ? 'Choose a business date in an open month before saving.' : 'Please wait for payroll status to load, or retry if it failed.'); return; }
+    if (!staffReady) { setErrorMsg('Wait for staff availability to load before reviewing.'); return; }
     setShowConfirmModal(true);
   };
   return (
     <div className="space-y-6">
       <div className="workflow-steps" aria-label="Bill workflow"><a href="#bill-activities" onClick={e => { e.preventDefault(); document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth' }); }}><span>1</span>Activities</a><a href="#bill-guest-details" onClick={e => { e.preventDefault(); document.getElementById('bill-room')?.focus(); }}><span>2</span>Guest details</a><button onClick={reviewBill}><span>3</span>Review & save</button></div>
       {(restored || dirty) && <div className="draft-notice" role="status"><span>{draftError ? 'Draft storage unavailable. Keep this screen open until you save.' : restored ? 'Draft restored. Review the guest, check number, and prices before saving.' : 'Draft saved in this browser tab.'}</span><button className="text-button" onClick={() => setDiscardOpen(true)}>Discard draft</button></div>}
+      {staffNotice && <div className="notice notice-info" role="status"><span>{staffNotice}</span>{!staffReady && !staffLoading && <button type="button" onClick={() => setStaffReload(value => value + 1)}>Retry staff availability</button>}</div>}
       {/* Top check number stepper bar */}
       <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
@@ -727,6 +770,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   Seller:
                                 </label>
                                 <select id={`newbillview-field-5-${idx}`}
+                                  disabled={!staffReady || saving}
                                   value={line.sellerStaffId || ''}
                                   onChange={(e) => updateStaffAssignment(idx, 'seller', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
@@ -747,6 +791,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   Guide / Divemaster:
                                 </label>
                                 <select id={`newbillview-field-6-${idx}`}
+                                  disabled={!staffReady || saving}
                                   value={line.guideStaffId || ''}
                                   onChange={(e) => updateStaffAssignment(idx, 'guide', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
@@ -767,6 +812,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   Instructor:
                                 </label>
                                 <select id={`newbillview-field-7-${idx}`}
+                                  disabled={!staffReady || saving}
                                   value={line.instructorStaffId || ''}
                                   onChange={(e) => updateStaffAssignment(idx, 'instructor', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
@@ -787,6 +833,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   Photographer:
                                 </label>
                                 <select id={`newbillview-field-8-${idx}`}
+                                  disabled={!staffReady || saving}
                                   value={line.photoStaffId || ''}
                                   onChange={(e) => updateStaffAssignment(idx, 'photo', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
@@ -807,6 +854,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   Videographer:
                                 </label>
                                 <select id={`newbillview-field-9-${idx}`}
+                                  disabled={!staffReady || saving}
                                   value={line.videoStaffId || ''}
                                   onChange={(e) => updateStaffAssignment(idx, 'video', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
@@ -853,7 +901,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                       Staff Sharing Tip (split equally)
                     </label>
                     <div className="tip-recipients" role="group" aria-label="Staff sharing tip">
-                      {staffList.length ? staffList.map(staff => <label key={staff.id}><input type="checkbox" checked={tipStaffIds.includes(staff.id)} onChange={e => setTipStaffIds(ids => e.target.checked ? [...ids, staff.id] : ids.filter(id => id !== staff.id))} />{staff.name}</label>) : <p className="text-slate-500">No team members available.</p>}
+                      {staffList.length ? staffList.map(staff => <label key={staff.id}><input type="checkbox" disabled={!staffReady || saving} checked={tipStaffIds.includes(staff.id)} onChange={e => setTipStaffIds(ids => e.target.checked ? [...ids, staff.id] : ids.filter(id => id !== staff.id))} />{staff.name}</label>) : <p className="text-slate-500">No team members available.</p>}
                     </div>
                   </div>
                 )}

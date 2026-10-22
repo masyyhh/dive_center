@@ -58,6 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    void apiFetch('/auth/logout', { method: 'POST' }).catch(err => console.warn('Could not record sign-out:', err));
     setAuthToken(null);
     setUser(null);
   };

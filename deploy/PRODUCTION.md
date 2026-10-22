@@ -240,3 +240,19 @@ Local validation on 21 October 2026 passed all 104 tests (5 deployment-tool, 88 
 Source and local tests can establish application behavior, secret generation, backup failure handling and migration correctness in disposable PostgreSQL. They do not establish your DNS, firewall, TLS issuance, host ACLs, resource capacity, off-site backups or operator response. At release time record the successful CI run, staging checks, restore rehearsal and responsible operator. This workstation has no running Docker daemon/Compose plugin; no local container/startup/public-HTTPS success is claimed. Container execution is enforced by the added CI gate and must pass before deployment.
 
 Authoritative references: [Docker installation](https://docs.docker.com/engine/install/ubuntu/), [Docker startup ordering](https://docs.docker.com/compose/how-tos/startup-order/), [Caddy HTTPS](https://caddyserver.com/docs/automatic-https), [PostgreSQL 18 image storage](https://hub.docker.com/_/postgres), [pg_dump](https://www.postgresql.org/docs/18/app-pgdump.html), [pg_restore](https://www.postgresql.org/docs/18/app-pgrestore.html).
+
+## Missing-column errors after an update
+
+A Prisma `P2022` error naming `Property.pmsPropertyCodes` means the backend image expects a migration that has not been applied to its database. The migration `20261021010000_pms_resorts_staff_login` adds the PMS resort list and staff login link, preserving the old single-resort mapping.
+
+After updating the server checkout to the intended release, run from its repository root:
+
+```sh
+docker compose --env-file .env.production build backend
+docker compose --env-file .env.production run --rm backend node tools/prisma.cjs migrate deploy
+docker compose --env-file .env.production up -d --wait --wait-timeout 120 backend web
+```
+
+Proceed to the next command only if the preceding command succeeds. These commands apply the bundled migrations to the existing database; they do not reset it. If migration deployment fails, inspect that error before restarting the API. Do not use `migrate reset`, delete the PostgreSQL volume, or mark an unapplied migration as applied.
+
+The backend container now runs `migrate deploy` before its default API command, and refuses to start the API if migration deployment fails. One-off migration and bootstrap commands still run directly. Explicit migration deployment remains useful during a controlled release and when repairing an older running image.

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X } from 'lucide-react';
+import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, ArrowUpRight, X } from 'lucide-react';
 
 export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin';
 export const navLabels: Record<NavTab, string> = { home: 'Overview', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
@@ -35,13 +35,13 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
   return <>
     {open && <button className="sidebar-scrim" aria-label="Close navigation" onClick={onClose} />}
     <aside ref={sidebarRef} className={`sidebar ${open ? 'is-open' : ''}`} aria-label="Workspace navigation">
-      <a className="brand" href="#home" onClick={event => { event.preventDefault(); navigate('home'); }}><span className="brand-symbol"><Waves size={24} /></span><span>Dive Centre<span className="brand-subtitle">Workspace</span></span></a>
+      <a className="brand" href="#home" onClick={event => { event.preventDefault(); navigate('home'); }}><img className="brand-symbol" src={`${import.meta.env.BASE_URL}logo.png`} alt="" width={297} height={170} /><span>Dive Centre<span className="brand-subtitle">Workspace</span></span></a>
       <button className="sidebar-close icon-button" aria-label="Close navigation" onClick={onClose}><X size={20} /></button>
       <button className={`sidebar-create ${currentTab === 'new-bill' ? 'selected' : ''}`} aria-current={currentTab === 'new-bill' ? 'page' : undefined} onClick={() => navigate('new-bill')}><Plus size={18} />New bill</button>
       <span className="eyebrow nav-caption">Workspace</span>
       <nav className="sidebar-links">{items.map(({ id, icon: Icon }) => <button key={id} onClick={() => navigate(id)} aria-current={currentTab === id ? 'page' : undefined} className={currentTab === id ? 'active' : ''}><Icon size={19} /><span>{navLabels[id]}</span>{currentTab === id && <span className="nav-dot" />}</button>)}</nav>
       {canAdmin && <><span className="eyebrow nav-caption">Settings</span><nav className="sidebar-links"><button className={currentTab === 'admin' ? 'active' : ''} aria-current={currentTab === 'admin' ? 'page' : undefined} onClick={() => navigate('admin')}><Settings size={19} /><span>Administration</span></button></nav></>}
-      <div className="sidebar-bottom"><a href="mailto:dive@devsabah.net"><span>Help & support</span><ArrowUpRight size={16} /></a><span className="sidebar-signature">Sun Diving</span></div>
+      <div className="sidebar-bottom"><a href="mailto:mohamed.maseeh@sunsiyam.com"><span>Help & support</span><ArrowUpRight size={16} /></a><span className="sidebar-signature">Sun Diving</span></div>
     </aside>
   </>;
 };

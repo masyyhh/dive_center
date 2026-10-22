@@ -109,3 +109,32 @@ test('production preparation supports no-domain and IP address deployments with 
   assert(contentIp.includes('APP_DOMAIN=:80'));
   assert(contentIp.includes('CORS_ORIGIN=http://192.168.1.50,http://localhost,http://127.0.0.1'));
 });
+
+test('API entrypoint migrates before serving, fails closed on migration error and leaves tooling commands alone', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dcm-entrypoint-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const entrypoint = path.join(root, 'entrypoint.sh');
+  fs.copyFileSync(path.join(source, 'backend/entrypoint.sh'), entrypoint);
+  const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
+  const log = path.join(root, 'calls.log');
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh
+printf '%s\\n' "$*" >> "$ENTRYPOINT_TEST_LOG"
+if [ "$1" = tools/prisma.cjs ] && [ "\${MIGRATION_FAIL:-}" = 1 ]; then exit 7; fi
+`, { mode: 0o755 });
+  const secret = path.join(root, 'database-url');
+  fs.writeFileSync(secret, 'postgresql://fixture');
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, ENTRYPOINT_TEST_LOG: log, DATABASE_URL: '', DATABASE_URL_FILE: secret, PRISMA_SCHEMA_ENGINE_BINARY: '/fixture-engine' };
+  const run = (args, extra = {}) => spawnSync('sh', [entrypoint, ...args], { cwd: root, env: { ...env, ...extra }, encoding: 'utf8' });
+  const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n');
+  assert.equal(run(['node', 'dist/index.js']).status, 0);
+  assert.deepEqual(calls(), ['tools/prisma.cjs migrate deploy', 'dist/index.js']);
+  fs.writeFileSync(log, '');
+  assert.equal(run(['node', 'dist/index.js'], { MIGRATION_FAIL: '1' }).status, 7);
+  assert.deepEqual(calls(), ['tools/prisma.cjs migrate deploy']);
+  fs.writeFileSync(log, '');
+  assert.equal(run(['node', 'tools/prisma.cjs', 'migrate', 'deploy']).status, 0);
+  assert.deepEqual(calls(), ['tools/prisma.cjs migrate deploy']);
+  fs.writeFileSync(log, '');
+  assert.equal(run(['node', 'dist/scripts/bootstrap-admin.js']).status, 0);
+  assert.deepEqual(calls(), ['dist/scripts/bootstrap-admin.js']);
+});

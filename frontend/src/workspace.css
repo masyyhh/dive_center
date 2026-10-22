@@ -25,7 +25,7 @@
 .app-shell { background: var(--canvas); }
 .sidebar { width: 216px; padding: 27px 16px 20px; background: var(--surface); border-right: 1px solid var(--border); color: var(--muted); }
 .brand { gap: 10px; color: var(--ink); font-size: 16px; font-weight: 650; letter-spacing: -.035em; padding: 0 8px; }
-.brand-symbol { background: transparent; color: var(--ink); width: 28px; height: 32px; border-radius: 0; }
+.brand-symbol { display: block; background: transparent; width: 42px; height: auto; object-fit: contain; border-radius: 0; }
 .brand-subtitle { font-size: 11px; color: var(--muted); letter-spacing: 0; font-weight: 400; margin-top: 0; }
 .sidebar-create { margin: 34px 4px 0; background: var(--action); color: var(--action-text); border-radius: 6px; padding: 9px 12px; min-height: 38px; font-size: 13px; font-weight: 500; }
 .sidebar-create:hover, .sidebar-create.selected { background: var(--action); opacity: .85; }

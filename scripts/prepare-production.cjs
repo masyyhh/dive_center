@@ -8,9 +8,16 @@ const isIpv4 = Boolean(target && /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[
 const isLocalhost = Boolean(target && /^localhost(?::[0-9]{1,5})?$/i.test(target));
 const isNoDomain = Boolean(target && (/^:80$/i.test(target) || /^--no-domain$/i.test(target) || isIpv4 || isLocalhost));
 
-if ((!isDomain && !isNoDomain) ||
-    !email || email.length > 254 || !/^[^\s=@$#"'`\\]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+if (!target || (!isDomain && !isNoDomain)) {
+  console.error('Error: Invalid domain or host target.');
   console.error('Usage: node scripts/prepare-production.cjs [app.example.com | <server-ip> | --no-domain] admin@example.com');
+  process.exit(1);
+}
+
+if (!email || email.length > 254 || !/^[^\s=@$#"'`\\]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  console.error('Error: Missing or invalid administrator email.');
+  console.error(`Usage: node scripts/prepare-production.cjs ${target} admin@example.com`);
+  console.error('The email is required for Let\'s Encrypt TLS renewal notices and your initial admin login.');
   process.exit(1);
 }
 
