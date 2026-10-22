@@ -14,6 +14,8 @@ compose run --rm backend npm run migrate:deploy
 bootstrap run --rm backend npm run bootstrap:admin
 compose up -d --wait --wait-timeout 120
 curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 http://127.0.0.1/api/ready > /dev/null
+# Compare bytes so the SPA's HTML fallback cannot hide a missing logo.
+curl --fail --silent --show-error http://127.0.0.1/logo.png | cmp frontend/public/logo.png -
 bootstrap run --rm -e CI=true -e SMOKE_TEST=1 backend node tools/smoke-production.cjs
 archive=$(sh scripts/backup.sh)
 # Restore to a distinct database, not over the running fixture application.

@@ -6,6 +6,8 @@
 !tailwind.config.js
 !postcss.config.js
 !index.html
+!public/
+!public/**
 !src/
 !src/**
 !deploy/
