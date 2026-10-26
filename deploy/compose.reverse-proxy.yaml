@@ -15,4 +15,5 @@ services:
     volumes:
       - ./deploy/Caddyfile.reverse-proxy:/etc/caddy/Caddyfile:ro
     cap_drop: [ALL]
-    cap_add: !reset []
+    # Required to execute the capability-marked official Caddy binary.
+    cap_add: [NET_BIND_SERVICE]
