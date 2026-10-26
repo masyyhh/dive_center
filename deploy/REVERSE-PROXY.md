@@ -9,7 +9,7 @@ the API only; pointing the entire website at it will not serve React.
 
 When the server and proxy private IPs are not yet known, use the separate
 `deploy/compose.reverse-proxy-open.yaml` override. It publishes HTTP ports
-5001 (API) and 8080 (website files) on all IPv4 interfaces without a source-IP
+5001 (API) and 8080 (website with API forwarding) on all IPv4 interfaces without a source-IP
 allowlist. It replaces the server's public Caddy 80/443 mappings. No IP variables
 are required. Network/provider firewalls still need to permit those ports;
 Compose does not modify those external firewalls.
@@ -25,9 +25,11 @@ logging, security headers or request limits. Rate limits and audit IPs use the
 actual TCP peer, so users behind the same proxy share its rate limit bucket.
 The proxy routing example below still applies. Public users should use the
 proxy's HTTPS domain; these HTTP upstreams do not encrypt passwords or tokens.
-Opening both ports does not make the React frontend call a separate API port:
-the external proxy must still route `/api` and `/api/*` to 5001 and other paths
-to 8080 under the same HTTPS origin.
+Port 8080 forwards `/api` and `/api/*` to Node, so temporary direct access to
+`http://SERVER_IP:8080` works for the website and API on the same origin.
+Requests through Caddy share its backend rate-limit bucket while forwarded
+header trust is disabled. The external proxy can either forward the entire
+origin to 8080 in this temporary mode, or use the split routing example below.
 
 When the addresses become available, configure the private bind IP and trusted
 proxy IP below, restrict network access, and switch from the open override to
@@ -77,7 +79,9 @@ private subnet to work around a 403.
 The override defaults to loopback when the bind IP is omitted and refuses to
 start without the trusted proxy address. It replaces the web port mappings,
 removing public 80/443 from this server. It disables Caddy's certificate
-issuance and uses Caddy only to serve static files over HTTP on port 8080.
+issuance and uses Caddy to serve the website over HTTP on port 8080. In the
+restricted mode, keep the split routing below: API requests forwarded through
+Caddy are rejected unless its source address is explicitly trusted as well.
 The Node gate rejects non-proxy API clients and requires forwarded HTTPS,
 except for read-only health/readiness probes. API responses use no-store.
 Existing authentication, RBAC, rate limits, audit logging, request body limits,
@@ -130,7 +134,7 @@ listener should redirect to the HTTPS hostname without forwarding API bodies.
 ## Verification before using real accounts
 
 From the proxy server, `/api/ready` on port 5001 must return 200, `/` on 8080
-must serve HTML, and `/api/*` on 8080 must return 404. An API request through
+must serve HTML, and `/api/ready` on 8080 must return 200. An API request through
 the trusted proxy with `X-Forwarded-Proto: https` reaches normal authentication
 (e.g. `/api/users` returns 401 without a token). Without the HTTPS header it
 returns 403. From other private/public hosts, firewall rules must prevent TCP
