@@ -228,14 +228,24 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const handleCreateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isGlobalAdmin || propertyCreating) return;
+    const name = propForm.name.trim();
+    const code = propForm.code.trim().toUpperCase();
+    if (name.length < 2) {
+      setErrorMsg('Property name must contain at least 2 characters.');
+      return;
+    }
+    if (code.length < 2 || code.length > 10) {
+      setErrorMsg('Property code must contain 2–10 characters, for example OLHU or SUN-BAA.');
+      return;
+    }
     setPropertyCreating(true); setErrorMsg(null);
     try {
       await apiFetch('/properties', {
         method: 'POST',
-        body: JSON.stringify(propForm),
+        body: JSON.stringify({ ...propForm, name, code }),
       });
       setShowPropertyModal(false);
-      showNotification(`Property '${propForm.name}' created successfully.`);
+      showNotification(`Property '${name}' created successfully.`);
       setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001 });
       await refreshProperties();
     } catch (err: any) {

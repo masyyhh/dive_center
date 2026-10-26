@@ -59,6 +59,16 @@ test('global admin creates a property with standard categories, validated inputs
   assert.equal((await call('POST', '/', { name: 'Duplicate', code: 'new' })).status, 409);
   assert.equal((await call('POST', '/', { name: '   ', code: 'BAD' })).status, 400);
 });
+test('invalid property codes return actionable errors without creating a property or audit entry', async () => {
+  for (const code of ['', ' ', 'A', ' A ', 'ABCDEFGHIJK']) {
+    const result = await call('POST', '/', { name: 'New Centre', code });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /Property code/);
+    assert.deepEqual(result.body.details[0].path, ['code']);
+  }
+  assert.equal(await prisma.property.count(), 2);
+  assert.equal(await prisma.auditLog.count(), 0);
+});
 test('deletion requires the matching property code and handles unknown or already removed properties', async () => {
   for (const body of [{}, { confirmationCode: 'wrong' }, { confirmationCode: ['ARCH'] }]) assert.equal((await remove(body)).status, 400);
   assert.equal((await prisma.property.findUnique({ where: { id: 'archive' } })).deletedAt, null);

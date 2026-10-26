@@ -74,7 +74,7 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
   try {
     const parseResult = propertySchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
+      return res.status(400).json({ error: parseResult.error.errors[0].message, details: parseResult.error.errors });
     }
 
     const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
