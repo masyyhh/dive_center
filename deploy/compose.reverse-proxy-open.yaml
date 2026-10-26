@@ -1,0 +1,17 @@
+# Temporary unrestricted source access. Use instead of the restricted override,
+# not together with it. The external proxy remains responsible for HTTPS.
+services:
+  backend:
+    environment:
+      TRUST_PROXY: "0"
+      TRUST_PROXY_ADDRESSES: !reset null
+      REQUIRE_TRUSTED_PROXY: "0"
+    ports:
+      - "0.0.0.0:5001:5001"
+  web:
+    ports: !override
+      - "0.0.0.0:8080:8080"
+    volumes:
+      - ./deploy/Caddyfile.reverse-proxy:/etc/caddy/Caddyfile:ro
+    cap_drop: [ALL]
+    cap_add: !reset []

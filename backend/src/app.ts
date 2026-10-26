@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from 'express';
 
 import { prisma } from './db';
 import { configureSecurity, apiLimiter } from './middleware/security';
+import { configureProxySecurity } from './middleware/proxy';
 import { guestsRouter } from './routes/guests.routes';
 import { passwordRouter } from './routes/password.routes';
 import { authRouter } from './routes/auth.routes';
@@ -19,8 +20,8 @@ const app = express();
 
 // Setup Security, Helmet, CORS
 app.disable('x-powered-by');
-app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
 configureSecurity(app);
+configureProxySecurity(app);
 
 // JSON and URL-encoded body parser
 app.use(express.json({ limit: '5mb' }));

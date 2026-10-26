@@ -27,9 +27,8 @@ services:
   backend:
     build:
       context: ./backend
-      network: host
       args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm}
     restart: unless-stopped
     init: true
     environment:
@@ -40,7 +39,6 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}}
       PMS_API_KEY_FILE: /run/secrets/pms_api_key
       TRUST_PROXY: "1"
-      PRISMA_SCHEMA_ENGINE_BINARY: /app/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x
     secrets:
       - database_url
       - authenticator_key
@@ -70,7 +68,6 @@ services:
   web:
     build:
       context: ./frontend
-      network: host
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2-alpine}

@@ -1,0 +1,18 @@
+# Compose >= 2.24.4. Paths resolve from the root compose.yaml.
+# TLS terminates at the external proxy. Publish on loopback unless using a
+# firewall-restricted private interface. Never expose these HTTP ports publicly.
+services:
+  backend:
+    environment:
+      TRUST_PROXY: "0"
+      TRUST_PROXY_ADDRESSES: ${REVERSE_PROXY_TRUSTED_IPS:?Set the proxy source IPs seen by Node, separated by commas}
+      REQUIRE_TRUSTED_PROXY: "1"
+    ports:
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:5001:5001"
+  web:
+    ports: !override
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:8080:8080"
+    volumes:
+      - ./deploy/Caddyfile.reverse-proxy:/etc/caddy/Caddyfile:ro
+    cap_drop: [ALL]
+    cap_add: !reset []

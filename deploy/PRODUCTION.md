@@ -1,5 +1,10 @@
 # Production hosting guide
 
+For TLS terminated by a reverse proxy on another private server, use the
+[external reverse proxy guide](REVERSE-PROXY.md) instead of publishing Caddy's
+public HTTPS listener. It covers Node port 5001, frontend port 8080, proxy
+trust, private bindings and firewall requirements.
+
 This guide deploys a small, single-server installation using PostgreSQL 18, the Node API and Caddy HTTPS. It is not a high-availability design. The database persists in the `postgres_data` Docker volume at `/var/lib/postgresql`; only Caddy publishes host ports. Use a separate staging server/project before admitting real guests or financial records.
 
 ## 1. Release gate
