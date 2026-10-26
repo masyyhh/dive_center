@@ -94,20 +94,29 @@ test('local secret setup preserves other settings and existing generated keys', 
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   }
 });
-test('production preparation supports no-domain and IP address deployments with HTTP port 80 and CORS', t => {
+test('production preparation requires HTTPS and rejects unsafe existing config without changing keys', t => {
+  for (const target of ['--no-domain', ':80', '192.168.1.50', '127.0.0.1:80', 'localhost', 'http://dive.example.test']) {
+    const root = fixture(t, 'prepare-production.cjs');
+    const result = spawnSync(process.execPath, [path.join(root, 'scripts/prepare-production.cjs'), target, 'admin@example.test'], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.equal(fs.existsSync(path.join(root, 'secrets')), false);
+  }
   const root = fixture(t, 'prepare-production.cjs');
-  const resNoDomain = spawnSync(process.execPath, [path.join(root, 'scripts/prepare-production.cjs'), '--no-domain', 'admin@example.test'], { encoding: 'utf8' });
-  assert.equal(resNoDomain.status, 0);
-  const contentNoDomain = fs.readFileSync(path.join(root, '.env.production'), 'utf8');
-  assert(contentNoDomain.includes('APP_DOMAIN=:80'));
-  assert(contentNoDomain.includes('CORS_ORIGIN=http://localhost,http://127.0.0.1'));
-
-  const rootIp = fixture(t, 'prepare-production.cjs');
-  const resIp = spawnSync(process.execPath, [path.join(rootIp, 'scripts/prepare-production.cjs'), '192.168.1.50', 'admin@example.test'], { encoding: 'utf8' });
-  assert.equal(resIp.status, 0);
-  const contentIp = fs.readFileSync(path.join(rootIp, '.env.production'), 'utf8');
-  assert(contentIp.includes('APP_DOMAIN=:80'));
-  assert(contentIp.includes('CORS_ORIGIN=http://192.168.1.50,http://localhost,http://127.0.0.1'));
+  assert.equal(prepare(root).status, 0);
+  const file = path.join(root, '.env.production');
+  const safe = fs.readFileSync(file, 'utf8');
+  assert(safe.includes('APP_DOMAIN=dive.example.test'));
+  assert(safe.includes('CORS_ORIGIN=https://dive.example.test'));
+  const keyFile = path.join(root, 'secrets/jwt_secret');
+  const key = fs.readFileSync(keyFile, 'utf8');
+  for (const unsafe of ['APP_DOMAIN=:80\nCORS_ORIGIN=http://localhost\n', 'APP_DOMAIN=dive.example.test\nCORS_ORIGIN=http://dive.example.test\n', 'APP_DOMAIN=dive.example.test\nCORS_ORIGIN=https://other.example.test\n']) {
+    fs.writeFileSync(file, unsafe);
+    assert.notEqual(prepare(root).status, 0);
+    assert.equal(fs.readFileSync(file, 'utf8'), unsafe);
+    assert.equal(fs.readFileSync(keyFile, 'utf8'), key);
+  }
+  fs.writeFileSync(file, safe);
+  assert.equal(prepare(root).status, 0);
 });
 
 test('API entrypoint migrates before serving, fails closed on migration error and leaves tooling commands alone', t => {

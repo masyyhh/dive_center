@@ -3,7 +3,7 @@
   admin off
 }
 
-{$APP_DOMAIN} {
+https://{$APP_DOMAIN} {
   encode zstd gzip
   @https protocol https
   header @https Strict-Transport-Security "max-age=31536000"

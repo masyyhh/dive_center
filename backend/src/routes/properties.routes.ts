@@ -57,8 +57,8 @@ propertiesRouter.get('/', requireAuth, async (req: Request, res: Response) => {
 });
 
 const propertySchema = z.object({
-  name: z.string().trim().min(2),
-  code: z.string().trim().min(2).max(10),
+  name: z.string().trim().min(2, 'Property name must contain at least 2 characters.'),
+  code: z.string().trim().min(2, 'Property code must contain at least 2 characters (e.g. SUN-BAA, OLHU).').max(10, 'Property code cannot exceed 10 characters.'),
   location: z.string().optional(),
   pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length, 'Choose each resort once.').optional(),
   pmsPropertyCode: pmsPropertyCodeSchema.nullish().or(z.literal('')).transform(value => value || null),

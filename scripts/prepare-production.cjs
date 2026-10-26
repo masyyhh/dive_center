@@ -1,16 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
+const { parseEnv } = require('node:util');
 
 const [target, email] = process.argv.slice(2);
-const isDomain = Boolean(target && target.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(target));
-const isIpv4 = Boolean(target && /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(?::[0-9]{1,5})?$/.test(target));
-const isLocalhost = Boolean(target && /^localhost(?::[0-9]{1,5})?$/i.test(target));
-const isNoDomain = Boolean(target && (/^:80$/i.test(target) || /^--no-domain$/i.test(target) || isIpv4 || isLocalhost));
+const validDomain = value => Boolean(value && value.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(value));
 
-if (!target || (!isDomain && !isNoDomain)) {
-  console.error('Error: Invalid domain or host target.');
-  console.error('Usage: node scripts/prepare-production.cjs [app.example.com | <server-ip> | --no-domain] admin@example.com');
+if (!validDomain(target)) {
+  console.error('Production requires a domain with HTTPS. IP addresses and HTTP/no-domain mode are not supported.');
+  console.error('Usage: node scripts/prepare-production.cjs app.example.com admin@example.com');
   process.exit(1);
 }
 
@@ -21,12 +19,8 @@ if (!email || email.length > 254 || !/^[^\s=@$#"'`\\]+@[^\s@]+\.[^\s@]+$/.test(e
   process.exit(1);
 }
 
-const appDomain = isDomain ? target.toLowerCase() : ':80';
-const corsOrigin = isDomain
-  ? `https://${target.toLowerCase()}`
-  : isIpv4
-  ? `http://${target.toLowerCase()},http://localhost,http://127.0.0.1`
-  : 'http://localhost,http://127.0.0.1';
+const appDomain = target.toLowerCase();
+const corsOrigin = `https://${appDomain}`;
 const root = path.resolve(__dirname, '..');
 const directory = path.join(root, 'secrets');
 const regularFile = file => {
@@ -34,6 +28,16 @@ const regularFile = file => {
   if (!stat.isFile() || stat.isSymbolicLink()) throw Error('Secret/configuration paths must be regular files.');
 };
 try {
+  const existingEnv = path.join(root, '.env.production');
+  if (fs.existsSync(existingEnv)) {
+    regularFile(existingEnv);
+    const config = parseEnv(fs.readFileSync(existingEnv, 'utf8'));
+    const origins = (config.CORS_ORIGIN || '').split(',').map(value => value.trim());
+    if (!validDomain(config.APP_DOMAIN) || !origins.includes(`https://${config.APP_DOMAIN.toLowerCase()}`) || origins.some(value => {
+      try { const url = new URL(value); return url.protocol !== 'https:' || url.origin !== value || !validDomain(url.hostname); }
+      catch { return true; }
+    })) throw Error('Existing .env.production requires an HTTPS APP_DOMAIN and matching HTTPS CORS_ORIGIN. Update both privately before retrying; existing configuration and keys were preserved.');
+  }
   if (fs.existsSync(directory) && (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink())) throw Error('Invalid secrets directory.');
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   fs.chmodSync(directory, 0o700);

@@ -56,7 +56,17 @@ export async function apiFetch<T>(
     let requestId: string | undefined;
     try {
       const errorJson = await response.json();
-      errorMessage = errorJson.error || errorMessage;
+      if (errorJson.error) {
+        if (Array.isArray(errorJson.details) && errorJson.details.length > 0) {
+          const detailMessages = errorJson.details
+            .map((d: any) => (d.path?.length ? `${d.path.join('.')}: ` : '') + (d.message || d.code))
+            .filter(Boolean)
+            .join('; ');
+          errorMessage = detailMessages ? `${errorJson.error} (${detailMessages})` : errorJson.error;
+        } else {
+          errorMessage = errorJson.error;
+        }
+      }
       if (typeof errorJson.requestId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(errorJson.requestId)) requestId = errorJson.requestId;
     } catch {
       // ignore

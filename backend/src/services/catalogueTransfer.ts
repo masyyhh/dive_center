@@ -1,5 +1,4 @@
-import ExcelJS from 'exceljs';
-import { Readable } from 'node:stream';
+import { parseCatalogueCells } from './catalogueParser';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 
@@ -34,23 +33,18 @@ export const nextItemCode = async (tx: Prisma.TransactionClient, propertyId: str
 export const parseCatalogue = async (content: string, format: 'csv' | 'xlsx'): Promise<CatalogueRow[]> => {
   const bytes = Buffer.from(content, 'base64');
   if (!bytes.length || bytes.length > 3 * 1024 * 1024) throw new CatalogueError('Choose a CSV or Excel file up to 3 MB.');
-  const workbook = new ExcelJS.Workbook();
+  let cells: string[][];
   try {
-    if (format === 'csv') await workbook.csv.read(Readable.from(bytes), { map: value => value });
-    else await workbook.xlsx.load(bytes as any);
-  } catch { throw new CatalogueError('The file could not be read. Choose a valid CSV or Excel workbook.'); }
-  const sheet = workbook.worksheets[0];
-  if (!sheet || sheet.rowCount > 2001) throw new CatalogueError('Import up to 2,000 items at a time.');
+    cells = await parseCatalogueCells(bytes, format);
+  } catch (error) { throw new CatalogueError(error instanceof Error ? error.message : 'The file could not be read. Choose a valid CSV or Excel workbook.'); }
   const text = (row: number, col: number): string => {
-    const cell = sheet.getRow(row).getCell(col);
-    if (cell.type === ExcelJS.ValueType.Formula || cell.type === ExcelJS.ValueType.Error) throw new CatalogueError(`Row ${row}: use values rather than formulas or errors.`);
-    const value = cell.text.trim();
+    const value = cells[row - 1]?.[col - 1] || '';
     return /^'+[\s\x00-\x1f]*[=+\-@]/.test(value) ? value.slice(1) : value;
   };
-  if (catalogueHeaders.some((header, index) => text(1, index + 1).toLowerCase() !== header.toLowerCase()) || sheet.columnCount > 6) throw new CatalogueError(`Use these six columns in order: ${catalogueHeaders.join(', ')}.`);
+  if (catalogueHeaders.some((header, index) => text(1, index + 1).toLowerCase() !== header.toLowerCase())) throw new CatalogueError(`Use these six columns in order: ${catalogueHeaders.join(', ')}.`);
   const rows: CatalogueRow[] = [];
   const codes = new Set<string>();
-  for (let row = 2; row <= sheet.rowCount; row++) {
+  for (let row = 2; row <= cells.length; row++) {
     const [code, name, category, priceText, commissionText, status] = catalogueHeaders.map((_, index) => text(row, index + 1));
     if (![code, name, category, priceText, commissionText, status].some(Boolean)) continue;
     if (code.length > 50 || name.length < 2 || name.length > 200 || !category || category.length > 80 || !priceText || !Number.isFinite(Number(priceText)) || Number(priceText) < 0 || !['active', 'inactive'].includes(status.toLowerCase())) throw new CatalogueError(`Row ${row}: enter an item, category, nonnegative price and Active or Inactive status.`);

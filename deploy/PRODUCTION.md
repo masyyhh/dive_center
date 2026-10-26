@@ -45,39 +45,31 @@ docker compose version
 
 From the repository root, with Node 22 or 24 on the host:
 
-**Option A: With a registered domain (automatic HTTPS via Let's Encrypt / ZeroSSL):**
+Production requires a registered domain and HTTPS. Point its DNS at this server before starting Caddy. Public IP/no-domain HTTP hosting is no longer supported because it exposes passwords and sessions.
 
 ```sh
 umask 077
 node scripts/prepare-production.cjs dive.your-domain.com admin@your-domain.com
 ```
 
-**Option B: Without a domain (HTTP on port 80 using server IP or hostname):**
-
-```sh
-umask 077
-# Pass your VPS / server IP, or --no-domain:
-node scripts/prepare-production.cjs 192.168.1.50 admin@your-domain.com
-# or:
-# node scripts/prepare-production.cjs --no-domain admin@your-domain.com
-```
-
-If Node is not installed on the host, the equivalent uses the official Node image as your own UID/GID:
+If Node is not installed on the host, use the official Node image as your own UID/GID:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" \
   --volume "$PWD:/workspace" --workdir /workspace \
   node:22-bookworm-slim \
-  node scripts/prepare-production.cjs --no-domain admin@your-domain.com
+  node scripts/prepare-production.cjs dive.your-domain.com admin@your-domain.com
 ```
 
 Preparation creates `.env.production` (0600) and `secrets/` (0700) with independently generated signing, encryption, app/admin database and bootstrap passwords. Existing keys/configuration are preserved; inconsistent existing database credentials fail rather than being silently replaced. Secret files are 0444 inside the private parent so nonroot containers can read their selected mounts. Do not loosen the directory's permissions. Keep the checkout on a private local filesystem; verify host ACLs as well as modes.
 
 Review `.env.production` privately:
-- In no-domain mode, `APP_DOMAIN` is `:80` and `CORS_ORIGIN` is configured for HTTP. Caddy binds port 80 for HTTP without attempting ACME certificates.
-- In domain mode, `APP_DOMAIN` contains the FQDN and Caddy automatically manages certificates and redirects HTTP to HTTPS.
-- When an application domain is acquired later, simply update `APP_DOMAIN=dive.your-domain.com` in `.env.production` and run `docker compose up -d` to switch to HTTPS seamlessly.
+- `APP_DOMAIN` must be the FQDN without a scheme, path or port. Caddy explicitly enables HTTPS and redirects HTTP to HTTPS.
+- `CORS_ORIGIN` must include `https://` followed by that domain. Any additional allowed origins must also use HTTPS.
+- For an existing HTTP installation, update **both** `APP_DOMAIN=dive.your-domain.com` and `CORS_ORIGIN=https://dive.your-domain.com` before rebuilding. Preparation rejects unsafe existing configuration without replacing it or rotating keys. Preserve the original `secrets/` and database volume.
+- Rebuild and restart with `docker compose --env-file .env.production up -d --build`, then verify HTTPS before signing in. The new Caddy configuration will not serve plaintext browser traffic even if an old `:80` address is left behind.
 - Use `docker compose ... config --quiet` to validate without printing interpolated configuration.
+- Keep the CI-only HTTP configuration confined to disposable CI; never use `deploy/compose.smoke.yaml` for public hosting.
 
 For optional PMS lookup, edit the private `secrets/pms_api_key` file using a trusted editor/password manager. It is empty by default, disabling lookup. Temporarily make it owner-writable to edit, then return it to 0444. Never put the value in shell history, frontend settings, Git, issue reports or logs. Earlier configurations using `.env.production`'s `PMS_API_KEY` must move the value to this file; Compose now reads `PMS_API_KEY_FILE`. Direct deployments may use either raw value or `_FILE`, never both. Resort mappings are editable only by global administrators.
 
@@ -256,3 +248,9 @@ docker compose --env-file .env.production up -d --wait --wait-timeout 120 backen
 Proceed to the next command only if the preceding command succeeds. These commands apply the bundled migrations to the existing database; they do not reset it. If migration deployment fails, inspect that error before restarting the API. Do not use `migrate reset`, delete the PostgreSQL volume, or mark an unapplied migration as applied.
 
 The backend container now runs `migrate deploy` before its default API command, and refuses to start the API if migration deployment fails. One-off migration and bootstrap commands still run directly. Explicit migration deployment remains useful during a controlled release and when repairing an older running image.
+
+## Catalogue import resource limits
+
+Catalogue CSV/XLSX parsing runs in one worker at a time with a 10-second deadline and a separate V8 heap budget (96 MiB old generation, 16 MiB young generation). Overlapping imports return a retry message. The upload cap remains 3 MiB, with up to 2,000 item rows and six columns. XLSX archives additionally allow at most 64 entries, 2 MiB of actual expanded bytes per entry and 8 MiB total; unused entries count too. Before copying values back into the API, text is limited to 4 KiB per cell and 2 MiB in total, including repeated shared strings. Formatting-only merge and column-width ranges are ignored. These limits apply equally to preview and commit. Workbook parsing failure must not interrupt other API requests.
+
+The general API limiter now runs before persistent request auditing. Over-budget traffic returns 429 without one database insert per rejected request; admitted request and explicit business/security event auditing remain enabled. Define database audit retention and alerting for admitted traffic as part of normal operations.

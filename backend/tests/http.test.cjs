@@ -56,3 +56,42 @@ test('HTTP audit records request outcomes and access times while omitting query 
   assert(!Number.isNaN(Date.parse(details.startedAt)));
   assert(!entry.details.includes('private-value'));
 });
+
+test('requests rejected by the API limiter stop writing database audit rows', async () => {
+  const headers = { 'X-Forwarded-For': '192.0.2.80' };
+  // Health requests consume the real limiter budget without producing audit rows.
+  for (let i = 0; i < 1000; i++) {
+    const response = await fetch(`${origin}/api/health`, { headers });
+    assert.equal(response.status, 200);
+    await response.arrayBuffer();
+  }
+  const before = auditEntries.length;
+  for (const path of ['/api/users', '/api/nonexistent', '/api/audit?secret=omitted']) {
+    const response = await fetch(`${origin}${path}`, { headers });
+    assert.equal(response.status, 429);
+    await response.arrayBuffer();
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(auditEntries.length, before);
+  // An admitted request from another client must still be audited.
+  assert.equal((await fetch(`${origin}/api/users`, { headers: { 'X-Forwarded-For': '192.0.2.81' } })).status, 401);
+  assert.equal(auditEntries.length, before + 1);
+});
+
+test('rejecting an amplified workbook leaves ordinary API requests responsive', async () => {
+  const ExcelJS = require('exceljs');
+  const JSZip = require('jszip');
+  const { parseCatalogue, catalogueHeaders } = loadTypeScript('src/services/catalogueTransfer.ts');
+  const book = new ExcelJS.Workbook(); const sheet = book.addWorksheet('Catalogue');
+  sheet.addRow(catalogueHeaders); sheet.addRow(['', 'Boat dive', 'Diving', 75, 10, 'Active']);
+  const archive = await JSZip.loadAsync(await book.xlsx.writeBuffer());
+  archive.file('unused.txt', Buffer.alloc(2 * 1024 * 1024 + 1, 65));
+  const content = (await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })).toString('base64');
+  const rejected = assert.rejects(parseCatalogue(content, 'xlsx'), /expanded data limit/);
+  const response = await fetch(`${origin}/api/health`, { headers: { 'X-Forwarded-For': '192.0.2.82' } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).status, 'healthy');
+  await rejected;
+  const valid = Buffer.from('Item Code,Items,Category,Price,Commission,Status\n,Boat dive,Diving,75,10,Active').toString('base64');
+  assert.equal((await parseCatalogue(valid, 'csv')).length, 1);
+});

@@ -987,6 +987,37 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Property Code *
+                  </label>
+                  <input id="adminview-field-2"
+                    type="text"
+                    required
+                    minLength={2}
+                    maxLength={10}
+                    value={propForm.code}
+                    onChange={(e) => setPropForm({ ...propForm, code: e.target.value.toUpperCase() })}
+                    placeholder="SUN-BAA"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">2-10 characters (e.g. SUN-BAA, OLHU)</p>
+                </div>
+                <div>
+                  <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Location (optional)
+                  </label>
+                  <input id="adminview-field-3"
+                    type="text"
+                    value={propForm.location}
+                    onChange={(e) => setPropForm({ ...propForm, location: e.target.value })}
+                    placeholder="e.g. Baa Atoll"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  />
+                </div>
+              </div>
+
               <fieldset className="space-y-2"><legend>PMS resorts (optional)</legend><div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => <label key={code} className="flex items-center gap-1"><input type="checkbox" checked={propForm.pmsPropertyCodes.includes(code)} onChange={e => setPropForm({ ...propForm, pmsPropertyCodes: e.target.checked ? [...propForm.pmsPropertyCodes, code] : propForm.pmsPropertyCodes.filter(value => value !== code) })} />{code}</label>)}</div></fieldset>
 
               <div className="grid grid-cols-3 gap-3">

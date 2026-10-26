@@ -41,7 +41,8 @@ export const lookupInhouseGuests = async (propertyCode: typeof pmsPropertyCodes[
     let response: globalThis.Response;
     try {
       response = await fetch(url, { headers: { 'X-API-Key': key, Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(8000) });
-    } catch {
+    } catch (err) {
+      console.error('PMS fetch error:', err instanceof Error ? err.message : err);
       throw new PmsLookupError(503, 'The PMS could not be reached. Try again or enter guest details manually.');
     }
     const requestId = safeRequestId(response);

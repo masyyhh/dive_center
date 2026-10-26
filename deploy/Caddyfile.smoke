@@ -1,0 +1,14 @@
+# Disposable CI only. Production always uses frontend/deploy/Caddyfile and HTTPS.
+{
+  admin off
+}
+:80 {
+  handle /api/* {
+    reverse_proxy backend:5001
+  }
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    file_server
+  }
+}

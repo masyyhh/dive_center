@@ -2,5 +2,7 @@
 # Never include this override in a public deployment.
 services:
   web:
+    volumes:
+      - ./deploy/Caddyfile.smoke:/etc/caddy/Caddyfile:ro
     environment:
       APP_DOMAIN: ":80"
