@@ -1,4 +1,5 @@
 import { pmsPropertyCodeSchema } from '../services/pmsService';
+import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -58,7 +59,8 @@ propertiesRouter.get('/', requireAuth, async (req: Request, res: Response) => {
 
 const propertySchema = z.object({
   name: z.string().trim().min(2, 'Property name must contain at least 2 characters.'),
-  code: z.string().trim().min(2, 'Property code must contain at least 2 characters (e.g. SUN-BAA, OLHU).').max(10, 'Property code cannot exceed 10 characters.'),
+  code: z.preprocess(value => typeof value === 'string' && !value.trim() ? undefined : value,
+    z.string().trim().min(2, 'Property code must contain at least 2 characters (e.g. SUN-BAA, OLHU).').max(10, 'Property code cannot exceed 10 characters.').optional()),
   location: z.string().optional(),
   pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length, 'Choose each resort once.').optional(),
   pmsPropertyCode: pmsPropertyCodeSchema.nullish().or(z.literal('')).transform(value => value || null),
@@ -80,15 +82,17 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
     const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
       parseResult.data;
 
-    const existing = await prisma.property.findUnique({ where: { code: code.toUpperCase() } });
+    const baseCode = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 10).replace(/-$/, '');
+    let propertyCode = code?.toUpperCase() ?? (baseCode.length >= 2 ? baseCode : 'PROPERTY');
+    const existing = code && await prisma.property.findUnique({ where: { code: propertyCode } });
     if (existing) {
       return res.status(409).json({ error: `Property code '${code.toUpperCase()}' is already in use, including retained historical properties. Choose another code.` });
     }
 
-    const property = await prisma.property.create({
+    const createProperty = () => prisma.property.create({
       data: {
         name,
-        code: code.toUpperCase(),
+        code: propertyCode,
         pmsPropertyCodes: pmsPropertyCodes ?? (pmsPropertyCode ? [pmsPropertyCode] : []),
         pmsPropertyCode: pmsPropertyCodes ? pmsPropertyCodes[0] ?? null : pmsPropertyCode,
         location,
@@ -108,6 +112,20 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
         },
       },
     });
+
+    // Retry generated codes on the unique constraint, including concurrent creates
+    // and codes reserved by historical properties. Explicit codes stay unchanged.
+    let property;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        property = await createProperty();
+        break;
+      } catch (error) {
+        if (code || (error as any)?.code !== 'P2002' || attempt === 4) throw error;
+        propertyCode = `${propertyCode.slice(0, 5)}-${randomUUID().slice(0, 4).toUpperCase()}`;
+      }
+    }
+    if (!property) throw new Error('Unable to allocate property code.');
 
     await logAuditEvent({
       req,

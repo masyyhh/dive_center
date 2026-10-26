@@ -234,7 +234,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       setErrorMsg('Property name must contain at least 2 characters.');
       return;
     }
-    if (code.length < 2 || code.length > 10) {
+    if (code && (code.length < 2 || code.length > 10)) {
       setErrorMsg('Property code must contain 2–10 characters, for example OLHU or SUN-BAA.');
       return;
     }
@@ -1000,11 +1000,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Property Code *
+                    Property Code (optional)
                   </label>
                   <input id="adminview-field-2"
                     type="text"
-                    required
                     minLength={2}
                     maxLength={10}
                     value={propForm.code}
@@ -1012,7 +1011,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     placeholder="SUN-BAA"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
                   />
-                  <p className="text-xs text-slate-400 mt-1">2-10 characters (e.g. SUN-BAA, OLHU)</p>
+                  <p className="text-xs text-slate-400 mt-1">Leave blank to generate from the name, or enter 2–10 characters.</p>
                 </div>
                 <div>
                   <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">

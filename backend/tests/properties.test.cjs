@@ -60,7 +60,7 @@ test('global admin creates a property with standard categories, validated inputs
   assert.equal((await call('POST', '/', { name: '   ', code: 'BAD' })).status, 400);
 });
 test('invalid property codes return actionable errors without creating a property or audit entry', async () => {
-  for (const code of ['', ' ', 'A', ' A ', 'ABCDEFGHIJK']) {
+  for (const code of ['A', ' A ', 'ABCDEFGHIJK']) {
     const result = await call('POST', '/', { name: 'New Centre', code });
     assert.equal(result.status, 400);
     assert.match(result.body.error, /Property code/);
@@ -68,6 +68,26 @@ test('invalid property codes return actionable errors without creating a propert
   }
   assert.equal(await prisma.property.count(), 2);
   assert.equal(await prisma.auditLog.count(), 0);
+});
+test('the name-only form generates unique codes for omitted, empty and whitespace codes', async () => {
+  const codes = [];
+  for (const code of [undefined, '', '   ']) {
+    const result = await call('POST', '/', { name: 'Villu Reef', code, pmsPropertyCodes: ['VILU'] });
+    assert.equal(result.status, 201);
+    assert.match(result.body.property.code, /^[A-Z0-9-]{2,10}$/);
+    assert.deepEqual(result.body.property.pmsPropertyCodes, ['VILU']);
+    codes.push(result.body.property.code);
+    assert.equal(await prisma.category.count({ where: { propertyId: result.body.property.id } }), 5);
+  }
+  assert.equal(codes[0], 'VILLU-REEF');
+  assert.equal(new Set(codes).size, 3);
+  assert.equal(await prisma.auditLog.count({ where: { action: 'PROPERTY_CREATE' } }), 3);
+});
+test('generated property codes do not reuse retained historical codes', async () => {
+  await remove();
+  const result = await call('POST', '/', { name: 'Arch' });
+  assert.equal(result.status, 201);
+  assert.notEqual(result.body.property.code, 'ARCH');
 });
 test('deletion requires the matching property code and handles unknown or already removed properties', async () => {
   for (const body of [{}, { confirmationCode: 'wrong' }, { confirmationCode: ['ARCH'] }]) assert.equal((await remove(body)).status, 400);
