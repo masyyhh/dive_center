@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
-import { apiFetch, getAuthToken, setAuthToken } from '../services/api';
+import { apiFetch, getAuthToken, setAuthToken, revokeSession } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string; attemptsRemaining?: number; changeToken?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  signingOut: boolean;
+  logoutError: string;
   refreshUser: () => Promise<void>;
 }
 
@@ -14,6 +16,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const [loading, setLoading] = useState<boolean>(true);
 
   const refreshUser = async () => {
@@ -57,14 +61,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = () => {
-    void apiFetch('/auth/logout', { method: 'POST' }).catch(err => console.warn('Could not record sign-out:', err));
-    setAuthToken(null);
-    setUser(null);
+  const logout = async () => {
+    if (signingOut) return;
+    setSigningOut(true); setLogoutError('');
+    try {
+      await revokeSession();
+      setUser(null);
+    } catch (err) {
+      setLogoutError(err instanceof Error ? err.message : 'Could not sign out. Please try again.');
+    } finally { setSigningOut(false); }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, signingOut, logoutError }}>
       {children}
     </AuthContext.Provider>
   );

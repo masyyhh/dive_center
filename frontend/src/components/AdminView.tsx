@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 
 export const AdminView: React.FC<{ section?: string; onSectionChange: (section: string) => void }> = ({ section, onSectionChange }) => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { activeProperty, properties, refreshProperties } = useProperty();
 
   const isGlobalAdmin = user?.role === 'GLOBAL_ADMIN';
@@ -41,11 +41,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     if (section === 'items' || section === 'staff' || section === 'audit' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && section === 'properties'))) setActiveTab(section);
   }, [section, isGlobalAdmin, canManageAccounts]);
   // Properties state
-  const [propertyCreating, setPropertyCreating] = useState(false);
+  const [propertySaving, setPropertySaving] = useState(false);
   const [deletePropertyTarget, setDeletePropertyTarget] = useState<Property | null>(null);
   const [deletePropertyCode, setDeletePropertyCode] = useState('');
   const [propertyDeleting, setPropertyDeleting] = useState(false);
   const closePropertyDelete = () => { if (!propertyDeleting) { setDeletePropertyTarget(null); setDeletePropertyCode(''); setErrorMsg(null); } };
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [showPropertyModal, setShowPropertyModal] = useState<boolean>(false);
   const [propForm, setPropForm] = useState({
     name: '',
@@ -57,9 +58,15 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     taxRate: 16.0,
     serviceChargeRate: 10.0,
     nextCheckNumber: 1001,
+    isActive: true,
   });
 
   // Users state
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userSaving, setUserSaving] = useState(false);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<User | null>(null);
+  const [deleteUsername, setDeleteUsername] = useState('');
+  const [userDeleting, setUserDeleting] = useState(false);
   const [usersList, setUsersList] = useState<User[]>([]);
   const [showUserModal, setShowUserModal] = useState<boolean>(false);
   const [userForm, setUserForm] = useState({
@@ -67,6 +74,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     name: '',
     email: '',
     password: '',
+    isActive: true,
     role: 'CENTRE_STAFF' as User['role'],
     propertyIds: [] as string[],
   });
@@ -224,33 +232,46 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     finally { setPmsSavingProperty(null); }
   };
 
-  // Create Property Handler (Global Admin)
-  const handleCreateProperty = async (e: React.FormEvent) => {
+  const openPropertyForm = (property: Property | null = null) => {
+    setEditingProperty(property);
+    setPropForm(property ? {
+      name: property.name, code: property.code, location: property.location ?? '',
+      pmsPropertyCodes: property.pmsPropertyCodes?.length ? [...property.pmsPropertyCodes] : property.pmsPropertyCode ? [property.pmsPropertyCode] : [],
+      currency: property.currency, currencySymbol: property.currencySymbol,
+      taxRate: property.taxRate, serviceChargeRate: property.serviceChargeRate,
+      nextCheckNumber: property.nextCheckNumber, isActive: property.isActive,
+    } : { name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, isActive: true });
+    setErrorMsg(null);
+    setShowPropertyModal(true);
+  };
+
+  // Save Property Handler (Global Admin)
+  const handleSaveProperty = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isGlobalAdmin || propertyCreating) return;
+    if (!isGlobalAdmin || propertySaving) return;
     const name = propForm.name.trim();
     const code = propForm.code.trim().toUpperCase();
     if (name.length < 2) {
       setErrorMsg('Property name must contain at least 2 characters.');
       return;
     }
-    if (code && (code.length < 2 || code.length > 10)) {
+    if ((editingProperty || code) && (code.length < 2 || code.length > 10)) {
       setErrorMsg('Property code must contain 2–10 characters, for example OLHU or SUN-BAA.');
       return;
     }
-    setPropertyCreating(true); setErrorMsg(null);
+    setPropertySaving(true); setErrorMsg(null);
     try {
-      await apiFetch('/properties', {
-        method: 'POST',
+      await apiFetch(editingProperty ? `/properties/${editingProperty.id}` : '/properties', {
+        method: editingProperty ? 'PUT' : 'POST',
         body: JSON.stringify({ ...propForm, name, code }),
       });
       setShowPropertyModal(false);
-      showNotification(`Property '${name}' created successfully.`);
-      setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001 });
+      showNotification(`Property '${name}' ${editingProperty ? 'updated' : 'created'} successfully.`);
+      setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, isActive: true });
       await refreshProperties();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create property.');
-    } finally { setPropertyCreating(false); }
+      setErrorMsg(err.message || 'Failed to save property.');
+    } finally { setPropertySaving(false); }
   };
 
   const handleDeleteProperty = async (event: React.FormEvent) => {
@@ -267,28 +288,51 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     finally { setPropertyDeleting(false); }
   };
 
-  // Create User Handler (Global Admin)
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const openUserForm = (account: User | null = null) => {
+    setEditingUser(account);
+    setUserForm({ username: account?.username ?? '', name: account?.name ?? '', email: account?.email ?? '',
+      password: '', role: account?.role ?? 'CENTRE_STAFF', isActive: account?.isActive ?? true,
+      propertyIds: account?.assignedProperties.map(property => property.id) ?? [],
+    });
+    setErrorMsg(null);
+    setShowUserModal(true);
+  };
+
+  const handleSaveUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (userSaving || (editingUser && !isGlobalAdmin)) return;
+    setUserSaving(true); setErrorMsg(null);
     try {
-      await apiFetch('/users', {
-        method: 'POST',
-        body: JSON.stringify(userForm),
+      const { password, isActive, ...details } = userForm;
+      await apiFetch(editingUser ? `/users/${editingUser.id}` : '/users', {
+        method: editingUser ? 'PUT' : 'POST',
+        body: JSON.stringify(editingUser ? { ...details, isActive } : { ...details, password }),
       });
       setShowUserModal(false);
-      setUserForm({
-        username: '',
-        name: '',
-        email: '',
-        password: '',
-        role: 'CENTRE_STAFF',
-        propertyIds: [],
-      });
-      showNotification(`User created successfully with role ${userForm.role}.`);
-      loadUsers();
+      showNotification(editingUser ? 'User updated successfully.' : `User created successfully with role ${userForm.role}.`);
+      await loadUsers();
+      if (editingUser?.id === user?.id) await refreshUser();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create user.');
-    }
+      setErrorMsg(err.message || 'Failed to save user.');
+    } finally { setUserSaving(false); }
+  };
+
+  const closeUserDelete = () => {
+    if (userDeleting) return;
+    setDeleteUserTarget(null); setDeleteUsername(''); setErrorMsg(null);
+  };
+
+  const handleDeleteUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isGlobalAdmin || !deleteUserTarget || userDeleting || deleteUsername.trim().toLowerCase() !== deleteUserTarget.username) return;
+    setUserDeleting(true); setErrorMsg(null);
+    try {
+      await apiFetch(`/users/${deleteUserTarget.id}`, { method: 'DELETE', body: JSON.stringify({ confirmationUsername: deleteUsername }) });
+      setDeleteUserTarget(null); setDeleteUsername('');
+      showNotification('User deleted. Access revoked and business history retained.');
+      await loadUsers();
+    } catch (err: any) { setErrorMsg(err.message || 'Failed to delete user.'); }
+    finally { setUserDeleting(false); }
   };
 
   // Reset password for an account permitted by the server
@@ -548,7 +592,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               </p>
             </div>
             <button
-              onClick={() => { setErrorMsg(null); setShowPropertyModal(true); }}
+              onClick={() => openPropertyForm()}
               className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
@@ -578,6 +622,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   </span>
                 </div>
 
+                <button type="button" className="text-button" disabled={pmsSavingProperty !== null} aria-label={`Edit property ${p.name}`} onClick={() => openPropertyForm(p)}><Edit2 size={15} /> Edit property</button>
                 <button type="button" className="text-button text-red-600 dark:text-red-400" aria-label={`Delete property ${p.name}`} onClick={() => { setErrorMsg(null); setDeletePropertyCode(''); setDeletePropertyTarget(p); }}><Trash2 size={15} /> Delete property</button>
                 <fieldset disabled={pmsSavingProperty !== null} className="space-y-2 text-sm">
                   <legend>PMS resorts for room lookups</legend>
@@ -620,7 +665,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               </p>
             </div>
             {canManageAccounts && <button
-              onClick={() => { setErrorMsg(null); setShowUserModal(true); }}
+              onClick={() => openUserForm()}
               className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
@@ -674,7 +719,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                         )}
                       </td>
                       <td className="py-3 px-4">
-                        {isLocked ? (
+                        {!u.isActive ? <span className="text-slate-500">Inactive</span> : isLocked ? (
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center space-x-1 w-max">
                             <Lock className="w-3 h-3" />
                             <span>Locked (5 wrong passwords)</span>
@@ -686,6 +731,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                         )}
                       </td>
                       <td className="py-3 px-4 text-right space-x-2">
+                        {isGlobalAdmin && <>
+                          <button type="button" className="text-button" aria-label={`Edit user ${u.username}`} onClick={() => openUserForm(u)}><Edit2 size={14} /> Edit</button>
+                          <button type="button" className="text-button text-red-600 dark:text-red-400" aria-label={`Delete user ${u.username}`} disabled={u.id === user?.id} title={u.id === user?.id ? 'You cannot delete your own administrator account.' : 'Delete user'} onClick={() => { setDeleteUserTarget(u); setDeleteUsername(''); setErrorMsg(null); }}><Trash2 size={14} /> Delete</button>
+                        </>}
                         {/* Reset Password Button */}
                         <button
                           onClick={() => { setNewPassword(''); setConfirmPassword(''); setErrorMsg(null); setResetTargetUser(u); }}
@@ -975,102 +1024,113 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         </form>
       </Modal>}
 
-      {/* MODAL: CREATE PROPERTY */}
-      {showPropertyModal && (
-        <Modal label="Create property" busy={propertyCreating} onClose={() => { if (!propertyCreating) { setShowPropertyModal(false); setErrorMsg(null); } } } error={errorMsg}>
+      {/* MODAL: CREATE / EDIT PROPERTY */}
+      {isGlobalAdmin && showPropertyModal && (
+        <Modal label={editingProperty ? `Edit property ${editingProperty.name}` : 'Create property'} busy={propertySaving} onClose={() => { if (!propertySaving) { setShowPropertyModal(false); setErrorMsg(null); } } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Create Dive Centre Property
+              {editingProperty ? 'Edit Dive Centre Property' : 'Create Dive Centre Property'}
             </h3>
-            <form onSubmit={handleCreateProperty} className="space-y-3 text-sm" aria-busy={propertyCreating}>
-              <div>
-                <label htmlFor="adminview-field-1" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Property Name *
-                </label>
-                <input id="adminview-field-1"
-                  type="text"
-                  required
-                  value={propForm.name}
-                  onChange={(e) => setPropForm({ ...propForm, name: e.target.value })}
-                  placeholder="e.g. Sun Diving - Baa Atoll"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSaveProperty} className="space-y-3 text-sm" aria-busy={propertySaving}>
+              <fieldset disabled={propertySaving} className="space-y-3">
                 <div>
-                  <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Property Code (optional)
+                  <label htmlFor="adminview-field-1" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Property Name *
                   </label>
-                  <input id="adminview-field-2"
+                  <input id="adminview-field-1"
                     type="text"
-                    minLength={2}
-                    maxLength={10}
-                    value={propForm.code}
-                    onChange={(e) => setPropForm({ ...propForm, code: e.target.value.toUpperCase() })}
-                    placeholder="SUN-BAA"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">Leave blank to generate from the name, or enter 2–10 characters.</p>
-                </div>
-                <div>
-                  <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Location (optional)
-                  </label>
-                  <input id="adminview-field-3"
-                    type="text"
-                    value={propForm.location}
-                    onChange={(e) => setPropForm({ ...propForm, location: e.target.value })}
-                    placeholder="e.g. Baa Atoll"
+                    required
+                    value={propForm.name}
+                    onChange={(e) => setPropForm({ ...propForm, name: e.target.value })}
+                    placeholder="e.g. Sun Diving - Baa Atoll"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                   />
                 </div>
-              </div>
 
-              <fieldset className="space-y-2"><legend>PMS resorts (optional)</legend><div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => <label key={code} className="flex items-center gap-1"><input type="checkbox" checked={propForm.pmsPropertyCodes.includes(code)} onChange={e => setPropForm({ ...propForm, pmsPropertyCodes: e.target.checked ? [...propForm.pmsPropertyCodes, code] : propForm.pmsPropertyCodes.filter(value => value !== code) })} />{code}</label>)}</div></fieldset>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="adminview-field-2" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Property Code {editingProperty ? '*' : '(optional)'}
+                    </label>
+                    <input id="adminview-field-2"
+                      type="text"
+                      required={Boolean(editingProperty)}
+                      minLength={2}
+                      maxLength={10}
+                      value={propForm.code}
+                      onChange={(e) => setPropForm({ ...propForm, code: e.target.value.toUpperCase() })}
+                      placeholder="SUN-BAA"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">{editingProperty ? 'Enter 2–10 characters. The code must be unique.' : 'Leave blank to generate from the name, or enter 2–10 characters.'}</p>
+                  </div>
+                  <div>
+                    <label htmlFor="adminview-field-3" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Location (optional)
+                    </label>
+                    <input id="adminview-field-3"
+                      type="text"
+                      value={propForm.location}
+                      onChange={(e) => setPropForm({ ...propForm, location: e.target.value })}
+                      placeholder="e.g. Baa Atoll"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label htmlFor="adminview-field-4" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Tax (%)
-                  </label>
-                  <input id="adminview-field-4"
-                    type="number"
-                    step="0.1"
-                    value={propForm.taxRate}
-                    onChange={(e) => setPropForm({ ...propForm, taxRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <label>Currency<input className="field-input" required value={propForm.currency} onChange={e => setPropForm({ ...propForm, currency: e.target.value })} /></label>
+                  <label>Currency symbol<input className="field-input" required value={propForm.currencySymbol} onChange={e => setPropForm({ ...propForm, currencySymbol: e.target.value })} /></label>
                 </div>
-                <div>
-                  <label htmlFor="adminview-field-5" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    SC (%)
-                  </label>
-                  <input id="adminview-field-5"
-                    type="number"
-                    step="0.1"
-                    value={propForm.serviceChargeRate}
-                    onChange={(e) => setPropForm({ ...propForm, serviceChargeRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="adminview-field-6" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Start Check #
-                  </label>
-                  <input id="adminview-field-6"
-                    type="number"
-                    value={propForm.nextCheckNumber}
-                    onChange={(e) => setPropForm({ ...propForm, nextCheckNumber: parseInt(e.target.value, 10) || 1001 })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                  />
-                </div>
-              </div>
+                {editingProperty && <label className="flex items-center gap-2"><input type="checkbox" checked={propForm.isActive} onChange={e => setPropForm({ ...propForm, isActive: e.target.checked })} /> Active property</label>}
+                <fieldset className="space-y-2"><legend>PMS resorts (optional)</legend><div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => <label key={code} className="flex items-center gap-1"><input type="checkbox" checked={propForm.pmsPropertyCodes.includes(code)} onChange={e => setPropForm({ ...propForm, pmsPropertyCodes: e.target.checked ? [...propForm.pmsPropertyCodes, code] : propForm.pmsPropertyCodes.filter(value => value !== code) })} />{code}</label>)}</div></fieldset>
 
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label htmlFor="adminview-field-4" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Tax (%)
+                    </label>
+                    <input id="adminview-field-4"
+                      type="number"
+                      step="0.1"
+                      required min="0" max="100"
+                      value={propForm.taxRate}
+                      onChange={(e) => setPropForm({ ...propForm, taxRate: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="adminview-field-5" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      SC (%)
+                    </label>
+                    <input id="adminview-field-5"
+                      type="number"
+                      step="0.1"
+                      required min="0" max="100"
+                      value={propForm.serviceChargeRate}
+                      onChange={(e) => setPropForm({ ...propForm, serviceChargeRate: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="adminview-field-6" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      {editingProperty ? 'Next Check #' : 'Start Check #'}
+                    </label>
+                    <input id="adminview-field-6"
+                      type="number"
+                      required min="1" step="1"
+                      value={propForm.nextCheckNumber}
+                      onChange={(e) => setPropForm({ ...propForm, nextCheckNumber: parseInt(e.target.value, 10) || 1001 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+              </fieldset>
               <div className="flex space-x-2 pt-3">
                 <button
                   type="button"
-                  disabled={propertyCreating}
+                  disabled={propertySaving}
                   onClick={() => setShowPropertyModal(false)}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
@@ -1078,10 +1138,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </button>
                 <button
                   type="submit"
-                  disabled={propertyCreating}
+                  disabled={propertySaving}
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  {propertyCreating ? 'Creating…' : 'Save Property'}
+                  {propertySaving ? 'Saving…' : editingProperty ? 'Save Changes' : 'Save Property'}
                 </button>
               </div>
             </form>
@@ -1089,112 +1149,128 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         </Modal>
       )}
 
-      {/* MODAL: CREATE USER */}
+      {isGlobalAdmin && deleteUserTarget && <Modal label={`Delete user ${deleteUserTarget.username}`} busy={userDeleting} onClose={closeUserDelete} error={errorMsg}>
+        <form className="surface guard-dialog" onSubmit={handleDeleteUser} aria-busy={userDeleting}>
+          <h2>Delete {deleteUserTarget.name}?</h2>
+          <p>This revokes sign-in access and removes this account from the user list. Bills, staff roster records, payroll and audit history are retained. The username remains reserved.</p>
+          <label htmlFor="delete-user-username">Type <strong>{deleteUserTarget.username}</strong> to confirm.</label>
+          <input id="delete-user-username" className="field-input" autoComplete="off" spellCheck={false} required disabled={userDeleting} value={deleteUsername} onChange={e => setDeleteUsername(e.target.value)} />
+          <div className="dialog-actions"><button type="button" className="secondary-button" disabled={userDeleting} onClick={closeUserDelete}>Cancel</button><button type="submit" className="danger-button" disabled={userDeleting || deleteUsername.trim().toLowerCase() !== deleteUserTarget.username}>{userDeleting ? 'Deleting…' : 'Delete user'}</button></div>
+        </form>
+      </Modal>}
+
+      {/* MODAL: CREATE / EDIT USER */}
       {showUserModal && (
-        <Modal label="Create account" onClose={() => { setShowUserModal(false); setErrorMsg(null); } } error={errorMsg}>
+        <Modal label={editingUser ? `Edit user ${editingUser.username}` : 'Create account'} busy={userSaving} onClose={() => { if (!userSaving) { setShowUserModal(false); setErrorMsg(null); } } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Create New User Account
+              {editingUser ? 'Edit User Account' : 'Create New User Account'}
             </h3>
-            <p className="text-sm text-slate-500">{passwordHelp} Share the username and temporary password directly with the user. They must change their password and bind their own authenticator before using the workspace.</p>
-            <form onSubmit={handleCreateUser} className="space-y-3 text-sm">
-              <div>
-                <label htmlFor="adminview-field-7" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Full Name *
-                </label>
-                <input id="adminview-field-7"
-                  type="text"
-                  required
-                  value={userForm.name}
-                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                  placeholder="e.g. Hassan Rauf"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="account-username" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Unique Username *</label>
-                <input id="account-username" autoComplete="off" required minLength={3} maxLength={100} pattern="[A-Za-z0-9._@+\-]+" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} placeholder="e.g. hassan.male" className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />
-                <p className="text-xs text-slate-500 mt-1">Every person needs their own username and authenticator, even when sharing an email address.</p>
-              </div>
-              <div>
-                <label htmlFor="adminview-field-8" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Email Address (optional; shared addresses allowed)
-                </label>
-                <input id="adminview-field-8"
-                  type="email"
-                  value={userForm.email}
-                  onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                  placeholder="hassan@sundiving.com"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="adminview-field-9" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Temporary Password *
-                </label>
-                <input id="adminview-field-9"
-                  type="password"
-                  required
-                  minLength={12} pattern={passwordPattern} title={passwordHelp}
-                  value={userForm.password}
-                  onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                  placeholder="12 characters, Aa, number, symbol"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="adminview-field-10" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Role *
-                </label>
-                <select id="adminview-field-10"
-                  value={userForm.role}
-                  onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                >
-                  <option value="CENTRE_STAFF">Centre Staff (Fixed to assigned centre)</option>
-                  {isGlobalAdmin && <option value="PROPERTY_MANAGER">Property Manager (Multiple assigned centres)</option>}
-                  {isGlobalAdmin && <option value="GLOBAL_ADMIN">Global Admin (Unrestricted system-wide)</option>}
-                </select>
-              </div>
-
-              {userForm.role !== 'GLOBAL_ADMIN' && (
+            {!editingUser && <p className="text-sm text-slate-500">{passwordHelp} Share the username and temporary password directly with the user. They must change their password and bind their own authenticator before using the workspace.</p>}
+            <form onSubmit={handleSaveUser} className="space-y-3 text-sm" aria-busy={userSaving}>
+              <fieldset disabled={userSaving} className="space-y-3">
                 <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Assign Properties:
+                  <label htmlFor="adminview-field-7" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Full Name *
                   </label>
-                  <div className="space-y-1 bg-slate-50 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 max-h-36 overflow-y-auto">
-                    {properties.filter(p => isGlobalAdmin || user?.assignedProperties.some(assigned => assigned.id === p.id)).map((p) => {
-                      const isChecked = userForm.propertyIds.includes(p.id);
-                      return (
-                        <label key={p.id} className="flex items-center space-x-2 cursor-pointer text-sm">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setUserForm({ ...userForm, propertyIds: [...userForm.propertyIds, p.id] });
-                              } else {
-                                setUserForm({
-                                  ...userForm,
-                                  propertyIds: userForm.propertyIds.filter((id) => id !== p.id),
-                                });
-                              }
-                            }}
-                          />
-                          <span>{p.name} ({p.code})</span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                  <input id="adminview-field-7"
+                    type="text"
+                    required
+                    value={userForm.name}
+                    onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                    placeholder="e.g. Hassan Rauf"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  />
                 </div>
-              )}
 
+                <div>
+                  <label htmlFor="account-username" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Unique Username *</label>
+                  <input id="account-username" autoComplete="off" required minLength={3} maxLength={100} pattern="[A-Za-z0-9._@+\-]+" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} placeholder="e.g. hassan.male" className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />
+                  <p className="text-xs text-slate-500 mt-1">Every person needs their own username and authenticator, even when sharing an email address.</p>
+                </div>
+                <div>
+                  <label htmlFor="adminview-field-8" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Email Address (optional; shared addresses allowed)
+                  </label>
+                  <input id="adminview-field-8"
+                    type="email"
+                    value={userForm.email}
+                    onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                    placeholder="hassan@sundiving.com"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  />
+                </div>
+
+                {!editingUser && <div>
+                  <label htmlFor="adminview-field-9" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Temporary Password *
+                  </label>
+                  <input id="adminview-field-9"
+                    type="password"
+                    required
+                    minLength={12} pattern={passwordPattern} title={passwordHelp}
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    placeholder="12 characters, Aa, number, symbol"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  />
+                </div>}
+
+                <div>
+                  <label htmlFor="adminview-field-10" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Role *
+                  </label>
+                  <select id="adminview-field-10"
+                    disabled={editingUser?.id === user?.id}
+                    value={userForm.role}
+                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  >
+                    <option value="CENTRE_STAFF">Centre Staff (Fixed to assigned centre)</option>
+                    {isGlobalAdmin && <option value="PROPERTY_MANAGER">Property Manager (Multiple assigned centres)</option>}
+                    {isGlobalAdmin && <option value="GLOBAL_ADMIN">Global Admin (Unrestricted system-wide)</option>}
+                  </select>
+                </div>
+
+                {editingUser && <label className="flex items-center gap-2"><input type="checkbox" disabled={editingUser.id === user?.id} checked={userForm.isActive} onChange={e => setUserForm({ ...userForm, isActive: e.target.checked })} /> Active account</label>}
+                {editingUser?.id === user?.id && <p className="text-xs text-slate-500">Your administrator role and active status are protected while you are signed in.</p>}
+                {userForm.role !== 'GLOBAL_ADMIN' && (
+                  <div>
+                    <label className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Assign Properties:
+                    </label>
+                    <div className="space-y-1 bg-slate-50 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 max-h-36 overflow-y-auto">
+                      {properties.filter(p => (p.isActive || editingUser?.assignedProperties.some(assigned => assigned.id === p.id)) && (isGlobalAdmin || user?.assignedProperties.some(assigned => assigned.id === p.id))).map((p) => {
+                        const isChecked = userForm.propertyIds.includes(p.id);
+                        return (
+                          <label key={p.id} className="flex items-center space-x-2 cursor-pointer text-sm">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setUserForm({ ...userForm, propertyIds: [...userForm.propertyIds, p.id] });
+                                } else {
+                                  setUserForm({
+                                    ...userForm,
+                                    propertyIds: userForm.propertyIds.filter((id) => id !== p.id),
+                                  });
+                                }
+                              }}
+                            />
+                            <span>{p.name} ({p.code}){!p.isActive ? ' · Inactive' : ''}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+              </fieldset>
               <div className="flex space-x-2 pt-3">
                 <button
                   type="button"
+                  disabled={userSaving}
                   onClick={() => setShowUserModal(false)}
                   className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
                 >
@@ -1202,9 +1278,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </button>
                 <button
                   type="submit"
+                  disabled={userSaving}
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  Create User
+                  {userSaving ? 'Saving…' : editingUser ? 'Save Changes' : 'Create User'}
                 </button>
               </div>
             </form>

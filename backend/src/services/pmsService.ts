@@ -1,3 +1,4 @@
+import { boundedArray } from '../utils/validation';
 import { z } from 'zod';
 import { readSecret } from '../config/secrets';
 import { isBusinessDate } from '../utils/dates';
@@ -23,7 +24,7 @@ export type PmsGuest = z.infer<typeof guestSchema>;
 const responseSchema = z.object({
   property_code: pmsPropertyCodeSchema,
   room_number: z.string().trim(),
-  data: z.array(guestSchema).max(100),
+  data: boundedArray(guestSchema, 100),
 });
 const safeRequestId = (response: globalThis.Response) => {
   const value = response.headers.get('X-Request-ID');

@@ -1,3 +1,4 @@
+import { boundedArray, validationIssues } from '../utils/validation';
 import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
@@ -156,7 +157,7 @@ presenceRouter.get('/day', requireAuth, requirePropertyAccess('query', 'property
 const saveDayPresenceSchema = z.object({
   propertyId: z.string(),
   date: z.string().refine(isBusinessDate, 'Valid calendar date (YYYY-MM-DD) is required.'),
-  records: z.array(
+  records: boundedArray(
     z.object({
       staffMemberId: z.string(),
       status: z.enum([
@@ -168,8 +169,8 @@ const saveDayPresenceSchema = z.object({
         'ABSENT',
         'EMERGENCY_LEAVE',
       ]),
-      note: z.string().optional().nullable(),
-    })
+      note: z.string().max(2000).optional().nullable(),
+    }), 1000
   ),
 });
 
@@ -179,7 +180,7 @@ presenceRouter.post('/day', requireAuth, requirePropertyAccess('body', 'property
   try {
     const parseResult = saveDayPresenceSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
+      return res.status(400).json({ error: 'Validation failed', details: validationIssues(parseResult.error) });
     }
 
     const { propertyId, date, records } = parseResult.data;

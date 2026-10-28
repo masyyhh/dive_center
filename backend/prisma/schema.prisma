@@ -48,6 +48,7 @@ model User {
   failedLoginAttempts Int            @default(0)
   lockedUntil         DateTime?
   isActive            Boolean        @default(true)
+  deletedAt           DateTime?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
@@ -282,4 +283,12 @@ model Authenticator {
   failedAttempts        Int      @default(0)
   lockedUntil           DateTime?
   recoveryCodeHashes    String   @default("[]")
+}
+
+// Exact-session logout revocation. Store only a keyed digest, never a bearer token.
+model RevokedToken {
+  tokenHash String   @id
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }

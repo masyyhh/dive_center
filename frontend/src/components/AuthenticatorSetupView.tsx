@@ -3,7 +3,7 @@ import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 export const AuthenticatorSetupView: React.FC<{ onComplete: () => void; onCancel?: () => void; onCodesVisible?: (visible: boolean) => void }> = ({ onComplete, onCancel, onCodesVisible }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, signingOut, logoutError } = useAuth();
   const [password, setPassword] = useState('');
   const [currentCode, setCurrentCode] = useState('');
   const [otp, setOtp] = useState('');
@@ -37,7 +37,7 @@ export const AuthenticatorSetupView: React.FC<{ onComplete: () => void; onCancel
     <p className="signin-brand">DIVE CENTRE MANAGER · {user?.username}</p>
     <h1 id="authenticator-heading">{codes.length ? 'Save your recovery codes' : user?.authenticatorEnabled ? 'Replace your authenticator' : 'Bind your authenticator'}</h1>
     <p className="signin-intro">{codes.length ? 'These codes are shown once. Each can recover your account if you lose your device. Store them somewhere private, away from your phone.' : setup ? 'Scan this QR code in your authenticator app, or enter the setup key manually. Enter a code from the app within 10 minutes to finish.' : 'Connect your own authenticator app to this account for password recovery. No email or shared mailbox is needed.'}</p>
-    {error && <p className="signin-error" role="alert">{error}</p>}
+    {(error || logoutError) && <p className="signin-error" role="alert">{error || logoutError}</p>}
     {codes.length > 0 ? <div className="signin-form">
       <ul className="recovery-code-list" aria-label="One-time recovery codes">{codes.map(code => <li key={code}><code>{code}</code></li>)}</ul>
       <button type="button" className="secondary-button" onClick={downloadCodes}>Download recovery codes</button>
@@ -59,6 +59,6 @@ export const AuthenticatorSetupView: React.FC<{ onComplete: () => void; onCancel
       </fieldset>
       {setup && <button type="button" className="signin-help" disabled={busy} onClick={() => { setSetup(undefined); setOtp(''); setError(''); }}>Restart setup</button>}
     </form>}
-    {!codes.length && <button type="button" className="signin-help" disabled={busy} onClick={onCancel || logout}>{onCancel ? 'Cancel' : 'Sign out'}</button>}
+    {!codes.length && <button type="button" className="signin-help" disabled={busy || signingOut} onClick={onCancel || (() => { void logout(); })}>{onCancel ? 'Cancel' : 'Sign out'}</button>}
   </main>;
 };

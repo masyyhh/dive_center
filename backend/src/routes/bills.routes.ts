@@ -1,3 +1,4 @@
+import { boundedArray, validationIssues } from '../utils/validation';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
@@ -197,8 +198,8 @@ const createBillSchema = z.object({
   departureDate: z.string().optional().nullable(),
   nationality: z.string().default('Other'),
   tipAmount: z.number().min(0).default(0),
-  tipStaffIds: z.array(z.string()).optional().default([]),
-  items: z.array(billItemSchema).min(1, 'At least one item is required on a bill'),
+  tipStaffIds: boundedArray(z.string(), 1000).optional().default([]),
+  items: boundedArray(billItemSchema, 200).refine(items => items.length > 0, 'At least one item is required on a bill'),
   notes: z.string().optional().nullable(),
 });
 
@@ -207,7 +208,7 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
   try {
     const parseResult = createBillSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
+      return res.status(400).json({ error: 'Validation failed', details: validationIssues(parseResult.error) });
     }
 
     const data = parseResult.data;

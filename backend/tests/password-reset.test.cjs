@@ -3,15 +3,15 @@ const assert = require('node:assert/strict');
 const bcrypt = require('bcryptjs');
 const { loadTypeScript, request } = require('./helpers/runtime.cjs');
 
-function fixture() {
+function fixture(managedProperties = ['male']) {
   const accounts = [
     { id: 'own', role: 'CENTRE_STAFF', properties: ['male'] },
     { id: 'other', role: 'CENTRE_STAFF', properties: ['ari'] },
     { id: 'shared', role: 'CENTRE_STAFF', properties: ['male', 'ari'] },
     { id: 'unassigned', role: 'CENTRE_STAFF', properties: [] },
-    { id: 'manager', role: 'PROPERTY_MANAGER', properties: ['male'] },
+    { id: 'manager', role: 'PROPERTY_MANAGER', properties: managedProperties },
     { id: 'admin', role: 'GLOBAL_ADMIN', properties: [] },
-  ].map(account => ({ ...account, name: account.id, email: `${account.id}@example.test`, assignedProperties: account.properties.map(propertyId => ({ propertyId, property: { id: propertyId, name: propertyId } })) }));
+  ].map(account => ({ ...account, passwordHash: 'fixture', mustChangePassword: false, isActive: true, deletedAt: null, name: account.id, email: `${account.id}@example.test`, assignedProperties: account.properties.map(propertyId => ({ propertyId, property: { id: propertyId, name: propertyId } })) }));
   const writes = [], audit = [], listQueries = [];
   const prisma = { user: {
     findUnique: async ({ where }) => accounts.find(account => account.id === where.id) || null,
@@ -20,10 +20,11 @@ function fixture() {
       return accounts.filter(account => !where.role || account.role === where.role && account.properties.some(id => where.assignedProperties.some.propertyId.in.includes(id)) && account.properties.every(id => where.assignedProperties.every.propertyId.in.includes(id)));
     },
     update: async args => { writes.push(args); return {}; },
-  } };
+  }, auditLog: { create: async ({ data }) => { audit.push(data); return data; } } };
+  prisma.$transaction = operation => operation(prisma);
   const { usersRouter } = loadTypeScript('src/routes/users.routes.ts', {
     '../db': { prisma },
-    '../middleware/auth': { requireAuth: (req, res, next) => req.user ? next() : res.status(401).json({ error: 'Authentication required' }) },
+    '../middleware/auth': { requireAuth: (req, res, next) => { req.authenticatedPasswordHash = 'fixture'; return req.user ? next() : res.status(401).json({ error: 'Authentication required' }); } },
     '../services/auditService': { logAuditEvent: async ({ req, ...event }) => audit.push(event) },
   });
   return { router: usersRouter, writes, audit, listQueries };
@@ -55,7 +56,7 @@ test('manager cannot reset other properties, shared accounts, unassigned staff, 
   assert.equal(f.audit.length, 0);
 });
 test('manager of all staff assignments can reset a shared staff account', async () => {
-  assert.equal((await reset(fixture(), 'shared', { ...manager, assignedPropertyIds: ['male', 'ari'] })).status, 200);
+  assert.equal((await reset(fixture(['male', 'ari']), 'shared', { ...manager, assignedPropertyIds: ['male', 'ari'] })).status, 200);
 });
 test('staff and unauthenticated callers cannot reset passwords', async () => {
   const f = fixture();

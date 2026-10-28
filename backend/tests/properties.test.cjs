@@ -136,3 +136,55 @@ test('audit failure rolls back property removal and assignment revocation togeth
   assert.equal((await prisma.property.findUnique({ where: { id: 'archive' } })).deletedAt, null);
   assert.equal(await prisma.userProperty.count({ where: { propertyId: 'archive' } }), 2);
 });
+
+test('global admin edits existing property details and keeps business history and assignments', async () => {
+  const result = await call('PUT', '/archive', {
+    name: '  Updated Centre  ', code: ' edited ', location: 'Baa Atoll',
+    currency: 'EUR', currencySymbol: '€', taxRate: 12.5, serviceChargeRate: 8,
+    nextCheckNumber: 2001, isActive: false, pmsPropertyCodes: ['OLHU'],
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.property.name, 'Updated Centre');
+  assert.equal(result.body.property.code, 'EDITED');
+  assert.equal(result.body.property.location, 'Baa Atoll');
+  assert.equal(result.body.property.currency, 'EUR');
+  assert.equal(result.body.property.currencySymbol, '€');
+  assert.equal(result.body.property.taxRate, 12.5);
+  assert.equal(result.body.property.serviceChargeRate, 8);
+  assert.equal(result.body.property.nextCheckNumber, 2001);
+  assert.equal(result.body.property.isActive, false);
+  assert.deepEqual(result.body.property.pmsPropertyCodes, ['OLHU']);
+  assert.equal(await prisma.bill.count({ where: { propertyId: 'archive' } }), 1);
+  assert.equal(await prisma.userProperty.count({ where: { propertyId: 'archive' } }), 2);
+  const audit = await prisma.auditLog.findFirst({ where: { action: 'PROPERTY_UPDATE' } });
+  assert.equal(audit.userId, 'admin');
+  assert.equal(JSON.parse(audit.details).code, 'EDITED');
+  assert.equal((await call('PUT', '/archive', { isActive: true })).status, 200);
+});
+
+test('partial property updates preserve omitted fields and reject invalid input without writes', async () => {
+  await prisma.property.update({ where: { id: 'archive' }, data: { currency: 'EUR', currencySymbol: '€', taxRate: 12.5, serviceChargeRate: 8, nextCheckNumber: 3000, pmsPropertyCode: 'OLHU', pmsPropertyCodes: ['OLHU'] } });
+  const before = await prisma.property.findUnique({ where: { id: 'archive' } });
+  for (const body of [{ name: ' ' }, { code: '' }, { code: 'ABCDEFGHIJK' }, { taxRate: -1 }, { taxRate: 101 }, { serviceChargeRate: 101 }, { nextCheckNumber: 0 }, { nextCheckNumber: 1.5 }, { isActive: 'false' }, { currency: ' ' }, { currencySymbol: '' }]) {
+    assert.equal((await call('PUT', '/archive', body)).status, 400, JSON.stringify(body));
+  }
+  assert.deepEqual(await prisma.property.findUnique({ where: { id: 'archive' } }), before);
+  assert.equal(await prisma.auditLog.count(), 0);
+  const result = await call('PUT', '/archive', { name: 'Renamed Centre' });
+  assert.equal(result.status, 200);
+  for (const key of ['code', 'taxRate', 'serviceChargeRate', 'nextCheckNumber', 'currency', 'isActive', 'pmsPropertyCode', 'pmsPropertyCodes']) assert.deepEqual(result.body.property[key], before[key]);
+});
+
+test('property code edits reserve historical codes and require global administrator access', async () => {
+  assert.equal((await call('PUT', '/archive', { code: 'other' })).status, 409);
+  for (const role of ['none', 'manager', 'staff']) {
+    assert.equal((await call('PUT', '/archive', { code: 'EDITED' }, role)).status, role === 'none' ? 401 : 403);
+  }
+  assert.equal((await call('PUT', '/archive', { name: 'Forbidden' }, 'staff')).status, 403);
+  await prisma.userProperty.deleteMany({ where: { userId: 'manager', propertyId: 'archive' } });
+  assert.equal((await call('PUT', '/archive', { name: 'Forbidden' }, 'manager')).status, 403);
+  assert.equal((await call('PUT', '/missing', { name: 'Missing' })).status, 404);
+  await remove();
+  assert.equal((await call('PUT', '/other', { code: 'ARCH' })).status, 409);
+  assert.equal((await call('PUT', '/archive', { name: 'Removed' })).status, 410);
+});

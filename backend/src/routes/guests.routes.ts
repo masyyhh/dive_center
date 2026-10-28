@@ -1,3 +1,4 @@
+import { boundedArray } from '../utils/validation';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -15,7 +16,7 @@ guestsRouter.get('/inhouse', requireAuth, requirePropertyAccess('query', 'proper
   try {
     const property = await prisma.property.findUnique({ where: { id: parsed.data.propertyId }, select: { code: true, pmsPropertyCode: true, pmsPropertyCodes: true, isActive: true } });
     if (!property?.isActive) return res.status(404).json({ error: 'Active property not found.' });
-    const codes = z.array(pmsPropertyCodeSchema).min(1).max(7).safeParse(
+    const codes = boundedArray(pmsPropertyCodeSchema, 7).refine(codes => codes.length > 0).safeParse(
       property.pmsPropertyCodes?.length ? property.pmsPropertyCodes : [property.pmsPropertyCode || property.code]
     );
     if (!codes.success) return res.status(409).json({ error: 'Set this property’s PMS resorts in Administration → Properties before looking up guests.' });

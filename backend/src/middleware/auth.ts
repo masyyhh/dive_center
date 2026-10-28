@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { loadJwtSecret } from '../config/secrets';
 import { prisma } from '../db';
 
@@ -20,6 +20,8 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       authenticatedPasswordHash?: string;
+      authenticatedTokenHash?: string;
+      authenticatedTokenExpiresAt?: Date;
     }
   }
 }
@@ -28,12 +30,13 @@ export const signToken = (payload: { id: string; email: string | null; role: str
   const { passwordHash, ...identity } = payload;
   return jwt.sign({ ...identity, credential: credentialBinding(identity.id, passwordHash) }, JWT_SECRET, {
     algorithm: 'HS256',
+    jwtid: randomUUID(),
     expiresIn: (payload.purpose ? '10m' : process.env.JWT_EXPIRES_IN || '12h') as any,
   });
 };
 
 
-const authenticate = (mode: 'workspace' | 'account' | 'initial') => async (req: Request, res: Response, next: NextFunction) => {
+const authenticate = (mode: 'workspace' | 'account' | 'initial' | 'logout') => async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -52,6 +55,17 @@ const authenticate = (mode: 'workspace' | 'account' | 'initial') => async (req: 
       return res.status(401).json({ error: 'Session expired. Please sign in again.' });
     }
 
+    // Password binding handles credential changes; this digest revokes only this session.
+    if (typeof decoded.exp !== 'number' || !Number.isFinite(decoded.exp)) {
+      return res.status(401).json({ error: 'Session expired. Please sign in again.' });
+    }
+    const tokenHash = createHmac('sha256', JWT_SECRET).update(JSON.stringify(['revoked-token', token])).digest('hex');
+    if (await prisma.revokedToken.findUnique({ where: { tokenHash }, select: { tokenHash: true } })) {
+      return res.status(401).json({ error: 'Session signed out. Please sign in again.' });
+    }
+    req.authenticatedTokenHash = tokenHash;
+    req.authenticatedTokenExpiresAt = new Date(decoded.exp * 1000);
+
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       include: {
@@ -62,7 +76,7 @@ const authenticate = (mode: 'workspace' | 'account' | 'initial') => async (req: 
       },
     });
 
-    if (!user || !user.isActive) {
+    if (!user || (!user.isActive && mode !== 'logout')) {
       return res.status(401).json({ error: 'User account is inactive or no longer exists.' });
     }
 
@@ -87,7 +101,7 @@ const authenticate = (mode: 'workspace' | 'account' | 'initial') => async (req: 
     req.authenticatedPasswordHash = user.passwordHash;
 
     // Check account lockout
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
+    if (mode !== 'logout' && user.lockedUntil && user.lockedUntil > new Date()) {
       const minutesRemaining = Math.ceil((user.lockedUntil.getTime() - Date.now()) / (60 * 1000));
       return res.status(423).json({
         error: `Account is temporarily locked. Please try again in ${minutesRemaining} minutes or contact your administrator.`,
@@ -113,3 +127,6 @@ export const requireAuth = authenticate('workspace');
 export const requirePasswordChangeAuth = authenticate('initial');
 
 export const requireAccountAuth = authenticate('account');
+
+// Revoking this signed token must remain possible even when the account is locked.
+export const requireLogoutAuth = authenticate('logout');
