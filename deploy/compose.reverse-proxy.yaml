@@ -7,7 +7,7 @@ services:
       TRUST_PROXY: "0"
       TRUST_PROXY_ADDRESSES: ${REVERSE_PROXY_TRUSTED_IPS:?Set the proxy source IPs seen by Node, separated by commas}
       REQUIRE_TRUSTED_PROXY: "1"
-    ports:
+    ports: !override
       - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:5001:5001"
   web:
     ports: !override

@@ -38,7 +38,10 @@ services:
       JWT_SECRET_FILE: /run/secrets/jwt_secret
       CORS_ORIGIN: ${CORS_ORIGIN:-https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}}
       PMS_API_KEY_FILE: /run/secrets/pms_api_key
-      TRUST_PROXY: "1"
+      TRUST_PROXY: "0"
+      # Empty configuration fails closed in Node; CI explicitly overrides it.
+      TRUST_PROXY_ADDRESSES: ${REVERSE_PROXY_TRUSTED_IPS:-}
+      REQUIRE_TRUSTED_PROXY: "1"
     secrets:
       - database_url
       - authenticator_key
@@ -49,6 +52,8 @@ services:
         condition: service_healthy
     expose:
       - "5001"
+    ports:
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:5001:5001"
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -72,16 +77,10 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2-alpine}
     restart: unless-stopped
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
-      ACME_EMAIL: ${ACME_EMAIL:-ops@dive-centre.local}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:8080:8080"
     volumes:
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./deploy/Caddyfile.reverse-proxy:/etc/caddy/Caddyfile:ro
     depends_on:
       backend:
         condition: service_healthy

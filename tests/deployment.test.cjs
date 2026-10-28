@@ -107,6 +107,9 @@ test('production preparation requires HTTPS and rejects unsafe existing config w
   const safe = fs.readFileSync(file, 'utf8');
   assert(safe.includes('APP_DOMAIN=dive.example.test'));
   assert(safe.includes('CORS_ORIGIN=https://dive.example.test'));
+  assert(safe.includes('REVERSE_PROXY_BIND_IP=127.0.0.1'));
+  assert(safe.includes('REVERSE_PROXY_TRUSTED_IPS=\n'));
+  assert(!safe.includes('ACME_EMAIL='));
   const keyFile = path.join(root, 'secrets/jwt_secret');
   const key = fs.readFileSync(keyFile, 'utf8');
   for (const unsafe of ['APP_DOMAIN=:80\nCORS_ORIGIN=http://localhost\n', 'APP_DOMAIN=dive.example.test\nCORS_ORIGIN=http://dive.example.test\n', 'APP_DOMAIN=dive.example.test\nCORS_ORIGIN=https://other.example.test\n']) {
@@ -146,4 +149,42 @@ if [ "$1" = tools/prisma.cjs ] && [ "\${MIGRATION_FAIL:-}" = 1 ]; then exit 7; f
   fs.writeFileSync(log, '');
   assert.equal(run(['node', 'dist/scripts/bootstrap-admin.js']).status, 0);
   assert.deepEqual(calls(), ['dist/scripts/bootstrap-admin.js']);
+});
+
+test('production defaults publish only private HTTP upstreams with fail-closed proxy controls', () => {
+  const compose = fs.readFileSync(path.join(source, 'compose.yaml'), 'utf8');
+  assert.match(compose, /TRUST_PROXY: "0"/);
+  assert.match(compose, /TRUST_PROXY_ADDRESSES: \$\{REVERSE_PROXY_TRUSTED_IPS:-\}/);
+  assert.match(compose, /REQUIRE_TRUSTED_PROXY: "1"/);
+  assert.match(compose, /"\$\{REVERSE_PROXY_BIND_IP:-127\.0\.0\.1\}:5001:5001"/);
+  assert.match(compose, /"\$\{REVERSE_PROXY_BIND_IP:-127\.0\.0\.1\}:8080:8080"/);
+  assert.doesNotMatch(compose, /"(?:80:80|443:443(?:\/udp)?)"/);
+  assert.match(compose, /\.\/deploy\/Caddyfile\.reverse-proxy:\/etc\/caddy\/Caddyfile:ro/);
+  assert.match(compose, /read_only: true/);
+  assert.match(compose, /no-new-privileges:true/);
+  assert.match(compose, /cap_drop: \[ALL\]/);
+});
+
+test('both Caddy production entry points disable certificate issuance and retain frontend security headers', () => {
+  const deployed = fs.readFileSync(path.join(source, 'deploy/Caddyfile.reverse-proxy'), 'utf8');
+  const image = fs.readFileSync(path.join(source, 'frontend/deploy/Caddyfile'), 'utf8');
+  assert.equal(image, deployed);
+  assert.match(deployed, /auto_https off/);
+  assert.match(deployed, /:8080 \{/);
+  assert.doesNotMatch(deployed, /https:\/\/|ACME_EMAIL/);
+  for (const value of ['Content-Security-Policy', 'X-Content-Type-Options nosniff', 'X-Frame-Options DENY', 'Cache-Control "no-store"']) assert(deployed.includes(value));
+});
+
+test('legacy proxy deployment commands retain restrictions and CI exceptions stay isolated', () => {
+  for (const file of ['compose.reverse-proxy.yaml', 'compose.reverse-proxy-open.yaml']) {
+    const config = fs.readFileSync(path.join(source, 'deploy', file), 'utf8');
+    assert.match(config, /REQUIRE_TRUSTED_PROXY: "1"/);
+    assert.match(config, /REVERSE_PROXY_TRUSTED_IPS:\?/);
+    assert.doesNotMatch(config, /0\.0\.0\.0:|REQUIRE_TRUSTED_PROXY: "0"/);
+    assert.match(config, /ports: !override/);
+  }
+  const smoke = fs.readFileSync(path.join(source, 'deploy/compose.smoke.yaml'), 'utf8');
+  assert.match(smoke, /ports: !reset \[\]/);
+  assert.match(smoke, /127\.0\.0\.1:80:80/);
+  assert.match(smoke, /TRUST_PROXY_ADDRESSES: !reset null/);
 });

@@ -73,3 +73,8 @@ Apply the included additive migrations before running the updated API (`npm run 
 API clients must send uncompressed JSON/form bodies. The 5 MB request limit and 2,000-row catalogue-import capacity are retained. Before schema parsing, requests are limited to 10,000 values, 20 nesting levels and 2,000 entries per container. Domain limits are 200 bill lines, 1,000 attendance records, tip recipients or property assignments, and 7 PMS resorts. Attendance notes are limited to 2,000 characters; validation responses contain at most 20 issues. Catalogue uploads use a bounded base64 string and remain supported within the original size limits.
 
 The backend uses patched Zod 4.6.7 and body-parser 1.20.9. Zod migration compatibility keeps omitted update fields unchanged and permits partial personal-commission rate maps. Run the full backend/frontend tests and builds on supported Node 22/24 before releasing. Login lockout is serialized per account, and account-manager password resets recheck live actor credentials, session, roles and assignments together with target ownership inside a transaction.
+
+Production uses an external HTTPS reverse proxy. Node port 5001 and frontend
+HTTP port 8080 bind to loopback by default; configure the private bind address,
+actual trusted proxy source and firewall before deploying. Caddy certificate
+issuance is disabled. See [proxy deployment](deploy/REVERSE-PROXY.md).

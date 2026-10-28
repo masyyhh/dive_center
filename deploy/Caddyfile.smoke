@@ -1,4 +1,4 @@
-# Disposable CI only. Production always uses frontend/deploy/Caddyfile and HTTPS.
+# Disposable CI only. Production uses an external HTTPS proxy.
 {
   admin off
 }
