@@ -86,3 +86,30 @@ test('PMS guest selection uses the selected sharer’s own dates and nationality
   assert.deepEqual(guestBillFields(sharer), { guestName: 'Test Sharer', departureDate: '2026-10-24', nationality: 'To be Adviced' });
   assert.deepEqual(guestBillFields({ fullName: 'Other Guest', checkoutDate: null, nationality: null }), { guestName: 'Other Guest', departureDate: '', nationality: '' });
 });
+
+const { revokeSession } = await loadModule('../src/services/api.ts');
+test('logout keeps the presented token until server revocation succeeds', async () => {
+  const store = new Map([['dcm_auth_token', 'fixture-token']]);
+  globalThis.localStorage = { getItem: key => store.get(key) ?? null, removeItem: key => store.delete(key) };
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/auth/logout'); assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer fixture-token');
+    assert.equal(store.get('dcm_auth_token'), 'fixture-token');
+    return new Response(JSON.stringify({ message: 'Signed out.' }), { status: 200 });
+  };
+  await revokeSession(); assert.equal(store.has('dcm_auth_token'), false);
+});
+test('server and network logout failures preserve the session for retry', async () => {
+  const store = new Map([['dcm_auth_token', 'fixture-token']]);
+  globalThis.localStorage = { getItem: key => store.get(key) ?? null, removeItem: key => store.delete(key) };
+  for (const response of [async () => new Response(JSON.stringify({ error: 'Try again.' }), { status: 503 }), async () => { throw Error('Offline'); }]) {
+    globalThis.fetch = response;
+    await assert.rejects(revokeSession()); assert.equal(store.get('dcm_auth_token'), 'fixture-token');
+  }
+});
+test('logout clears an already expired or revoked session', async () => {
+  const store = new Map([['dcm_auth_token', 'fixture-token']]);
+  globalThis.localStorage = { getItem: key => store.get(key) ?? null, removeItem: key => store.delete(key) };
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Session expired.' }), { status: 401 });
+  await revokeSession(); assert.equal(store.has('dcm_auth_token'), false);
+});

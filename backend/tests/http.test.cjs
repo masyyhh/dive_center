@@ -95,3 +95,26 @@ test('rejecting an amplified workbook leaves ordinary API requests responsive', 
   const valid = Buffer.from('Item Code,Items,Category,Price,Commission,Status\n,Boat dive,Diving,75,10,Active').toString('base64');
   assert.equal((await parseCatalogue(valid, 'csv')).length, 1);
 });
+
+test('compressed JSON and form bodies reject before routing and leave the API alive', async () => {
+  const zlib = require('node:zlib');
+  for (const [type, content] of [['application/json', '{}'], ['application/x-www-form-urlencoded', 'a=b']]) {
+    for (const encoding of ['gzip', 'deflate']) {
+      const bytes = encoding === 'gzip' ? zlib.gzipSync(content) : zlib.deflateSync(content);
+      const response = await fetch(`${origin}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': type, 'Content-Encoding': encoding }, body: bytes });
+      assert.equal(response.status, 415);
+    }
+  }
+  assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+});
+
+test('raw input budgets reject wide/nested requests without breaking catalogue envelopes', async () => {
+  for (const body of [{ records: Array.from({ length: 8000 }, () => ({})) }, Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`key${i}`, true]))]) {
+    const response = await fetch(`${origin}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /too many/);
+  }
+  const response = await fetch(`${origin}/api/items/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ propertyId: 'fixture', content: 'A'.repeat(4 * 1024 * 1024), format: 'csv' }) });
+  // The normal auth gate is reached; the upload envelope was not truncated/rejected.
+  assert.equal(response.status, 401);
+});

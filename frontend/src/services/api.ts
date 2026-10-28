@@ -77,6 +77,17 @@ export async function apiFetch<T>(
   return response.json();
 }
 
+// Only clear the local token after revocation succeeds, or the server says it is
+// already invalid. Failed persistence/network requests must remain retryable.
+export async function revokeSession(): Promise<void> {
+  try {
+    await apiFetch('/auth/logout', { method: 'POST' });
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 401)) throw error;
+  }
+  setAuthToken(null);
+}
+
 // Download helper for Excel reports
 export async function downloadFile(endpoint: string, filename: string) {
   const token = getAuthToken();

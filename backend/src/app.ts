@@ -1,3 +1,4 @@
+import { requestInputBudget } from './utils/validation';
 import { auditApiActivity } from './middleware/audit';
 import express, { Request, Response, NextFunction } from 'express';
 
@@ -24,11 +25,12 @@ configureSecurity(app);
 configureProxySecurity(app);
 
 // JSON and URL-encoded body parser
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(express.json({ limit: '5mb', inflate: false }));
+app.use(express.urlencoded({ extended: true, limit: '5mb', inflate: false }));
 
 // Apply general API rate limiter
 app.use('/api', apiLimiter);
+app.use('/api', requestInputBudget);
 app.use('/api', auditApiActivity);
 
 // Health check endpoint

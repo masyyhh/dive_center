@@ -3,7 +3,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../db';
-import { signToken, requireAccountAuth } from '../middleware/auth';
+import { signToken, requireAccountAuth, requireLogoutAuth } from '../middleware/auth';
 import { authLimiter } from '../middleware/security';
 import { logAuditEvent } from '../services/auditService';
 
@@ -24,83 +24,49 @@ authRouter.post('/login', authLimiter, async (req: Request, res: Response) => {
     }
 
     const { identifier, password } = parseResult.data;
-    const user = await findLoginUser(prisma, identifier, {
-      authenticator: { select: { enrolledAt: true } },
-      assignedProperties: { include: { property: true } },
-    });
+    // Lock the account before comparing a password: the sixth concurrent request
+    // must observe the committed lock instead of evaluating another guess.
+    const result = await prisma.$transaction(async tx => {
+      const candidate = await findLoginUser(tx, identifier);
+      if (!candidate) return { kind: 'unknown' as const };
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${candidate.id} FOR UPDATE`;
+      const user = await findLoginUser(tx, identifier, {
+        authenticator: { select: { enrolledAt: true } },
+        assignedProperties: { include: { property: true } },
+      });
+      if (!user || user.id !== candidate.id) return { kind: 'unknown' as const };
+      if (user.lockedUntil && user.lockedUntil > new Date()) return { kind: 'locked' as const, user };
+      if (!user.isActive || user.deletedAt) return { kind: 'inactive' as const, user };
+      const isMatch = await bcrypt.compare(password, user.passwordHash);
+      if (!isMatch) {
+        const attempts = user.lockedUntil ? 1 : user.failedLoginAttempts + 1;
+        const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60000) : null;
+        await tx.user.update({ where: { id: user.id }, data: { failedLoginAttempts: attempts, lockedUntil } });
+        return { kind: 'invalid' as const, user, attempts };
+      }
+      await tx.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lockedUntil: null } });
+      return { kind: 'authenticated' as const, user };
+    }, { isolationLevel: 'ReadCommitted', maxWait: 5000, timeout: 15000 });
 
-    if (!user) {
+    if (result.kind === 'unknown') {
       await logAuditEvent({ req, action: 'LOGIN_FAILED', targetType: 'User', details: { identifier, reason: 'Unknown account' } });
       return res.status(401).json({ error: 'Invalid username or password.' });
     }
-
-    // Check account lockout
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const { user } = result;
+    if (result.kind === 'locked') {
       await logAuditEvent({ req, userId: user.id, action: 'LOGIN_BLOCKED', targetType: 'User', targetId: user.id, details: { reason: 'Account locked' } });
-      const minutesRemaining = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / (60 * 1000)));
-      return res.status(423).json({
-        error: `Account is temporarily locked due to 5 consecutive wrong passwords. Please wait ${minutesRemaining} minute(s) or contact your administrator.`,
-      });
+      const minutesRemaining = Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000));
+      return res.status(423).json({ error: `Account is temporarily locked due to 5 consecutive wrong passwords. Please wait ${minutesRemaining} minute(s) or contact your administrator.` });
     }
-
-    if (!user.isActive) {
+    if (result.kind === 'inactive') {
       await logAuditEvent({ req, userId: user.id, action: 'LOGIN_BLOCKED', targetType: 'User', targetId: user.id, details: { reason: 'Account deactivated' } });
       return res.status(403).json({ error: 'Your account is deactivated. Please contact your administrator.' });
     }
-
-    const isMatch = await bcrypt.compare(password, user.passwordHash);
-
-    if (!isMatch) {
-      const newAttempts = user.failedLoginAttempts + 1;
-      let lockedUntil: Date | null = null;
-      let lockMessage = 'Invalid username or password.';
-
-      if (newAttempts >= 5) {
-        // Lock for 15 minutes
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
-        lockMessage = 'Account temporarily locked for 15 minutes due to 5 wrong passwords in a row.';
-
-        await logAuditEvent({
-          req,
-          userId: user.id,
-          action: 'ACCOUNT_LOCKED',
-          targetType: 'User',
-          targetId: user.id,
-          details: { email: user.email, reason: '5 wrong password attempts' },
-        });
-      } else {
-        await logAuditEvent({
-          req,
-          userId: user.id,
-          action: 'LOGIN_FAILED',
-          targetType: 'User',
-          targetId: user.id,
-          details: { email: user.email, attempt: newAttempts },
-        });
-      }
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: newAttempts,
-          lockedUntil,
-        },
-      });
-
-      return res.status(401).json({
-        error: lockMessage,
-        attemptsRemaining: Math.max(0, 5 - newAttempts),
-      });
+    if (result.kind === 'invalid') {
+      await logAuditEvent({ req, userId: user.id, action: result.attempts >= 5 ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILED', targetType: 'User', targetId: user.id,
+        details: { email: user.email, attempt: result.attempts } });
+      return res.status(401).json({ error: result.attempts >= 5 ? 'Account temporarily locked for 15 minutes due to 5 wrong passwords in a row.' : 'Invalid username or password.', attemptsRemaining: Math.max(0, 5 - result.attempts) });
     }
-
-    // Reset failed login attempts on successful sign-in
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        failedLoginAttempts: 0,
-        lockedUntil: null,
-      },
-    });
 
     if (user.mustChangePassword) {
       await logAuditEvent({ req, userId: user.id, action: 'LOGIN_PASSWORD_CHANGE_REQUIRED', targetType: 'User', targetId: user.id });
@@ -203,7 +169,18 @@ authRouter.get('/me', requireAccountAuth, async (req: Request, res: Response) =>
 });
 
 // The client calls this before removing its local token.
-authRouter.post('/logout', requireAccountAuth, async (req: Request, res: Response) => {
-  await logAuditEvent({ req, action: 'LOGOUT', targetType: 'User', targetId: req.user!.id });
-  return res.json({ message: 'Signed out.' });
+authRouter.post('/logout', requireLogoutAuth, async (req: Request, res: Response) => {
+  try {
+    await prisma.revokedToken.upsert({
+      where: { tokenHash: req.authenticatedTokenHash! },
+      create: { tokenHash: req.authenticatedTokenHash!, expiresAt: req.authenticatedTokenExpiresAt! },
+      update: {},
+    });
+    // Expired tokens already fail signature verification; their digest rows can go.
+    await prisma.revokedToken.deleteMany({ where: { expiresAt: { lte: new Date() } } });
+    await logAuditEvent({ req, action: 'LOGOUT', targetType: 'User', targetId: req.user!.id });
+    return res.json({ message: 'Signed out.' });
+  } catch {
+    return res.status(503).json({ error: 'Could not sign out this session. Please try again.' });
+  }
 });

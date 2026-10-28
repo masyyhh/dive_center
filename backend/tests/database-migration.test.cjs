@@ -29,8 +29,8 @@ const snapshot = (filename, badReference = false) => {
     Authenticator: { userId: 'u', version: 'binding-v1', secretCiphertext: 'preserve-encrypted-secret', recoveryCodeHashes: '["preserved-backup-hash"]', enrolledAt: timestamp },
     PasswordReset: { userId: 'u', credentialHash: 'preserved-credential', tokenHash: 'preserved-token', authenticatorVersion: 'binding-v1' },
   };
-  for (const model of Prisma.dmmf.datamodel.models) {
-    const fields = model.fields.filter(field => field.kind === 'scalar' && !(model.name === 'Property' && field.name === 'pmsPropertyCodes') && !(model.name === 'StaffMember' && field.name === 'userId'));
+  for (const model of Prisma.dmmf.datamodel.models.filter(model => Object.hasOwn(samples, model.name))) {
+    const fields = model.fields.filter(field => field.kind === 'scalar' && !(model.name === 'Property' && field.name === 'pmsPropertyCodes') && !(model.name === 'StaffMember' && field.name === 'userId') && !(model.name === 'User' && field.name === 'deletedAt'));
     sqlite.exec(`CREATE TABLE "${model.name}" (${fields.map(field => `"${field.name}" ${field.type === 'Float' ? 'REAL' : ['Int', 'Boolean'].includes(field.type) ? 'INTEGER' : 'TEXT'}`).join(',')})`);
     const values = fields.map(field => {
       if (field.name in samples[model.name]) return samples[model.name][field.name];
@@ -58,6 +58,8 @@ test('SQLite import preserves every row, credential, encrypted authenticator, da
   assert.equal(imported.length, 13); assert.equal(imported.every(row => row.count === 1), true);
   assert.equal(digest(), before);
   const user = await database.prisma.user.findUnique({ where: { id: 'u' } });
+  assert.equal(user.deletedAt, null);
+  assert.equal(await database.prisma.revokedToken.count(), 0);
   assert.equal(user.passwordHash, 'preserve-this-hash'); assert.equal(user.isActive, true);
   assert.equal(user.createdAt.toISOString(), '2025-10-20T04:00:00.000Z');
   assert.equal(user.updatedAt.getTime(), timestamp);

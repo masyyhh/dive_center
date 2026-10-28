@@ -1,3 +1,4 @@
+import { boundedArray, validationIssues } from '../utils/validation';
 import { pmsPropertyCodeSchema } from '../services/pmsService';
 import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
@@ -62,7 +63,7 @@ const propertySchema = z.object({
   code: z.preprocess(value => typeof value === 'string' && !value.trim() ? undefined : value,
     z.string().trim().min(2, 'Property code must contain at least 2 characters (e.g. SUN-BAA, OLHU).').max(10, 'Property code cannot exceed 10 characters.').optional()),
   location: z.string().optional(),
-  pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length, 'Choose each resort once.').optional(),
+  pmsPropertyCodes: boundedArray(pmsPropertyCodeSchema, 7).refine(codes => new Set(codes).size === codes.length, 'Choose each resort once.').optional(),
   pmsPropertyCode: pmsPropertyCodeSchema.nullish().or(z.literal('')).transform(value => value || null),
   currency: z.string().default('USD'),
   currencySymbol: z.string().default('$'),
@@ -71,12 +72,22 @@ const propertySchema = z.object({
   nextCheckNumber: z.number().int().positive().default(1001),
 });
 
+const propertyUpdateSchema = propertySchema.omit({ code: true, currency: true, currencySymbol: true, taxRate: true, serviceChargeRate: true, nextCheckNumber: true }).partial().extend({
+  code: z.string().trim().min(2, 'Property code must contain at least 2 characters.').max(10, 'Property code cannot exceed 10 characters.').transform(value => value.toUpperCase()).optional(),
+  currency: z.string().trim().min(1, 'Currency is required.').optional(),
+  currencySymbol: z.string().trim().min(1, 'Currency symbol is required.').optional(),
+  taxRate: z.number().min(0).max(100).optional(),
+  serviceChargeRate: z.number().min(0).max(100).optional(),
+  nextCheckNumber: z.number().int().positive().optional(),
+  isActive: z.boolean().optional(),
+});
+
 // POST /api/properties (GLOBAL_ADMIN only)
 propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
   try {
     const parseResult = propertySchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: parseResult.error.errors[0].message, details: parseResult.error.errors });
+      return res.status(400).json({ error: validationIssues(parseResult.error)[0].message, details: validationIssues(parseResult.error) });
     }
 
     const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
@@ -152,18 +163,16 @@ propertiesRouter.put(
   async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
-      const { name, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber, isActive } =
-        req.body;
-
       // Ensure manager has access if not global admin
       if (req.user!.role !== 'GLOBAL_ADMIN' && !req.user!.assignedPropertyIds.includes(id)) {
         return res.status(403).json({ error: 'Unauthorized to modify this property.' });
       }
 
-      const pmsCode = z.object({ pmsPropertyCodes: z.array(pmsPropertyCodeSchema).max(7).refine(codes => new Set(codes).size === codes.length).optional(), pmsPropertyCode: pmsPropertyCodeSchema.nullable().or(z.literal('')).optional() }).safeParse(req.body);
-      if (!pmsCode.success) return res.status(400).json({ error: 'Select a valid PMS resort code.' });
-      if (req.user!.role !== 'GLOBAL_ADMIN' && (pmsCode.data.pmsPropertyCode !== undefined || pmsCode.data.pmsPropertyCodes !== undefined)) {
-        return res.status(403).json({ error: 'Only global administrators can change the PMS resort mapping.' });
+      const parsed = propertyUpdateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: validationIssues(parsed.error)[0].message, details: validationIssues(parsed.error) });
+      const { pmsPropertyCode, pmsPropertyCodes, code, ...fields } = parsed.data;
+      if (req.user!.role !== 'GLOBAL_ADMIN' && (pmsPropertyCode !== undefined || pmsPropertyCodes !== undefined || code !== undefined)) {
+        return res.status(403).json({ error: 'Only global administrators can change the property code or PMS resort mapping.' });
       }
       const current = await prisma.property.findUnique({ where: { id }, select: { deletedAt: true } });
       if (!current) return res.status(404).json({ error: 'Property not found.' });
@@ -171,17 +180,11 @@ propertiesRouter.put(
       const updated = await prisma.property.update({
         where: { id },
         data: {
-          ...(pmsCode.data.pmsPropertyCodes !== undefined
-            ? { pmsPropertyCodes: pmsCode.data.pmsPropertyCodes, pmsPropertyCode: pmsCode.data.pmsPropertyCodes[0] ?? null }
-            : pmsCode.data.pmsPropertyCode !== undefined ? { pmsPropertyCode: pmsCode.data.pmsPropertyCode || null, pmsPropertyCodes: pmsCode.data.pmsPropertyCode ? [pmsCode.data.pmsPropertyCode] : [] } : {}),
-          name: name ?? undefined,
-          location: location ?? undefined,
-          currency: currency ?? undefined,
-          currencySymbol: currencySymbol ?? undefined,
-          taxRate: taxRate !== undefined ? Number(taxRate) : undefined,
-          serviceChargeRate: serviceChargeRate !== undefined ? Number(serviceChargeRate) : undefined,
-          nextCheckNumber: nextCheckNumber !== undefined ? Number(nextCheckNumber) : undefined,
-          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+          ...fields,
+          code,
+          ...(pmsPropertyCodes !== undefined
+            ? { pmsPropertyCodes, pmsPropertyCode: pmsPropertyCodes[0] ?? null }
+            : pmsPropertyCode !== undefined ? { pmsPropertyCode: pmsPropertyCode || null, pmsPropertyCodes: pmsPropertyCode ? [pmsPropertyCode] : [] } : {}),
         },
       });
 
@@ -191,11 +194,12 @@ propertiesRouter.put(
         action: 'PROPERTY_UPDATE',
         targetType: 'Property',
         targetId: updated.id,
-        details: { name: updated.name, pmsPropertyCodes: updated.pmsPropertyCodes },
+        details: { name: updated.name, code: updated.code, pmsPropertyCodes: updated.pmsPropertyCodes },
       });
 
       return res.json({ property: updated });
     } catch (error) {
+      if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This property code is already in use, including retained historical properties. Choose another code.' });
       console.error('Update property error:', error);
       return res.status(500).json({ error: 'Failed to update property.' });
     }

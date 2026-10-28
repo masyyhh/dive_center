@@ -1,3 +1,4 @@
+import { validationIssues } from '../utils/validation';
 import bcrypt from 'bcryptjs';
 import { usernameSchema } from '../utils/identity';
 import { passwordSchema } from '../utils/password';
@@ -80,7 +81,7 @@ staffRouter.post(
     try {
       const parseResult = staffSchema.safeParse(req.body);
       if (!parseResult.success) {
-        return res.status(400).json({ error: 'Validation failed', details: parseResult.error.errors });
+        return res.status(400).json({ error: 'Validation failed', details: validationIssues(parseResult.error) });
       }
 
       const { loginAccess, ...data } = parseResult.data;

@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 export const catalogueHeaders = ['Item Code', 'Items', 'Category', 'Price', 'Commission', 'Status'];
 const poolType = z.enum(['NONE', 'COURSE_POOL', 'DIVE_POOL']);
-const rates = z.record(z.enum(['seller', 'guide', 'instructor', 'photo', 'video']), z.number().finite().nonnegative());
+const rates = z.partialRecord(z.enum(['seller', 'guide', 'instructor', 'photo', 'video']), z.number().finite().nonnegative());
 const commissionSchema = z.object({ poolType, poolContribution: z.number().finite().nonnegative(), personalRates: rates.default({}) }).strict();
 export type CatalogueRow = { row: number; code: string; name: string; category: string; price: number; isActive: boolean; commission: z.infer<typeof commissionSchema> };
 export class CatalogueError extends Error {}

@@ -1,3 +1,5 @@
+import { boundedArray, validationIssues } from '../utils/validation';
+import { withSerializableTransaction } from '../utils/transactions';
 import { usernameSchema } from '../utils/identity';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
@@ -21,7 +23,8 @@ usersRouter.get('/', accountManagers, async (req: Request, res: Response) => {
     const managerPropertyIds = req.user!.assignedPropertyIds;
     const users = await prisma.user.findMany({
       // All assignments must be managed by the caller because a password controls the whole account.
-      where: req.user!.role === 'GLOBAL_ADMIN' ? {} : {
+      where: req.user!.role === 'GLOBAL_ADMIN' ? { deletedAt: null } : {
+        deletedAt: null,
         role: 'CENTRE_STAFF',
         assignedProperties: {
           some: { propertyId: { in: managerPropertyIds } },
@@ -63,7 +66,7 @@ const createUserSchema = z.object({
   name: z.string().min(2),
   password: passwordSchema,
   role: z.enum(['GLOBAL_ADMIN', 'PROPERTY_MANAGER', 'CENTRE_STAFF']),
-  propertyIds: z.array(z.string()).optional(),
+  propertyIds: boundedArray(z.string(), 1000).optional(),
 });
 
 // POST /api/users
@@ -71,7 +74,7 @@ usersRouter.post('/', accountManagers, async (req: Request, res: Response) => {
   try {
     const parseResult = createUserSchema.safeParse(req.body);
     if (!parseResult.success) {
-      return res.status(400).json({ error: parseResult.error.errors[0].message, details: parseResult.error.errors });
+      return res.status(400).json({ error: validationIssues(parseResult.error)[0].message, details: validationIssues(parseResult.error) });
     }
 
     const { username, email, name, password, role, propertyIds } = parseResult.data;
@@ -135,69 +138,81 @@ usersRouter.post('/', accountManagers, async (req: Request, res: Response) => {
   }
 });
 
+const updateUserSchema = createUserSchema.omit({ password: true }).partial().extend({
+  name: z.string().trim().min(2, 'Name must contain at least 2 characters.').optional(),
+  isActive: z.boolean().optional(),
+  propertyIds: boundedArray(z.string().min(1), 1000).refine(ids => new Set(ids).size === ids.length, 'Choose each property once.').optional(),
+}).strict().refine(data => Object.keys(data).length > 0, 'Provide account details to update.');
+
 // PUT /api/users/:id
 usersRouter.put('/:id', requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
+  const parsed = updateUserSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: validationIssues(parsed.error)[0].message });
+  const id = String(req.params.id);
+  const { propertyIds, ...fields } = parsed.data;
+  if (id === req.user!.id && (fields.isActive === false || (fields.role !== undefined && fields.role !== 'GLOBAL_ADMIN'))) {
+    return res.status(400).json({ error: 'You cannot disable or demote your own administrator account.' });
+  }
   try {
-    const id = String(req.params.id);
-    const { name, role, propertyIds, isActive } = req.body;
-
-    const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    if (Array.isArray(propertyIds)) {
-      if (propertyIds.some(id => typeof id !== 'string') || new Set(propertyIds).size !== propertyIds.length || await prisma.property.count({ where: { id: { in: propertyIds }, isActive: true, deletedAt: null } }) !== propertyIds.length) {
-        return res.status(400).json({ error: 'Assign only valid, active properties.' });
+    const result = await withSerializableTransaction(prisma, async tx => {
+      const actor = await tx.user.findUnique({ where: { id: req.user!.id } });
+      if (!actor?.isActive || actor.deletedAt || actor.role !== 'GLOBAL_ADMIN') return { status: 403, error: 'Global administrator access required.' };
+      const existing = await tx.user.findUnique({ where: { id } });
+      if (!existing || existing.deletedAt) return { status: 404, error: 'User not found.' };
+      if (propertyIds && await tx.property.count({ where: { id: { in: propertyIds }, deletedAt: null, OR: [{ isActive: true }, { users: { some: { userId: id } } }] } }) !== propertyIds.length) {
+        return { status: 400, error: 'New assignments must use valid, active properties.' };
       }
-    }
-
-    // Update basic fields
-    await prisma.user.update({
-      where: { id },
-      data: {
-        name: name ?? undefined,
-        role: role ?? undefined,
-        isActive: isActive !== undefined ? Boolean(isActive) : undefined,
-      },
-    });
-
-    // If propertyIds provided, update relations
-    if (Array.isArray(propertyIds)) {
-      await prisma.userProperty.deleteMany({ where: { userId: id } });
-      await prisma.userProperty.createMany({
-        data: propertyIds.map((propertyId: string) => ({ userId: id, propertyId })),
+      if (fields.username && await tx.user.findFirst({ where: { id: { not: id }, OR: [{ username: fields.username }, { email: fields.username }] } })) {
+        return { status: 409, error: 'This username is already in use.' };
+      }
+      const updated = await tx.user.update({
+        where: { id },
+        data: { ...fields, ...(propertyIds !== undefined ? { assignedProperties: { deleteMany: {}, create: propertyIds.map(propertyId => ({ propertyId })) } } : {}) },
+        select: { id: true, username: true, email: true, name: true, role: true, isActive: true, assignedProperties: { include: { property: true } } },
       });
-    }
-
-    const updated = await prisma.user.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        assignedProperties: {
-          include: { property: true },
-        },
-      },
+      await tx.auditLog.create({ data: {
+        userId: req.user!.id, action: 'USER_UPDATE', targetType: 'User', targetId: id,
+        details: JSON.stringify({ updatedFields: parsed.data }), ipAddress: req.ip || null,
+      } });
+      return { user: { ...updated, assignedProperties: updated.assignedProperties.map(assignment => assignment.property) } };
     });
-
-    await logAuditEvent({
-      req,
-      userId: req.user!.id,
-      action: 'USER_UPDATE',
-      targetType: 'User',
-      targetId: id,
-      details: { updatedFields: { name, role, isActive, propertyIds } },
-    });
-
-    return res.json({ user: updated });
+    if (result.status !== undefined) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
   } catch (error) {
-    console.error('Update user error:', error);
+    if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This username is already in use.' });
+    console.error('Update user failed.');
     return res.status(500).json({ error: 'Failed to update user.' });
+  }
+});
+
+// Retain account references for bills, payroll and audit history while revoking access.
+usersRouter.delete('/:id', requireRole('GLOBAL_ADMIN'), async (req: Request, res: Response) => {
+  const parsed = z.object({ confirmationUsername: usernameSchema }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Enter the username to confirm deletion.' });
+  const id = String(req.params.id);
+  if (id === req.user!.id) return res.status(400).json({ error: 'You cannot delete your own administrator account.' });
+  try {
+    const result = await withSerializableTransaction(prisma, async tx => {
+      const actor = await tx.user.findUnique({ where: { id: req.user!.id } });
+      if (!actor?.isActive || actor.deletedAt || actor.role !== 'GLOBAL_ADMIN') return { status: 403, error: 'Global administrator access required.' };
+      const target = await tx.user.findUnique({ where: { id } });
+      if (!target || target.deletedAt) return { status: 404, error: 'User not found or already deleted.' };
+      if (target.username !== parsed.data.confirmationUsername) return { status: 400, error: 'The username does not match this account.' };
+      await tx.user.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+      await tx.userProperty.deleteMany({ where: { userId: id } });
+      await tx.authenticator.deleteMany({ where: { userId: id } });
+      await tx.passwordReset.deleteMany({ where: { userId: id } });
+      await tx.auditLog.create({ data: {
+        userId: req.user!.id, action: 'USER_DELETE', targetType: 'User', targetId: id,
+        details: JSON.stringify({ username: target.username, name: target.name, historyRetained: true }), ipAddress: req.ip || null,
+      } });
+      return { message: 'User deleted. Access revoked; billing, payroll and audit history retained.' };
+    });
+    if (result.status !== undefined) return res.status(result.status).json({ error: result.error });
+    return res.json(result);
+  } catch {
+    console.error('Delete user failed.');
+    return res.status(500).json({ error: 'Failed to delete user.' });
   }
 });
 
@@ -213,43 +228,32 @@ usersRouter.post('/:id/reset-password', accountManagers, async (req: Request, re
       return res.status(400).json({ error: passwordPolicyMessage });
     }
 
-    const target = await prisma.user.findUnique({
-      where: { id },
-      select: { id: true, role: true, assignedProperties: { select: { propertyId: true } } },
-    });
-    if (!target) return res.status(404).json({ error: 'User not found.' });
-
-    if (req.user!.role === 'PROPERTY_MANAGER') {
-      const canReset = target.role === 'CENTRE_STAFF' && target.assignedProperties.length > 0 &&
-        target.assignedProperties.every(assignment => req.user!.assignedPropertyIds.includes(assignment.propertyId));
-      if (!canReset) {
-        return res.status(403).json({ error: 'You can only reset passwords for staff whose properties you manage.' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await withSerializableTransaction(prisma, async tx => {
+      const actor = await tx.user.findUnique({ where: { id: req.user!.id }, include: { assignedProperties: { include: { property: true } } } });
+      if (!actor?.isActive || actor.deletedAt || actor.mustChangePassword || actor.passwordHash !== req.authenticatedPasswordHash || (actor.lockedUntil && actor.lockedUntil > new Date()) || !['GLOBAL_ADMIN', 'PROPERTY_MANAGER'].includes(actor.role) || (req.authenticatedTokenHash && await tx.revokedToken.findUnique({ where: { tokenHash: req.authenticatedTokenHash } }))) {
+        return { status: 403, error: 'Account management access is no longer available.' };
       }
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
-
-    const update = { where: { id }, data: { passwordHash, mustChangePassword: true, failedLoginAttempts: 0, lockedUntil: null } };
-    if (resetAuthenticator) {
-      await prisma.$transaction(async tx => {
-        await tx.user.update(update);
+      const target = await tx.user.findUnique({ where: { id }, include: { assignedProperties: true } });
+      if (!target || target.deletedAt) return { status: 404, error: 'User not found.' };
+      const managed = new Set(actor.assignedProperties.filter(assignment => !assignment.property.deletedAt).map(assignment => assignment.propertyId));
+      if (actor.role === 'PROPERTY_MANAGER' && (target.role !== 'CENTRE_STAFF' || !target.assignedProperties.length || !target.assignedProperties.every(assignment => managed.has(assignment.propertyId)))) {
+        return { status: 403, error: 'You can only reset passwords for staff whose properties you manage.' };
+      }
+      await tx.user.update({ where: { id }, data: { passwordHash, mustChangePassword: true, failedLoginAttempts: 0, lockedUntil: null } });
+      if (resetAuthenticator) {
         await tx.authenticator.deleteMany({ where: { userId: id } });
         await tx.passwordReset.deleteMany({ where: { userId: id } });
-      });
-    } else {
-      await prisma.user.update(update);
-    }
-
-    await logAuditEvent({
-      req,
-      userId: req.user!.id,
-      action: 'PASSWORD_RESET',
-      targetType: 'User',
-      targetId: id,
-      propertyId: target.assignedProperties[0]?.propertyId,
-      details: { message: 'Password reset by account manager', actorRole: req.user!.role, authenticatorCleared: Boolean(resetAuthenticator) },
+      }
+      await tx.auditLog.create({ data: {
+        userId: actor.id, action: 'PASSWORD_RESET', targetType: 'User', targetId: id,
+        propertyId: target.assignedProperties[0]?.propertyId ?? null,
+        details: JSON.stringify({ message: 'Password reset by account manager', actorRole: actor.role, authenticatorCleared: Boolean(resetAuthenticator) }),
+        ipAddress: req.ip || null,
+      } });
+      return { status: 200 };
     });
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
 
     return res.json({ message: 'Password updated successfully. Account lock has been cleared.' });
   } catch (error) {
@@ -264,6 +268,8 @@ usersRouter.post('/:id/unlock', requireRole('GLOBAL_ADMIN'), async (req: Request
   try {
     const id = String(req.params.id);
 
+    const target = await prisma.user.findUnique({ where: { id }, select: { deletedAt: true } });
+    if (!target || target.deletedAt) return res.status(404).json({ error: 'User not found.' });
     await prisma.user.update({
       where: { id },
       data: {

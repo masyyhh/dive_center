@@ -104,7 +104,8 @@ test('password reset invalidates old tokens, rejects legacy/invalid JWT claims, 
   };
   assert.equal((await authorize(token)).allowed, true);
   const { usersRouter } = loadTypeScript('src/routes/users.routes.ts', stubs);
-  const reset = await request(usersRouter, 'POST', '/manager/reset-password', { user: { ...actor, role: 'GLOBAL_ADMIN' }, body: { password: 'NewPass1!abc' } });
+  await prisma.user.create({ data: { id: 'reset-admin', username: 'reset-admin', name: 'Administrator', role: 'GLOBAL_ADMIN', passwordHash: 'fixture-admin' } });
+  const reset = await request(usersRouter, 'POST', '/manager/reset-password', { user: { id: 'reset-admin', role: 'GLOBAL_ADMIN', assignedPropertyIds: [] }, authenticatedPasswordHash: 'fixture-admin', body: { password: 'NewPass1!abc' } });
   assert.equal(reset.status, 200);
   assert.equal((await authorize(token)).status, 401);
   const user = await prisma.user.findUnique({ where: { id: actor.id } });
@@ -116,6 +117,7 @@ test('password reset invalidates old tokens, rejects legacy/invalid JWT claims, 
     assert.equal((await authorize(forged)).status, 401);
   }
   assert.equal((await authorize(jwt.sign({ id: actor.id }, secret, { algorithm: 'HS384' }))).status, 401);
+  await prisma.user.delete({ where: { id: 'reset-admin' } });
 });
 test('missing and default signing keys fail closed', () => {
   const { loadJwtSecret } = loadTypeScript('src/config/secrets.ts');
