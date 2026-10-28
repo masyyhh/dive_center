@@ -1,0 +1,26 @@
+# NPM forwards the entire application to port 8080; no NPM changes required.
+# Compose >= 2.24.4. NPM_PROXY_IP must be ONE exact source IP seen by Caddy.
+services:
+  backend:
+    environment:
+      TRUST_PROXY: "0"
+      TRUST_PROXY_ADDRESSES: ${PROXY_RELAY_CADDY_IP:-172.30.251.2}
+      REQUIRE_TRUSTED_PROXY: "1"
+    ports: !reset []
+    networks:
+      default: {}
+      proxy_relay:
+        ipv4_address: ${PROXY_RELAY_BACKEND_IP:-172.30.251.3}
+  web:
+    environment:
+      NPM_PROXY_IP: ${NPM_PROXY_IP:?Set the exact NPM source IP seen by Caddy}
+    volumes:
+      - ./deploy/Caddyfile.proxy-relay:/etc/caddy/Caddyfile:ro
+    networks:
+      proxy_relay:
+        ipv4_address: ${PROXY_RELAY_CADDY_IP:-172.30.251.2}
+networks:
+  proxy_relay:
+    ipam:
+      config:
+        - subnet: ${PROXY_RELAY_SUBNET:-172.30.251.0/29}

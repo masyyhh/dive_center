@@ -188,3 +188,40 @@ test('legacy proxy deployment commands retain restrictions and CI exceptions sta
   assert.match(smoke, /127\.0\.0\.1:80:80/);
   assert.match(smoke, /TRUST_PROXY_ADDRESSES: !reset null/);
 });
+
+test('single-port NPM relay keeps Node internal and trusts a stable isolated Caddy address', () => {
+  const config = fs.readFileSync(path.join(source, 'deploy/compose.proxy-relay.yaml'), 'utf8');
+  assert.match(config, /ports: !reset \[\]/);
+  assert.match(config, /TRUST_PROXY_ADDRESSES: \$\{PROXY_RELAY_CADDY_IP:-172\.30\.251\.2\}/);
+  assert.match(config, /REQUIRE_TRUSTED_PROXY: "1"/);
+  assert.match(config, /NPM_PROXY_IP: \$\{NPM_PROXY_IP:\?/);
+  assert.match(config, /ipv4_address: \$\{PROXY_RELAY_CADDY_IP:-172\.30\.251\.2\}/);
+  assert.match(config, /ipv4_address: \$\{PROXY_RELAY_BACKEND_IP:-172\.30\.251\.3\}/);
+  const web = config.slice(config.indexOf('  web:'));
+  assert.doesNotMatch(web, /default:/);
+  assert.match(config, /Caddyfile\.proxy-relay:\/etc\/caddy\/Caddyfile:ro/);
+});
+
+test('relay rejects untrusted TCP peers before accepting forwarded HTTPS or proxying API requests', () => {
+  const config = fs.readFileSync(path.join(source, 'deploy/Caddyfile.proxy-relay'), 'utf8');
+  assert.match(config, /auto_https off/);
+  assert.match(config, /trusted_proxies static \{\$NPM_PROXY_IP\}/);
+  assert.match(config, /trusted_proxies_strict/);
+  assert.match(config, /@untrusted not remote_ip \{\$NPM_PROXY_IP\}/);
+  assert.match(config, /respond @untrusted .* 403/);
+  assert.match(config, /@insecure not header X-Forwarded-Proto https/);
+  assert.match(config, /respond @insecure .* 403/);
+  assert(config.indexOf('respond @untrusted') < config.indexOf('respond @insecure'));
+  assert(config.indexOf('respond @insecure') < config.indexOf('reverse_proxy backend:5001'));
+  assert.match(config, /header_up X-Forwarded-For \{client_ip\}/);
+  assert.doesNotMatch(config, /private_ranges|172\.18\.0\.4/);
+});
+
+test('relay smoke tooling refuses execution outside a disposable CI project', () => {
+  assert.notEqual(spawnSync('sh', [path.join(source, 'scripts/test-proxy-relay.sh')], {
+    env: { ...process.env, CI: '', COMPOSE_PROJECT_NAME: '' },
+  }).status, 0);
+  assert.notEqual(spawnSync('sh', [path.join(source, 'scripts/test-proxy-relay.sh')], {
+    env: { ...process.env, CI: 'true', COMPOSE_PROJECT_NAME: 'dive-centre' },
+  }).status, 0);
+});

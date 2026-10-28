@@ -39,10 +39,20 @@ jobs:
       - run: npm run build --prefix frontend
       - run: node scripts/prepare-production.cjs ci.example.test ci@example.test
       - run: docker compose --env-file .env.production build
+      - name: Validate the NPM relay configuration
+        env:
+          NPM_PROXY_IP: 192.0.2.10
+        run: |
+          docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml config --quiet
+          docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml run --rm --no-deps web caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Exercise container startup and backup restore
         env:
           COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
         run: sh scripts/smoke-production.sh
+      - name: Exercise single-port NPM relay security
+        env:
+          COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: sh scripts/test-proxy-relay.sh
       - name: Container diagnostics
         if: failure()
         env:
@@ -51,5 +61,6 @@ jobs:
       - name: Remove disposable CI volumes
         if: always()
         env:
+          NPM_PROXY_IP: 192.0.2.10
           COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
-        run: docker compose --env-file .env.production -f compose.yaml -f deploy/compose.smoke.yaml down --volumes --remove-orphans
+        run: docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml down --volumes --remove-orphans

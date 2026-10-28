@@ -78,3 +78,6 @@ Production uses an external HTTPS reverse proxy. Node port 5001 and frontend
 HTTP port 8080 bind to loopback by default; configure the private bind address,
 actual trusted proxy source and firewall before deploying. Caddy certificate
 issuance is disabled. See [proxy deployment](deploy/REVERSE-PROXY.md).
+
+If Nginx Proxy Manager is managed by someone else and already forwards the
+whole site to 8080, use [proxy relay mode](deploy/PROXY-RELAY.md).

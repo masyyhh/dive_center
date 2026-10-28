@@ -1,5 +1,9 @@
 # External reverse proxy on a private network
 
+If you cannot change NPM and it forwards everything to 8080, use
+[the proxy relay mode](PROXY-RELAY.md). It keeps Node internal and validates
+NPM at Caddy. The split-routing instructions below apply to the base mode.
+
 Use this mode when another server terminates public HTTPS and this application
 server provides both the React website and Node API. The external proxy routes
 `/api` and `/api/*` to port 5001, and all other paths to port 8080. Port 5001 is
