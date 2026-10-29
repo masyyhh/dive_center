@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, ArrowUpRight, X } from 'lucide-react';
+import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X } from 'lucide-react';
 
-export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin';
-export const navLabels: Record<NavTab, string> = { home: 'Overview', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
+export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin' | 'water-sports';
+export const navLabels: Record<NavTab, string> = { home: 'Overview', 'water-sports': 'Water sports', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
 interface SubNavProps { currentTab: NavTab; onTabChange: (tab: NavTab) => void; open: boolean; onClose: () => void; }
 
 export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, onClose }) => {
@@ -29,6 +29,7 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
   const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
   const items = [
     { id: 'home' as NavTab, icon: LayoutDashboard }, { id: 'bills' as NavTab, icon: Receipt },
+    { id: 'water-sports' as NavTab, icon: Waves },
     { id: 'presence' as NavTab, icon: CalendarCheck }, { id: 'reporting' as NavTab, icon: BarChart3 },
   ];
   const navigate = (tab: NavTab) => { onTabChange(tab); onClose(); };

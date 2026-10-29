@@ -32,6 +32,9 @@ model Property {
   attendanceRecords   Attendance[]
   monthLocks          MonthLock[]
   auditLogs           AuditLog[]
+  waterSportsDocuments WaterSportsDocument[]
+  waterSportsSessions WaterSportsSession[]
+  waterSportsRecords WaterSportsRecord[]
 }
 
 model User {
@@ -56,6 +59,9 @@ model User {
   createdBills        Bill[]         @relation("CreatedBills")
   auditLogs           AuditLog[]
   monthLocksCreated   MonthLock[]
+  waterSportsDocuments WaterSportsDocument[]
+  waterSportsSessions WaterSportsSession[]
+  waterSportsRecords WaterSportsRecord[]
 
   @@index([email])
 }
@@ -291,4 +297,72 @@ model RevokedToken {
   expiresAt DateTime
 
   @@index([expiresAt])
+}
+
+// Published documents are append-only. Sessions pin the versions offered at handoff.
+model WaterSportsDocument {
+  id           String   @id @default(uuid())
+  propertyId   String
+  kind         String
+  language     String
+  languageName String
+  title        String
+  body         String
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, kind, language, createdAt])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+}
+
+model WaterSportsSession {
+  id           String   @id @default(uuid())
+  propertyId   String
+  formType     String
+  roomNumber   String
+  staffFields  Json
+  documents    Json
+  candidates   Json     @default("[]")
+  tokenHash    String   @unique
+  lookupCount  Int      @default(0)
+  createdById  String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  record       WaterSportsRecord?
+
+  @@index([propertyId, createdAt])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+}
+
+model WaterSportsRecord {
+  id               String   @id @default(uuid())
+  runningNumber    Int      @unique @default(autoincrement())
+  sessionId        String   @unique
+  session          WaterSportsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  propertyId       String
+  formType         String
+  businessDate     String
+  guestName        String
+  roomNumber       String
+  departureDate    String?
+  confirmationNumber String?
+  pmsPropertyCode  String
+  staffFields      Json
+  documentSnapshot Json
+  documentHash     String
+  isMinor          Boolean
+  guardianName     String?
+  signature        Json
+  createdById      String
+  signedAt         DateTime @default(now())
+
+  @@index([propertyId, businessDate, runningNumber])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
 }

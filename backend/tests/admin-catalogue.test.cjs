@@ -110,7 +110,7 @@ test('CSV and Excel exports round-trip all six fields; imports update only match
   assert.equal(updated.status, 200);
   assert.equal((await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: 'DIV-006' } } })).price, 80);
   const before = await prisma.item.count();
-  assert.equal((await importFile([['DIV-999', 'Unknown', 'Diving', 10, 0, 'Active']], { preview: false })).status, 400);
+  assert.equal((await importFile([['DIV-006', 'Duplicate', 'Diving', 10, 10, 'Active'], ['DIV-006', 'Duplicate again', 'Diving', 10, 10, 'Active']], { preview: false })).status, 400);
   assert.equal((await importFile([['', 'Foreign', 'Diving', 10, 0, 'Active']], { propertyId: 'b', preview: false })).status, 403);
   assert.equal((await importFile([['', 'No rights', 'Diving', 10, 0, 'Active']], { preview: false }, staff)).status, 403);
   assert.equal((await exportFile('csv', staff)).status, 403);
@@ -141,4 +141,35 @@ test('spreadsheet formulas are rejected and formula-like item names remain safe 
   assert(exported.bytes.toString().includes("'=SUM(1,2)"));
   assert.equal((await call(itemsRouter, 'POST', '/import', { propertyId: 'a', format: 'csv', content: exported.bytes.toString('base64'), preview: false })).status, 200);
   assert.equal(await prisma.item.count({ where: { name: '=SUM(1,2)' } }), 1);
+});
+
+test('imports retain supplied codes, reserve them before generation, and update on reimport', async () => {
+  const rows = [
+    ['', 'Generated activity', 'Legacy', 25, 0, 'Active'],
+    ['LEG-001', 'Supplied sequential code', 'Legacy', 30, 0, 'Active'],
+    ['13152', 'Original activity code', 'Legacy', 75, 10, 'Active'],
+    ['00123', 'Leading zero code', 'Legacy', 80, 10, 'Inactive'],
+  ];
+  const before = await prisma.item.count();
+  const preview = await importFile(rows);
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.created, 4); assert.equal(preview.body.updated, 0);
+  assert.equal(preview.body.previewRows[2].code, '13152');
+  assert.equal(await prisma.item.count(), before);
+  const committed = await importFile(rows, { preview: false });
+  assert.equal(committed.status, 200);
+  assert.equal(committed.body.created, 4); assert.equal(committed.body.updated, 0);
+  const saved = await prisma.item.findMany({ where: { propertyId: 'a', category: { name: 'Legacy' } } });
+  assert.deepEqual(saved.map(item => item.code).sort(), ['00123', '13152', 'LEG-001', 'LEG-002']);
+  const again = await importFile([['13152', 'Renamed activity', 'Legacy', 90, 10, 'Active']], { preview: false });
+  assert.equal(again.status, 200);
+  assert.equal(again.body.created, 0); assert.equal(again.body.updated, 1);
+  assert.equal(await prisma.item.count(), before + 4);
+  const updated = await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: '13152' } } });
+  assert.equal(updated.price, 90);
+  const audit = await prisma.auditLog.findFirst({ where: { targetId: updated.id, action: 'ITEM_CREATE' } });
+  assert(audit);
+  const other = await importFile([['13152', 'Other property activity', 'Legacy', 20, 0, 'Active']], { propertyId: 'b', preview: false }, admin);
+  assert.equal(other.status, 200); assert.equal(other.body.created, 1); assert.equal(other.body.updated, 0);
+  assert.equal((await prisma.item.findUnique({ where: { id: updated.id } })).price, 90);
 });
