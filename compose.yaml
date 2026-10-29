@@ -33,6 +33,7 @@ services:
     init: true
     environment:
       NODE_ENV: production
+      ENABLE_WATER_SPORTS: ${ENABLE_WATER_SPORTS:-false}
       DATABASE_URL_FILE: /run/secrets/database_url
       AUTHENTICATOR_ENCRYPTION_KEY_FILE: /run/secrets/authenticator_key
       JWT_SECRET_FILE: /run/secrets/jwt_secret
@@ -76,6 +77,7 @@ services:
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2-alpine}
+        VITE_ENABLE_WATER_SPORTS: ${ENABLE_WATER_SPORTS:-false}
     restart: unless-stopped
     ports:
       - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:8080:8080"

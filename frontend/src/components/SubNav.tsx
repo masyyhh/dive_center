@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { waterSportsEnabled } from '../features';
 import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X } from 'lucide-react';
 
 export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin' | 'water-sports';
@@ -29,7 +30,7 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
   const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
   const items = [
     { id: 'home' as NavTab, icon: LayoutDashboard }, { id: 'bills' as NavTab, icon: Receipt },
-    { id: 'water-sports' as NavTab, icon: Waves },
+    ...(waterSportsEnabled ? [{ id: 'water-sports' as NavTab, icon: Waves }] : []),
     { id: 'presence' as NavTab, icon: CalendarCheck }, { id: 'reporting' as NavTab, icon: BarChart3 },
   ];
   const navigate = (tab: NavTab) => { onTabChange(tab); onClose(); };

@@ -5,7 +5,10 @@ import { useAuth } from './context/AuthContext';
 import { useProperty } from './context/PropertyContext';
 import { Navbar } from './components/Navbar';
 import { SubNav, NavTab, navLabels } from './components/SubNav';
-const WaterSportsView = lazy(() => import('./components/WaterSportsView').then(module => ({ default: module.WaterSportsView })));
+import { waterSportsEnabled } from './features';
+const WaterSportsView = waterSportsEnabled
+  ? lazy(() => import('./components/WaterSportsView').then(module => ({ default: module.WaterSportsView })))
+  : () => null;
 const HomeDashboard = lazy(() => import('./components/HomeDashboard').then(module => ({ default: module.HomeDashboard })));
 const NewBillView = lazy(() => import('./components/NewBillView').then(module => ({ default: module.NewBillView })));
 const BillsView = lazy(() => import('./components/BillsView').then(module => ({ default: module.BillsView })));
@@ -16,7 +19,7 @@ import { LoginView } from './components/LoginView';
 import { useNavigation } from './context/NavigationContext';
 import { Waves } from 'lucide-react';
 
-const validTabs = Object.keys(navLabels);
+const validTabs = Object.keys(navLabels).filter(tab => tab !== 'water-sports' || waterSportsEnabled);
 const readTab = (): NavTab => validTabs.includes(location.hash.slice(1).split('/')[0]) ? location.hash.slice(1).split('/')[0] as NavTab : 'home';
 const readSection = () => location.hash.slice(1).split('/')[1] || '';
 export const AppContent: React.FC = () => {
@@ -95,7 +98,7 @@ export const AppContent: React.FC = () => {
     <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => setSecurityOpen(true))} />
       <main id="main-content" className={`main-content view-${currentTab}`} ref={mainRef} tabIndex={-1}>
         {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
-          {currentTab === 'water-sports' && <WaterSportsView />}
+          {waterSportsEnabled && currentTab === 'water-sports' && <WaterSportsView />}
           {currentTab === 'home' && <HomeDashboard onNavigate={navigate} />}
           {currentTab === 'new-bill' && <><div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1><p>Add activities, assign your guest, and review the total before saving.</p></div><NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
           {currentTab === 'bills' && <BillsView savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}

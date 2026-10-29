@@ -61,7 +61,7 @@ Use the [production runbook](deploy/PRODUCTION.md) for Docker Compose, HTTPS, se
 
 Private backups, reference materials and the previous SQLite schema are retained under ignored `backups/`. Local databases, credentials, reference PDFs, development dependencies and build outputs are excluded from production build contexts. Production uses compiled backend code with runtime dependencies and a static frontend served by Caddy.
 
-Catalogue managers can export Excel/CSV and preview imports in Administration → Activities. The six columns are `Item Code`, `Items`, `Category`, `Price`, `Commission`, `Status`. Supply your own codes to create new items; matching codes update only this property's existing items. Leave codes blank to generate them automatically. Generated codes use the category's first three letters and a property-local sequence (e.g. `DIV-001`), including archived codes when allocating the next number. Codes remain stable after category changes. Commission accepts a nonnegative pool amount (course categories use the course pool, others the dive pool), or the full JSON object exported by the app: `{"poolType":"DIVE_POOL","poolContribution":10,"personalRates":{"guide":5}}`. Status is `Active` or `Inactive`. Imports validate all rows before any writes and preserve pool rules used on saved bills.
+Catalogue managers can export Excel/CSV and preview imports in Administration → Activities. The six columns are `Item Code`, `Items`, `Category`, `Price`, `Commission`, `Status`. Existing codes update only this property's items; new supplied codes (e.g. `13152`) are preserved when creating items. Leave codes blank to generate them from the category's first three letters and a property-local sequence (e.g. `DIV-001`), reserving archived codes and every supplied code in the file before allocating the next number. Codes remain stable after category changes. Commission accepts a nonnegative pool amount (course categories use the course pool, others the dive pool), or the full JSON object exported by the app: `{"poolType":"DIVE_POOL","poolContribution":10,"personalRates":{"guide":5}}`. Status is `Active` or `Inactive`. Imports validate all rows before any writes and preserve pool rules used on saved bills.
 
 Global administrators can assign multiple PMS resorts to a property. Room lookup searches every assigned resort and combines guest matches with their resort shown; a failure in any resort returns an error instead of an incomplete result. Existing single-resort mappings are retained by the database migration. Staff creation accepts an empty leaving date and optionally creates a linked centre-staff login, assigned only to that property, for either global administrators or property managers.
 
@@ -83,6 +83,14 @@ If Nginx Proxy Manager is managed by someone else and already forwards the
 whole site to 8080, use [proxy relay mode](deploy/PROXY-RELAY.md).
 
 ## Water sports forms and tablet signing
+
+Water Sports is disabled by default in production: its navigation, tablet
+signing entry point and API routes are unavailable. Existing database records
+and migrations are retained. Keep `ENABLE_WATER_SPORTS=false` in production.
+To enable it later with Docker Compose, set `ENABLE_WATER_SPORTS=true` and rebuild
+both backend and frontend. Local Vite/Node development keeps it available unless
+explicitly disabled (`VITE_ENABLE_WATER_SPORTS=false` and
+`ENABLE_WATER_SPORTS=false`, respectively).
 
 Apply `npm run migrate:deploy --prefix backend` before serving the updated API. The additive water sports migration creates published disclaimers, temporary tablet sessions and signed records. It does not change existing bills or their check-number sequence.
 

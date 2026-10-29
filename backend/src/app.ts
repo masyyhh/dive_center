@@ -56,7 +56,9 @@ app.use('/api/users', usersRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/items', itemsRouter);
 app.use('/api/guests', guestsRouter);
-app.use('/api/water-sports', waterSportsRouter);
+const waterSportsEnabled = process.env.ENABLE_WATER_SPORTS === 'true' ||
+  (process.env.NODE_ENV !== 'production' && process.env.ENABLE_WATER_SPORTS !== 'false');
+if (waterSportsEnabled) app.use('/api/water-sports', waterSportsRouter);
 app.use('/api/bills', billsRouter);
 app.use('/api/presence', presenceRouter);
 app.use('/api/reports', reportsRouter);
