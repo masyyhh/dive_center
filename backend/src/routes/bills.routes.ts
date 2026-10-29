@@ -43,7 +43,7 @@ billsRouter.get('/next-check', requireAuth, requirePropertyAccess('query', 'prop
       select: { checkNumber: true },
     });
 
-    const nextNumber = lastBill ? lastBill.checkNumber + 1 : property.nextCheckNumber;
+    const nextNumber = Math.max(property.nextCheckNumber, lastBill ? lastBill.checkNumber + 1 : 0);
     return res.json({ nextCheckNumber: nextNumber });
   } catch (error) {
     console.error('Fetch next check error:', error);
@@ -91,6 +91,18 @@ billsRouter.get('/room-lookup', requireAuth, requirePropertyAccess('query', 'pro
 billsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, startDate, endDate, search, status } = req.query;
+
+    if ((startDate !== undefined && !isBusinessDate(startDate)) ||
+        (endDate !== undefined && !isBusinessDate(endDate)) ||
+        (typeof startDate === 'string' && typeof endDate === 'string' && startDate > endDate)) {
+      return res.status(400).json({ error: 'Choose valid calendar dates, with startDate on or before endDate.' });
+    }
+    if (status !== undefined && !z.enum(['ALL', 'ACTIVE', 'REBATED', 'DELETED']).safeParse(status).success) {
+      return res.status(400).json({ error: 'Choose a valid bill status.' });
+    }
+    if (search !== undefined && typeof search !== 'string') {
+      return res.status(400).json({ error: 'Enter a single search value.' });
+    }
 
     const where: any = {
       propertyId: String(propertyId),
