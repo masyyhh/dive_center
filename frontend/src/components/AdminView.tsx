@@ -880,7 +880,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <button type="button" className="text-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('xlsx', true)}>Download import template</button>
             <label className="text-sm" htmlFor="catalogue-file">Import catalogue<input id="catalogue-file" type="file" accept=".csv,.xlsx" className="block mt-1" disabled={!activeProperty || transferBusy} onChange={e => { void previewCatalogue(e.target.files?.[0]); e.target.value = ''; }} /></label>
           </div>
-          <p className="text-xs text-slate-500">Columns: Item Code, Items, Category, Price, Commission, Status. Leave Item Code blank for new items; existing codes update this property's items. Status: Active or Inactive. Commission accepts a pool amount (courses use the course pool; other categories use the dive pool), or the full settings object from an export. Up to 2,000 items / 3 MB. Imports are checked before saving.</p>
+          <p className="text-xs text-slate-500">Columns: Item Code, Items, Category, Price, Commission, Status. Existing codes update this property's items; new codes are preserved when creating items. Leave Item Code blank to generate a code automatically. Status: Active or Inactive. Commission accepts a pool amount (courses use the course pool; other categories use the dive pool), or the full settings object from an export. Up to 2,000 items / 3 MB. Imports are checked before saving.</p>
           {transferBusy && <p role="status">Processing catalogue…</p>}
           {catalogueImport?.propertyId === activeProperty?.id && catalogueImport && <div className="surface p-4 space-y-3">
             <h4 className="font-bold">Review catalogue import</h4>

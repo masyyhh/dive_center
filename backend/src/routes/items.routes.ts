@@ -125,16 +125,18 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
       const byCode = new Map(existing.map(item => [item.code, item]));
       const changes = new Map<string, number>();
       for (const row of rows) {
-        const item = byCode.get(row.code);
-        if (row.code && !item) throw new CatalogueError(`Row ${row.row}: item code ${row.code} does not exist in this property. Leave Item Code blank for new items.`);
+        const item = row.code ? byCode.get(row.code) : undefined;
         if (item && (item.poolType !== row.commission.poolType || item.poolContribution !== row.commission.poolContribution)) changes.set(item.id, row.row);
       }
       if (changes.size) {
         const used = await tx.billItem.findFirst({ where: { itemId: { in: [...changes.keys()] } }, select: { itemId: true } });
         if (used?.itemId) throw new CatalogueError(`Row ${changes.get(used.itemId)}: pool rules are used on saved bills. Leave the rules unchanged or import a new item with a blank code.`);
       }
-      const allocateCode = itemCodeAllocator(existing.map(item => item.code));
-      const result = { created: rows.filter(row => !row.code).length, updated: rows.filter(row => row.code).length, total: rows.length };
+      // Reserve every supplied code before allocating blank-code rows, even
+      // when the supplied code appears later in the file.
+      const allocateCode = itemCodeAllocator([...existing.map(item => item.code), ...rows.map(row => row.code)]);
+      const updated = rows.filter(row => row.code && byCode.has(row.code)).length;
+      const result = { created: rows.length - updated, updated, total: rows.length };
       if (preview) return result;
       const categories = await tx.category.findMany({ where: { propertyId } });
       const categoryMap = new Map(categories.map(category => [category.name.toLowerCase(), category]));
@@ -147,9 +149,10 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
         const data = { name: row.name, categoryId: category.id, price: row.price, isActive: row.isActive,
           poolType: row.commission.poolType, poolContribution: row.commission.poolContribution,
           personalRatesJson: JSON.stringify(row.commission.personalRates), personalRoles: Object.keys(row.commission.personalRates).join(',') };
-        const item = row.code ? await tx.item.update({ where: { id: byCode.get(row.code)!.id }, data })
-          : await tx.item.create({ data: { ...data, propertyId, code: allocateCode(category.name) } });
-        await logAuditEvent({ client: tx, req, propertyId, action: row.code ? 'ITEM_UPDATE' : 'ITEM_CREATE', targetType: 'Item', targetId: item.id, details: { source: 'catalogue-import', code: item.code, name: item.name, price: item.price, isActive: item.isActive } });
+        const existingItem = row.code ? byCode.get(row.code) : undefined;
+        const item = existingItem ? await tx.item.update({ where: { id: existingItem.id }, data })
+          : await tx.item.create({ data: { ...data, propertyId, code: row.code || allocateCode(category.name) } });
+        await logAuditEvent({ client: tx, req, propertyId, action: existingItem ? 'ITEM_UPDATE' : 'ITEM_CREATE', targetType: 'Item', targetId: item.id, details: { source: 'catalogue-import', code: item.code, name: item.name, price: item.price, isActive: item.isActive } });
       }
       await logAuditEvent({ client: tx, req, propertyId, action: 'CATALOGUE_IMPORT', targetType: 'Item', details: result });
       return result;
