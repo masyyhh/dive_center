@@ -11,6 +11,28 @@ import { isBusinessDate, isYearMonth, isDateRange } from '../utils/dates';
 
 export const reportsRouter = Router();
 
+reportsRouter.get('/commission-breakdown', requireAuth, requirePropertyAccess('query'), async (req, res) => {
+  const { propertyId, staffId, startDate, endDate } = req.query;
+  if (typeof propertyId !== 'string' || !propertyId || typeof staffId !== 'string' || !staffId || !isDateRange(startDate, endDate)) {
+    return res.status(400).json({ error: 'Choose a property, employee and valid report period.' });
+  }
+  try {
+    const member = await prisma.staffMember.findFirst({ where: { id: staffId, propertyId, isActive: true }, select: { id: true } });
+    if (!member) return res.status(404).json({ error: 'Employee not found for this property.' });
+    const result = await calculateCommissionForPeriod(propertyId, String(startDate), String(endDate), staffId);
+    const staff = result.staffResults.find(staff => staff.staffId === staffId);
+    if (!staff) return res.status(404).json({ error: 'Employee not found for this property.' });
+    const details = result.breakdownDetails.sort((a, b) => a.businessDate.localeCompare(b.businessDate) || a.checkNumber - b.checkNumber || a.itemName.localeCompare(b.itemName));
+    // Match the money formatter used in the UI, including fractional-cent shares.
+    const displayedSum = details.reduce((sum, detail) => sum + Number(detail.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })), 0);
+    return res.json({ staff, details, roundingAdjustment: Math.round((staff.totalCommission - displayedSum) * 100) / 100,
+      period: { startDate, endDate } });
+  } catch (error) {
+    console.error('Commission breakdown error:', error);
+    return res.status(500).json({ error: 'Could not load the payroll breakdown.' });
+  }
+});
+
 // GET /api/reports/dashboard?propertyId=...&startDate=...&endDate=...
 reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
@@ -53,7 +75,7 @@ reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'pro
     const isLocked = locks.length > 0;
 
     // Calculate Commissions
-    const { staffResults, personalDetails, grandTotal: totalCommission } =
+    const { staffResults, personalDetails, certificationPoolTotal, grandTotal: totalCommission } =
       await calculateCommissionForPeriod(propId, start, end);
 
     // Headline metrics
@@ -164,6 +186,7 @@ reportsRouter.get('/dashboard', requireAuth, requirePropertyAccess('query', 'pro
         billCount,
         averageBill: Math.round(averageBill * 100) / 100,
         totalCommission,
+        certificationPoolTotal,
         netRevenue: Math.round(netRevenue * 100) / 100,
       },
       charts,

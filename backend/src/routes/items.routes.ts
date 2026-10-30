@@ -1,15 +1,60 @@
 import { validationIssues } from '../utils/validation';
 import ExcelJS from 'exceljs';
 import { withPropertyPayrollTransaction } from '../utils/payrollTransaction';
-import { catalogueHeaders, CatalogueError, parseCatalogue, nextItemCode, itemCodeAllocator, commissionCell, safeSpreadsheetText } from '../services/catalogueTransfer';
+import { catalogueSpreadsheetHeaders, catalogueSpreadsheetRow, CatalogueError, parseCatalogue, nextItemCode, itemCodeAllocator, safeSpreadsheetText } from '../services/catalogueTransfer';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
+import { isPercentagePool, validPoolRate } from '../utils/poolRates';
 
 export const itemsRouter = Router();
+
+class BulkMediaConflict extends Error {}
+const bulkMediaSchema = z.object({
+  propertyId: z.string().min(1),
+  itemIds: z.array(z.string().min(1)).min(1).max(200).refine(ids => new Set(ids).size === ids.length, 'Choose each activity once.'),
+  includesComplimentaryMedia: z.boolean(),
+  preview: z.boolean().default(true),
+  expectedItems: z.array(z.object({ id: z.string(), updatedAt: z.iso.datetime() })).max(200).optional(),
+}).strict();
+
+itemsRouter.post('/bulk-complimentary-media', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req, res) => {
+  const parsed = bulkMediaSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose 1–200 different activities and a photo/video setting.' });
+  const { propertyId, itemIds, includesComplimentaryMedia, preview, expectedItems } = parsed.data;
+  if (!preview && (!expectedItems || expectedItems.length !== itemIds.length || new Set(expectedItems.map(item => item.id)).size !== itemIds.length || expectedItems.some(item => !itemIds.includes(item.id)))) {
+    return res.status(400).json({ error: 'Review these activities before saving the bulk update.' });
+  }
+  try {
+    const result = await withPropertyPayrollTransaction(prisma, propertyId, async tx => {
+      const property = await tx.property.findUnique({ where: { id: propertyId } });
+      if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
+      const items = await tx.item.findMany({ where: { propertyId, id: { in: itemIds }, isActive: true }, orderBy: { code: 'asc' } });
+      if (items.length !== itemIds.length) throw new BulkMediaConflict('Some selected activities are unavailable. Refresh the catalogue and review again.');
+      const changedCount = items.filter(item => item.includesComplimentaryMedia !== includesComplimentaryMedia).length;
+      if (!preview) {
+        const versions = new Map(expectedItems!.map(item => [item.id, new Date(item.updatedAt)]));
+        for (const item of items) {
+          const updated = await tx.item.updateMany({ where: { id: item.id, propertyId, isActive: true, updatedAt: versions.get(item.id)! }, data: { includesComplimentaryMedia } });
+          if (updated.count !== 1) throw new BulkMediaConflict('An activity changed since your review. Review the latest settings before saving.');
+        }
+        await logAuditEvent({ client: tx, req, propertyId, action: 'ITEM_BULK_MEDIA_UPDATE', targetType: 'Property', targetId: propertyId,
+          details: { includesComplimentaryMedia, changedCount, items: items.map(item => ({ id: item.id, previous: item.includesComplimentaryMedia })) } });
+      }
+      return { preview, changedCount, total: items.length, includesComplimentaryMedia,
+        items: items.map(item => ({ id: item.id, code: item.code, name: item.name, includesComplimentaryMedia: item.includesComplimentaryMedia, updatedAt: item.updatedAt })) };
+    });
+    return res.json(result);
+  } catch (error) {
+    if (error instanceof BulkMediaConflict) return res.status(409).json({ error: error.message });
+    if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
+    console.error('Bulk media update error:', error);
+    return res.status(500).json({ error: 'Could not update the selected activities.' });
+  }
+});
 
 // GET /api/items?propertyId=...
 itemsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
@@ -80,13 +125,16 @@ const activityFields = z.object({
   code: z.string().trim().max(50).optional(),
   name: z.string().trim().min(2).max(200),
   price: z.number().finite().nonnegative(),
-  poolType: z.enum(['COURSE_POOL', 'DIVE_POOL', 'NONE']).default('NONE'),
-  poolContribution: z.number().finite().min(0).default(0.0),
+  poolType: z.enum(['COURSE_POOL', 'CERTIFICATION_POOL', 'DIVE_POOL', 'NONE']).default('NONE'),
+  poolContribution: z.number().finite().min(0).optional(),
+  includesComplimentaryMedia: z.boolean().default(false),
   personalRoles: z.string().max(100).refine(value => value.split(',').every(role => !role.trim() || commissionRoles.includes(role.trim())), 'Choose supported commission roles.').optional().nullable(),
   personalRatesJson: z.string().max(2000).refine(validRates, 'Enter a JSON object with nonnegative amounts for supported commission roles.').optional().nullable(),
 });
-const itemSchema = activityFields.extend({ propertyId: z.string().trim().min(1) }).strict();
-const itemUpdateSchema = activityFields.omit({ poolType: true, poolContribution: true }).partial().extend({ poolType: z.enum(['COURSE_POOL', 'DIVE_POOL', 'NONE']).optional(), poolContribution: z.number().finite().min(0).optional(), isActive: z.boolean().optional() }).strict().refine(data => Object.keys(data).length > 0, 'Choose an activity field to update.');
+const itemSchema = activityFields.extend({ propertyId: z.string().trim().min(1) }).strict()
+  .transform(data => ({ ...data, poolContribution: data.poolContribution ?? (isPercentagePool(data.poolType) ? 10 : 0) }))
+  .refine(data => validPoolRate(data.poolType, data.poolContribution), { path: ['poolContribution'], message: 'Course and dive pool rates must be between 0 and 100 percent.' });
+const itemUpdateSchema = activityFields.omit({ poolType: true, poolContribution: true, includesComplimentaryMedia: true }).partial().extend({ poolType: z.enum(['COURSE_POOL', 'CERTIFICATION_POOL', 'DIVE_POOL', 'NONE']).optional(), poolContribution: z.number().finite().min(0).optional(), includesComplimentaryMedia: z.boolean().optional(), isActive: z.boolean().optional() }).strict().refine(data => Object.keys(data).length > 0, 'Choose an activity field to update.');
 
 // Standard catalogue interchange. Property authorization applies equally to preview and commit.
 itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('query', 'propertyId'), async (req, res) => {
@@ -96,15 +144,49 @@ itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MA
     const { propertyId, format, template } = parsed.data;
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Catalogue');
-    sheet.addRow(catalogueHeaders);
-    if (template === 'true') sheet.addRow(['', 'Single boat dive', 'Dives', 75, 10, 'Active']);
+    sheet.addRow(catalogueSpreadsheetHeaders);
+    if (template === 'true') sheet.addRow(['', 'Single boat dive', 'Dives', 75, 'Dive pool', 10, null, 5, 10, null, null, null, 'No', 'Active']);
     else {
       const items = await prisma.item.findMany({ where: { propertyId }, include: { category: true }, orderBy: { code: 'asc' } });
-      for (const item of items) if (item.category.propertyId === propertyId) sheet.addRow([item.code, item.name, item.category.name, item.price, commissionCell(item), item.isActive ? 'Active' : 'Inactive'].map(value => typeof value === 'string' ? safeSpreadsheetText(value) : value));
+      for (const item of items) if (item.category.propertyId === propertyId) sheet.addRow(catalogueSpreadsheetRow(item).map(value => typeof value === 'string' ? safeSpreadsheetText(value) : value));
     }
-    sheet.getRow(1).font = { bold: true };
-    [18, 36, 24, 14, 65, 14].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
-    const bytes = format === 'csv' ? await workbook.csv.writeBuffer() : await workbook.xlsx.writeBuffer();
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = 'A1:N1';
+    sheet.getRow(1).height = 42;
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF19323C' } };
+    sheet.getRow(1).alignment = { vertical: 'middle', wrapText: true };
+    [18, 36, 24, 14, 22, 16, 24, 20, 20, 22, 24, 24, 25, 14].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+    for (const index of [4, 7, 8, 9, 10, 11, 12]) sheet.getColumn(index).numFmt = '0.00';
+    sheet.getCell('F1').note = 'Enter 10 for a 10% course/dive pool contribution after discounts, before tax and service charge.';
+    sheet.getCell('G1').note = 'Fixed amount per unit for Certifications. No staff pool share or base-leader override is paid from Certifications.';
+    sheet.getCell('M1').note = 'Yes adds a separate Photo line at $57.50 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
+    for (let row = 2; row <= sheet.rowCount; row++) {
+      sheet.getCell(`E${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Course pool,Dive pool,Certifications,No pool"'], showErrorMessage: true, error: 'Choose one of the listed pools.' };
+      sheet.getCell(`M${row}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'], showErrorMessage: true, error: 'Choose Yes or No.' };
+      sheet.getCell(`N${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Active,Inactive"'], showErrorMessage: true, error: 'Choose Active or Inactive.' };
+    }
+    if (format === 'xlsx') {
+      const guide = workbook.addWorksheet('Instructions');
+      guide.getColumn(1).width = 105;
+      const notes = [
+        'How to update your catalogue',
+        'Edit the Catalogue sheet. Keep its column names and order unchanged.',
+        template === 'true' ? 'Replace or delete the example row before importing your own services.' : 'Existing item codes update matching services in this property. Blank codes are generated when saving.',
+        'Pool: choose Course pool, Dive pool, Certifications or No pool.',
+        'Pool Rate (%): enter 10 for 10% on course/dive services after discounts, before tax and service charge. Leave blank for other pools.',
+        'Certifications Amount / Unit: fixed amount per service unit. Leave blank for other pools. Certifications pay no staff pool commission.',
+        'Employee payment columns: fixed amounts per unit. Blank means the role has no payment; 0 explicitly enables the role with a zero payment.',
+        'Include Photo ($57.50): Yes adds a separate $57.50 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
+        'Include Photo ($57.50) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
+        'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($57.50).',
+        'Status: Active or Inactive. Existing bill prices and saved commissions are retained.',
+        'Upload CSV or Excel (.xlsx), up to 3 MB and 2,000 activities. Review the import before applying it.',
+      ];
+      notes.forEach((note, index) => { const row = guide.addRow([note]); row.alignment = { wrapText: true, vertical: 'top' }; row.height = index ? 42 : 28; });
+      guide.getRow(1).font = { bold: true, size: 16 };
+    }
+    const bytes = format === 'csv' ? await workbook.csv.writeBuffer({ sheetName: 'Catalogue' }) : await workbook.xlsx.writeBuffer({ useSharedStrings: true });
     await logAuditEvent({ req, propertyId, action: 'CATALOGUE_EXPORT', targetType: 'Item', details: { format, template: template === 'true', count: sheet.rowCount - 1 } });
     res.setHeader('Content-Type', format === 'csv' ? 'text/csv; charset=utf-8' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="catalogue.${format}"`);
@@ -126,7 +208,7 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
       const changes = new Map<string, number>();
       for (const row of rows) {
         const item = row.code ? byCode.get(row.code) : undefined;
-        if (item && (item.poolType !== row.commission.poolType || item.poolContribution !== row.commission.poolContribution)) changes.set(item.id, row.row);
+        if (item && (item.poolType !== row.commission.poolType || (row.commission.poolType !== 'NONE' && item.poolContribution !== row.commission.poolContribution))) changes.set(item.id, row.row);
       }
       if (changes.size) {
         const used = await tx.billItem.findFirst({ where: { itemId: { in: [...changes.keys()] } }, select: { itemId: true } });
@@ -137,7 +219,10 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
       const allocateCode = itemCodeAllocator([...existing.map(item => item.code), ...rows.map(row => row.code)]);
       const updated = rows.filter(row => row.code && byCode.has(row.code)).length;
       const result = { created: rows.length - updated, updated, total: rows.length };
-      if (preview) return result;
+      if (preview) return { ...result, previewRows: rows.slice(0, 20).map(({ code, name, category, price, isActive, commission }) => ({
+        code, name, category, price, isActive, action: code && byCode.has(code) ? 'update' : 'create',
+        commission: { ...commission, includesComplimentaryMedia: commission.includesComplimentaryMedia ?? byCode.get(code)?.includesComplimentaryMedia ?? false },
+      })) };
       const categories = await tx.category.findMany({ where: { propertyId } });
       const categoryMap = new Map(categories.map(category => [category.name.toLowerCase(), category]));
       for (const row of rows) {
@@ -147,6 +232,7 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
           categoryMap.set(row.category.toLowerCase(), category);
         }
         const data = { name: row.name, categoryId: category.id, price: row.price, isActive: row.isActive,
+          includesComplimentaryMedia: row.commission.includesComplimentaryMedia,
           poolType: row.commission.poolType, poolContribution: row.commission.poolContribution,
           personalRatesJson: JSON.stringify(row.commission.personalRates), personalRoles: Object.keys(row.commission.personalRates).join(',') };
         const existingItem = row.code ? byCode.get(row.code) : undefined;
@@ -157,7 +243,7 @@ itemsRouter.post('/import', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_M
       await logAuditEvent({ client: tx, req, propertyId, action: 'CATALOGUE_IMPORT', targetType: 'Item', details: result });
       return result;
     }, 60000);
-    return res.json({ preview, ...summary, ...(preview ? { previewRows: rows.slice(0, 20).map(({ code, name, category, price, isActive, commission }) => ({ code, name, category, price, isActive, commission })) } : {}) });
+    return res.json({ preview, ...summary });
   } catch (error) {
     if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
     return res.status(500).json({ error: 'Could not import catalogue. No items were changed.' });
@@ -194,7 +280,7 @@ itemsRouter.post(
         action: 'ITEM_CREATE',
         targetType: 'Item',
         targetId: item.id,
-        details: { code: item.code, name: item.name, price: item.price },
+        details: { code: item.code, name: item.name, price: item.price, includesComplimentaryMedia: item.includesComplimentaryMedia },
       });
 
       return res.status(201).json({ item });
@@ -238,8 +324,11 @@ itemsRouter.put(
       const category = typeof effectiveCategoryId === 'string' && await prisma.category.findFirst({ where: { id: effectiveCategoryId, propertyId: existing.propertyId } });
       if (!category) return res.status(400).json({ error: 'Choose a category from this property.' });
 
-      // Payroll reads pool rules from the activity; keep rules used by saved bills stable.
-      const poolRulesChanged = (data.poolType !== undefined && data.poolType !== existing.poolType) || (data.poolContribution !== undefined && data.poolContribution !== existing.poolContribution);
+      // Keep rules stable for billed activities, including retained legacy records.
+      if (!validPoolRate(data.poolType ?? existing.poolType, data.poolContribution ?? existing.poolContribution)) {
+        return res.status(400).json({ error: 'Course and dive pool rates must be between 0 and 100 percent.' });
+      }
+      const poolRulesChanged = (data.poolType !== undefined && data.poolType !== existing.poolType) || ((data.poolType ?? existing.poolType) !== 'NONE' && data.poolContribution !== undefined && data.poolContribution !== existing.poolContribution);
       if (poolRulesChanged && await prisma.billItem.count({ where: { itemId: id } })) {
         return res.status(409).json({ error: 'This activity is used on saved bills. Create a new activity to change pool rules without changing historical payroll.' });
       }
@@ -256,7 +345,7 @@ itemsRouter.put(
         action: data.isActive === true && !existing.isActive ? 'ITEM_RESTORE' : data.isActive === false && existing.isActive ? 'ITEM_DELETE' : 'ITEM_UPDATE',
         targetType: 'Item',
         targetId: updated.id,
-        details: { code: updated.code, name: updated.name, price: updated.price, isActive: updated.isActive, previousPrice: existing.price },
+        details: { code: updated.code, name: updated.name, price: updated.price, isActive: updated.isActive, previousPrice: existing.price, includesComplimentaryMedia: updated.includesComplimentaryMedia, previousIncludesComplimentaryMedia: existing.includesComplimentaryMedia },
       });
 
       return res.json({ item: updated });

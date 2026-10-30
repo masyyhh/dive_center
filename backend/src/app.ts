@@ -8,6 +8,8 @@ import { configureProxySecurity } from './middleware/proxy';
 import { waterSportsRouter } from './routes/water-sports.routes';
 import { guestsRouter } from './routes/guests.routes';
 import { passwordRouter } from './routes/password.routes';
+import { testingAuthRouter } from './routes/testing-auth.routes';
+import { testingLiveAuthEnabled } from './services/testingLiveAuth';
 import { authRouter } from './routes/auth.routes';
 import { propertiesRouter } from './routes/properties.routes';
 import { usersRouter } from './routes/users.routes';
@@ -49,8 +51,11 @@ app.get('/api/ready', async (_req: Request, res: Response) => {
 });
 
 // Mount modular API routes
-app.use('/api/auth', passwordRouter);
-app.use('/api/auth', authRouter);
+if (testingLiveAuthEnabled()) app.use('/api/auth', testingAuthRouter);
+else {
+  app.use('/api/auth', passwordRouter);
+  app.use('/api/auth', authRouter);
+}
 app.use('/api/properties', propertiesRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/staff', staffRouter);

@@ -1,6 +1,7 @@
 import { serializeCsv } from '../utils/csv';
 import { formatMoney } from '../utils/format';
 import { Modal } from './Modal';
+import { PayrollBreakdown } from './PayrollBreakdown';
 import { businessToday } from '../utils/dates';
 import React, { useState, useEffect, useRef } from 'react';
 import { useProperty } from '../context/PropertyContext';
@@ -68,6 +69,8 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
   const [lockLoading, setLockLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [breakdownStaffId, setBreakdownStaffId] = useState<string | null>(null);
+  useEffect(() => setBreakdownStaffId(null), [activeProperty?.id, startDate, endDate]);
 
   const fetchReport = async () => {
     if (!activeProperty) return;
@@ -259,6 +262,10 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
       </div>
 
       <div className="report-tabs" role="tablist" aria-label="Report sections">{([['performance', 'Performance'], ['commissions', 'Staff commissions'], ['exports', 'Exports & payroll']] as const).map(([id, label]) => <button key={id} role="tab" id={`tab-${id}`} aria-selected={reportTab === id} aria-controls={`panel-${id}`} tabIndex={reportTab === id ? 0 : -1} onClick={() => onSectionChange(id)} onKeyDown={event => { const ids = ['performance', 'commissions', 'exports']; const index = ids.indexOf(id); const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : -1; if (next >= 0) { event.preventDefault(); onSectionChange(ids[next]); requestAnimationFrame(() => document.getElementById(`tab-${ids[next]}`)?.focus()); } }}>{label}</button>)}</div>
+      <div className="surface p-4 flex flex-wrap items-center justify-between gap-3">
+        <div><h3 className="font-bold">Certifications pool</h3><p className="text-sm text-slate-500">Tracked separately. No staff commission or base-leader override is paid from this pool.</p></div>
+        <strong>{formatMoney(report?.headline.certificationPoolTotal ?? 0, currencySymbol)}</strong>
+      </div>
       {reportTab === 'performance' && <section id="panel-performance" role="tabpanel" aria-labelledby="tab-performance" className="space-y-6">
       {/* Headline Numbers Grid (PDF Page 6: turnover, service charge, tax, bill count, average bill, total commission) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-3">
@@ -545,6 +552,7 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
                 <th className="py-3 px-4">Tips Share</th>
                 <th className="py-3 px-4">Personal</th>
                 <th className="py-3 px-4 font-bold text-slate-900 dark:text-white">Total commission</th>
+                <th className="py-3 px-4">Breakdown</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -581,11 +589,12 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
                     <td className="py-3 px-4 font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
                       {formatMoney(s.totalCommission, currencySymbol)}
                     </td>
+                    <td className="py-3 px-4"><button type="button" className="text-button" onClick={() => setBreakdownStaffId(s.staffId)} aria-label={`Why this amount for ${s.staffName}?`}>Why this amount?</button></td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={9} className="py-8 text-center text-slate-400">
                     No staff commission recorded for this date range.
                   </td>
                 </tr>
@@ -744,6 +753,7 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
 
         <div className="surface payroll-panel"><div><span className="eyebrow">PAYROLL CONTROL</span><h2>Month lock</h2><p>Lock a month after reviewing bills and attendance. A locked month prevents changes to its bills and attendance.</p></div><div className="payroll-control-row"><label htmlFor="payroll-month">Payroll month</label><input id="payroll-month" type="month" value={exportMonth} disabled={lockLoading} onChange={event => setExportMonth(event.target.value)} /><span className={`status-badge ${payrollLocked ? 'status-rebated' : 'status-active'}`}>{payrollLoading ? 'Checking…' : payrollLocked === null ? 'Unavailable' : payrollLocked ? 'Locked' : 'Open'}</span>{canManageLocks && <button className="secondary-button" disabled={payrollLoading || payrollLocked === null || lockLoading} onClick={() => setConfirmLock(true)}>{payrollLocked ? 'Unlock month' : 'Lock month'}</button>}</div>{!canManageLocks && <p>Your property manager controls payroll locks.</p>}{payrollError && <div className="notice notice-error" role="alert"><span>{payrollError}</span><button onClick={() => setPayrollVersion(value => value + 1)}>Retry</button></div>}</div>
       </section>}
+      {breakdownStaffId && activeProperty && <PayrollBreakdown propertyId={activeProperty.id} staffId={breakdownStaffId} startDate={startDate} endDate={endDate} currencySymbol={currencySymbol} onClose={() => setBreakdownStaffId(null)} />}
       {confirmLock && <Modal label={payrollLocked ? 'Unlock payroll month?' : 'Lock payroll month?'} busy={lockLoading} onClose={() => setConfirmLock(false)} error={errorMsg}><div className="surface guard-dialog"><h2>{payrollLocked ? 'Unlock' : 'Lock'} {exportMonth}?</h2><p>{payrollLocked ? 'Bills and attendance in this month will become editable again.' : 'Bills and attendance in this month will be frozen for payroll. Confirm your team has finished reviewing them.'}</p><div className="dialog-actions"><button className="secondary-button" disabled={lockLoading} onClick={() => setConfirmLock(false)}>Cancel</button><button className="primary-button" disabled={lockLoading} onClick={handleToggleLock}>{lockLoading ? 'Updating…' : payrollLocked ? 'Unlock month' : 'Lock month'}</button></div></div></Modal>}
     </div>
   );

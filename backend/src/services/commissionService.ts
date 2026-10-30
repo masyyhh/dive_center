@@ -26,10 +26,29 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
+export interface CommissionBreakdownDetail {
+  id: string;
+  billId: string;
+  billItemId: string | null;
+  checkNumber: number;
+  businessDate: string;
+  itemName: string;
+  quantity: number | null;
+  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL';
+  basisAmount: number;
+  recipientCount: number;
+  factor: number;
+  unitRate?: number;
+  explanation: string;
+  amount: number;
+}
+type BreakdownSource = Pick<CommissionBreakdownDetail, 'billId' | 'billItemId' | 'checkNumber' | 'businessDate' | 'itemName' | 'quantity' | 'basisAmount'>;
+
 export const calculateCommissionForPeriod = async (
   propertyId: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  detailStaffId?: string
 ) => {
   // 1. Fetch active staff members for this property
   const staffMembers = await prisma.staffMember.findMany({
@@ -103,6 +122,14 @@ export const calculateCommissionForPeriod = async (
   }
 
   const personalDetails: PersonalCommissionDetail[] = [];
+  const breakdownDetails: CommissionBreakdownDetail[] = [];
+  const addDetail = (staffId: string, source: BreakdownSource, kind: CommissionBreakdownDetail['kind'], explanation: string, recipientCount = 1, factor = 1, unitRate?: number) => {
+    if (staffId !== detailStaffId) return;
+    breakdownDetails.push({ ...source, id: `${source.billItemId || source.billId}-${kind}-${breakdownDetails.length}`, kind,
+      recipientCount, factor, unitRate, explanation, amount: source.basisAmount * factor / recipientCount });
+  };
+  // Certifications are tracked separately and never distributed as staff pay.
+  let certificationPoolTotal = 0;
 
   // Helper function to check if attendance status counts toward commission pool
   // Per PDF Page 5: Present = Yes, Off / Off (half day) = Yes (counted in full).
@@ -130,6 +157,7 @@ export const calculateCommissionForPeriod = async (
 
     let dailyCoursePool = 0;
     let dailyDivePool = 0;
+    const poolSources: (BreakdownSource & { poolType: 'COURSE_POOL' | 'DIVE_POOL' })[] = [];
 
     // Process bills for this day
     for (const bill of dayBills) {
@@ -143,6 +171,7 @@ export const calculateCommissionForPeriod = async (
               const entry = commissionMap.get(staffId);
               if (entry) {
                 entry.tipsCommission += tipShare;
+                addDetail(staffId, { billId: bill.id, billItemId: null, checkNumber: bill.checkNumber, businessDate: date, itemName: 'Bill tip', quantity: null, basisAmount: bill.tipAmount }, 'TIPS', 'Bill tip divided among the eligible employees selected on the bill', tipStaffIds.length);
               }
             }
           }
@@ -157,14 +186,24 @@ export const calculateCommissionForPeriod = async (
         if (line.item && line.item.propertyId !== propertyId) continue;
         // Pool contributions
         const ownedItem = line.item?.propertyId === propertyId ? line.item : null;
-        const poolType = ownedItem?.poolType || 'NONE';
-        const contribution = ownedItem && Number.isFinite(ownedItem.poolContribution) && ownedItem.poolContribution >= 0 ? ownedItem.poolContribution * line.quantity : 0;
+        const hasSnapshot = line.poolTypeSnapshot !== null && line.poolTypeSnapshot !== undefined &&
+          typeof line.poolContributionAmount === 'number' && Number.isFinite(line.poolContributionAmount) && line.poolContributionAmount >= 0;
+        const poolType = hasSnapshot ? line.poolTypeSnapshot : ownedItem?.poolType || 'NONE';
+        // Null snapshots belong to legacy imports/records. Migration snapshots all
+        // existing records before changing catalogue values; new bills save their own amount.
+        const contribution = hasSnapshot ? line.poolContributionAmount! :
+          ownedItem && Number.isFinite(ownedItem.poolContribution) && ownedItem.poolContribution >= 0 ? ownedItem.poolContribution * line.quantity : 0;
 
         if (poolType === 'COURSE_POOL') {
           dailyCoursePool += contribution;
         } else if (poolType === 'DIVE_POOL') {
           dailyDivePool += contribution;
+        } else if (poolType === 'CERTIFICATION_POOL') {
+          certificationPoolTotal += contribution;
         }
+
+        const source = { billId: bill.id, billItemId: line.id, checkNumber: bill.checkNumber, businessDate: date, itemName: line.itemName, quantity: line.quantity };
+        if (detailStaffId && contribution > 0 && (poolType === 'COURSE_POOL' || poolType === 'DIVE_POOL')) poolSources.push({ ...source, basisAmount: contribution, poolType });
 
         // Personal commission (fixed amounts to designated roles on line)
         if (line.personalCommissionsJson) {
@@ -175,6 +214,7 @@ export const calculateCommissionForPeriod = async (
               const amt = Number(rates.seller) * line.quantity;
               const entry = commissionMap.get(line.sellerStaffId);
               if (entry) entry.personalCommission += amt;
+              addDetail(line.sellerStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Seller fixed payment per service unit × quantity', 1, 1, Number(rates.seller));
               const sObj = staffMap.get(line.sellerStaffId);
               personalDetails.push({
                 id: `${line.id}-seller`,
@@ -194,6 +234,7 @@ export const calculateCommissionForPeriod = async (
               const amt = Number(rates.guide) * line.quantity;
               const entry = commissionMap.get(line.guideStaffId);
               if (entry) entry.personalCommission += amt;
+              addDetail(line.guideStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Guide fixed payment per service unit × quantity', 1, 1, Number(rates.guide));
               const sObj = staffMap.get(line.guideStaffId);
               personalDetails.push({
                 id: `${line.id}-guide`,
@@ -213,6 +254,7 @@ export const calculateCommissionForPeriod = async (
               const amt = Number(rates.instructor) * line.quantity;
               const entry = commissionMap.get(line.instructorStaffId);
               if (entry) entry.personalCommission += amt;
+              addDetail(line.instructorStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Instructor fixed payment per service unit × quantity', 1, 1, Number(rates.instructor));
               const sObj = staffMap.get(line.instructorStaffId);
               personalDetails.push({
                 id: `${line.id}-instructor`,
@@ -232,6 +274,7 @@ export const calculateCommissionForPeriod = async (
               const amt = Number(rates.photo) * line.quantity;
               const entry = commissionMap.get(line.photoStaffId);
               if (entry) entry.personalCommission += amt;
+              addDetail(line.photoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', `${line.includesComplimentaryMedia ? 'Photo / Video' : 'Photographer'} fixed payment per service unit × quantity`, 1, 1, Number(rates.photo));
               const sObj = staffMap.get(line.photoStaffId);
               personalDetails.push({
                 id: `${line.id}-photo`,
@@ -240,7 +283,7 @@ export const calculateCommissionForPeriod = async (
                 guestName: bill.guestName,
                 roomNumber: bill.roomNumber,
                 itemName: line.itemName,
-                role: 'Photo',
+                role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo',
                 staffId: line.photoStaffId,
                 staffName: sObj?.name || 'Staff',
                 amount: amt,
@@ -251,6 +294,7 @@ export const calculateCommissionForPeriod = async (
               const amt = Number(rates.video) * line.quantity;
               const entry = commissionMap.get(line.videoStaffId);
               if (entry) entry.personalCommission += amt;
+              addDetail(line.videoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Video fixed payment per service unit × quantity', 1, 1, Number(rates.video));
               const sObj = staffMap.get(line.videoStaffId);
               personalDetails.push({
                 id: `${line.id}-video`,
@@ -295,6 +339,9 @@ export const calculateCommissionForPeriod = async (
       for (const s of courseSharingStaffToday) {
         const entry = commissionMap.get(s.id);
         if (entry) entry.courseCommission += share;
+        if (s.id === detailStaffId) for (const source of poolSources.filter(source => source.poolType === 'COURSE_POOL')) {
+          addDetail(s.id, source, 'COURSE_POOL', 'Saved course pool contribution divided among eligible staff on this date', courseSharingStaffToday.length);
+        }
       }
     }
 
@@ -304,6 +351,9 @@ export const calculateCommissionForPeriod = async (
       for (const s of diveSharingStaffToday) {
         const entry = commissionMap.get(s.id);
         if (entry) entry.diveCommission += share;
+        if (s.id === detailStaffId) for (const source of poolSources.filter(source => source.poolType === 'DIVE_POOL')) {
+          addDetail(s.id, source, 'DIVE_POOL', 'Saved dive pool contribution divided among eligible staff on this date', diveSharingStaffToday.length);
+        }
       }
     }
 
@@ -317,6 +367,9 @@ export const calculateCommissionForPeriod = async (
       for (const bl of employedBaseLeaders) {
         const entry = commissionMap.get(bl.id);
         if (entry) entry.overrideCommission += overrideShare;
+        if (bl.id === detailStaffId) for (const source of poolSources) {
+          addDetail(bl.id, source, 'OVERRIDE', 'Extra 10% of the saved pool contribution divided among employed base leaders', employedBaseLeaders.length, 0.10);
+        }
       }
     }
   }
@@ -347,6 +400,8 @@ export const calculateCommissionForPeriod = async (
   return {
     staffResults,
     personalDetails,
+    breakdownDetails,
+    certificationPoolTotal: Math.round(certificationPoolTotal * 100) / 100,
     grandTotal: Math.round(grandTotal * 100) / 100,
   };
 };

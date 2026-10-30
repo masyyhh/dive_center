@@ -48,7 +48,7 @@ function excelFixture() {
       bill: { findMany: async () => [bill] },
       attendance: { findMany: async () => [] },
     } },
-    './commissionService': { calculateCommissionForPeriod: async (property, start, end) => { periods.push({ start, end }); return { staffResults: [], personalDetails: [] }; } },
+    './commissionService': { calculateCommissionForPeriod: async (property, start, end) => { periods.push({ start, end }); return { staffResults: [], personalDetails: [], certificationPoolTotal: 0 }; } },
   });
   return { service, periods };
 }

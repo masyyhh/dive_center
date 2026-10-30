@@ -119,6 +119,7 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
             { name: 'Photo & Video', sortOrder: 3 },
             { name: 'Rentals', sortOrder: 4 },
             { name: 'Retail', sortOrder: 5 },
+            { name: 'Certifications', sortOrder: 6 },
           ],
         },
       },

@@ -1,0 +1,114 @@
+# A separate Compose project. No ports, production secrets, or production volumes.
+name: dive-centre-testing
+services:
+  testdb:
+    image: ${POSTGRES_IMAGE:-postgres:18-bookworm}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/testing_postgres_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets: [testing_postgres_password, testing_database_password]
+    volumes:
+      - testing_data:/var/lib/postgresql
+      - ./deploy/postgres/init-testing.sh:/docker-entrypoint-initdb.d/10-testing.sh:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    shm_size: 128mb
+    mem_limit: 512m
+    pids_limit: 256
+    logging: &logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  testbackend:
+    build:
+      context: ./backend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm}
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      TESTING_LIVE_AUTH: "true"
+      TESTING_LIVE_AUTH_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
+      TESTING_ALLOWED_USER_IDS_FILE: /run/secrets/testing_allowed_users
+      ENABLE_WATER_SPORTS: ${ENABLE_WATER_SPORTS:-false}
+      DATABASE_URL_FILE: /run/secrets/testing_database_url
+      JWT_SECRET_FILE: /run/secrets/testing_jwt_secret
+      AUTHENTICATOR_ENCRYPTION_KEY_FILE: /run/secrets/testing_authenticator_key
+      PMS_API_KEY_FILE: /run/secrets/testing_pms_api_key
+      CORS_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
+      TRUST_PROXY: "0"
+      REQUIRE_TRUSTED_PROXY: "1"
+      TRUST_PROXY_ADDRESSES: ${TESTING_WEB_IP:-172.30.252.3}
+    secrets: [testing_database_url, testing_jwt_secret, testing_authenticator_key, testing_pms_api_key, testing_allowed_users]
+    networks:
+      frontend:
+        ipv4_address: ${TESTING_BACKEND_IP:-172.30.252.4}
+      database: {}
+      live_auth_egress: {}
+    depends_on:
+      testdb: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:5001/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 20
+    logging: *logs
+  testweb:
+    build:
+      context: ./frontend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2-alpine}
+        VITE_DEPLOYMENT_MODE: testing
+        VITE_ENABLE_WATER_SPORTS: ${ENABLE_WATER_SPORTS:-false}
+    restart: unless-stopped
+    environment:
+      TESTING_GATEWAY_IP: ${TESTING_GATEWAY_IP:-172.30.252.2}
+    volumes:
+      - ./deploy/Caddyfile.testing:/etc/caddy/Caddyfile:ro
+    networks:
+      frontend:
+        ipv4_address: ${TESTING_WEB_IP:-172.30.252.3}
+    depends_on:
+      testbackend: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 128
+    logging: *logs
+networks:
+  frontend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${TESTING_SUBNET:-172.30.252.0/29}
+  database:
+    internal: true
+  # Only the testing API needs outbound HTTPS to the existing live auth service.
+  live_auth_egress: {}
+volumes:
+  testing_data:
+secrets:
+  testing_postgres_password: {file: ./secrets-testing/postgres_password}
+  testing_database_password: {file: ./secrets-testing/database_password}
+  testing_database_url: {file: ./secrets-testing/database_url}
+  testing_jwt_secret: {file: ./secrets-testing/jwt_secret}
+  testing_authenticator_key: {file: ./secrets-testing/authenticator_key}
+  testing_pms_api_key: {file: ./secrets-testing/pms_api_key}
+  testing_allowed_users: {file: ./secrets-testing/allowed_live_users.json}

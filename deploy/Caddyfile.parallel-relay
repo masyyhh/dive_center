@@ -1,0 +1,28 @@
+{
+  admin off
+  auto_https off
+  servers {
+    trusted_proxies static {$NPM_PROXY_IP}
+    trusted_proxies_strict
+  }
+}
+
+:8080 {
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    X-Frame-Options DENY
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    -Server
+  }
+  route {
+    # Check the TCP peer, never a client-supplied forwarded IP.
+    @untrusted not remote_ip {$NPM_PROXY_IP}
+    respond @untrusted "Access through the configured reverse proxy is required." 403
+    @insecure not header X-Forwarded-Proto https
+    respond @insecure "HTTPS is required through the reverse proxy." 403
+    import /etc/caddy/parallel-routes
+  }
+}

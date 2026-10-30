@@ -99,7 +99,7 @@ test('CSV preview is read-only; commit creates categories, generates codes and r
   const course = await prisma.item.findFirst({ where: { name: 'Open Water' } });
   assert.equal(course.code, 'COU-001'); assert.equal(course.poolType, 'COURSE_POOL'); assert.equal(course.poolContribution, 20); assert.equal(course.isActive, false);
 });
-test('CSV and Excel exports round-trip all six fields; imports update only matching property codes', async () => {
+test('labelled CSV and Excel exports round-trip all settings; imports update only matching property codes', async () => {
   for (const format of ['csv', 'xlsx']) {
     const exported = await exportFile(format);
     assert.equal(exported.status, 200);

@@ -17,3 +17,7 @@ ui-preview/
 **/*.log
 **/*.dump
 *.tar.gz
+
+.env.testing
+.env.parallel-live
+secrets-testing/

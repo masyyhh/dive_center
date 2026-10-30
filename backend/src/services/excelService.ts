@@ -14,7 +14,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     orderBy: { checkNumber: 'asc' },
   });
 
-  const { staffResults } = await calculateCommissionForPeriod(propertyId, date, date);
+  const { staffResults, certificationPoolTotal } = await calculateCommissionForPeriod(propertyId, date, date);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Dive Centre Manager';
@@ -119,6 +119,12 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     });
   }
 
+  const poolSheet = workbook.addWorksheet('Certifications Pool');
+  poolSheet.columns = [{ header: 'Metric', key: 'metric', width: 36 }, { header: 'Value', key: 'value', width: 45 }];
+  poolSheet.getRow(1).font = { bold: true };
+  poolSheet.addRow({ metric: `Certifications Pool (${currency})`, value: certificationPoolTotal.toFixed(2) });
+  poolSheet.addRow({ metric: 'Distribution', value: 'No staff commission or base-leader override' });
+
   return workbook.xlsx.writeBuffer();
 };
 
@@ -143,7 +149,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     orderBy: { businessDate: 'asc' },
   });
 
-  const { staffResults, personalDetails } = await calculateCommissionForPeriod(
+  const { staffResults, personalDetails, certificationPoolTotal } = await calculateCommissionForPeriod(
     propertyId,
     startDate,
     endDate
@@ -187,6 +193,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
   summarySheet.addRow({ metric: 'Total Tips Paid', value: `${currency} ${totalTips.toFixed(2)}` });
   summarySheet.addRow({ metric: 'Net Revenue', value: `${currency} ${totalNet.toFixed(2)}` });
   summarySheet.addRow({ metric: 'Total Staff Commission', value: `${currency} ${totalCommission.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Certifications Pool (not paid to staff)', value: `${currency} ${certificationPoolTotal.toFixed(2)}` });
 
   // Sheet 2: Staff Commission
   const commSheet = workbook.addWorksheet('Staff Commission Breakdown');

@@ -53,6 +53,8 @@ jobs:
         env:
           COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
         run: sh scripts/test-proxy-relay.sh
+      - name: Exercise isolated testing at the live URL
+        run: sh scripts/test-parallel-testing.sh
       - name: Container diagnostics
         if: failure()
         env:
@@ -63,4 +65,8 @@ jobs:
         env:
           NPM_PROXY_IP: 192.0.2.10
           COMPOSE_PROJECT_NAME: dive-ci-${{ github.run_id }}-${{ github.run_attempt }}
-        run: docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml down --volumes --remove-orphans
+        run: |
+          if [ -f .env.testing ]; then
+            docker compose --project-directory . -p dive-centre-testing --env-file .env.production --env-file .env.testing -f deploy/compose.testing.yaml down --volumes --remove-orphans
+          fi
+          docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml down --volumes --remove-orphans

@@ -1,4 +1,6 @@
 import { boundedArray, validationIssues } from '../utils/validation';
+import { randomUUID } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { withPropertyPayrollTransaction, payrollReply } from '../utils/payrollTransaction';
 import { Router, Request, Response } from 'express';
@@ -7,6 +9,7 @@ import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
+import { poolContributionAmount } from '../utils/poolRates';
 
 import { businessToday, isBusinessDate } from '../utils/dates';
 
@@ -124,7 +127,7 @@ billsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       where,
       include: {
         createdBy: { select: { id: true, name: true } },
-        items: true,
+        items: { orderBy: { linePosition: 'asc' } },
       },
       orderBy: [{ businessDate: 'desc' }, { checkNumber: 'desc' }],
     });
@@ -156,6 +159,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
       include: {
         createdBy: { select: { id: true, name: true } },
         items: {
+          orderBy: { linePosition: 'asc' },
           include: {
             sellerStaff: { select: { id: true, name: true, propertyId: true } },
             guideStaff: { select: { id: true, name: true, propertyId: true } },
@@ -186,6 +190,8 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
 });
 
 const billItemSchema = z.object({
+  clientLineId: z.string().min(1).max(80).optional(),
+  autoPhotoFor: z.string().min(1).max(80).nullish(),
   itemId: z.string().optional().nullable(),
   itemName: z.string(),
   categoryName: z.string(),
@@ -251,11 +257,27 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       const property = await prisma.property.findUnique({ where: { id: data.propertyId } });
       if (!property) return payrollReply(404, { error: 'Property not found.' });
 
-      const itemIds = [...new Set(data.items.map(line => line.itemId).filter((id): id is string => Boolean(id)))];
+      const roots = data.items.filter(line => !line.autoPhotoFor);
+      const providedIds = data.items.map(line => line.clientLineId).filter((id): id is string => Boolean(id));
+      if (!roots.length || new Set(providedIds).size !== providedIds.length) return payrollReply(400, { error: 'Each activity must have a unique bill-line identifier.' });
+      const itemIds = [...new Set(roots.map(line => line.itemId).filter((id): id is string => Boolean(id)))];
       const catalogue = await prisma.item.findMany({ where: { id: { in: itemIds }, propertyId: data.propertyId, isActive: true }, include: { category: true } });
       const itemMap = new Map(catalogue.filter(item => item.category.propertyId === data.propertyId).map(item => [item.id, item]));
-      if (data.items.some(line => !line.itemId || !itemMap.has(line.itemId))) {
-        return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
+      if (roots.some(line => !line.itemId || !itemMap.has(line.itemId))) return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
+      const rootMap = new Map(roots.filter(line => line.clientLineId).map(line => [line.clientLineId!, line]));
+      const photoLines = new Map<string, typeof data.items[number]>();
+      for (const photo of data.items.filter(line => line.autoPhotoFor)) {
+        const parent = rootMap.get(photo.autoPhotoFor!);
+        if (!parent || !itemMap.get(parent.itemId!)?.includesComplimentaryMedia || photoLines.has(photo.autoPhotoFor!) || photo.itemId ||
+            photo.unitPrice !== 57.5 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
+          return payrollReply(400, { error: 'Photo lines must be linked once to an included activity, priced at $57.50 per unit, with matching quantity and one photographer.' });
+        }
+        photoLines.set(photo.autoPhotoFor!, photo);
+      }
+      for (const parent of roots) {
+        if (itemMap.get(parent.itemId!)?.includesComplimentaryMedia && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || parent.photoStaffId || parent.videoStaffId)) {
+          return payrollReply(400, { error: 'This activity includes an automatic $57.50 Photo line. Refresh the bill and select the team member on that Photo line before saving.' });
+        }
       }
       const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
       const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true, hireDate: { lte: data.businessDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: data.businessDate } }] }, select: { id: true } });
@@ -273,7 +295,8 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       let grossAmount = 0;
       let totalDiscount = 0;
 
-      const lineItemsData = data.items.map((line) => {
+      const lineItemsData: Prisma.BillItemUncheckedCreateWithoutBillInput[] = [];
+      for (const line of roots) {
         const item = itemMap.get(line.itemId!)!;
         let parsedRates: Record<string, unknown> = {};
         try { parsedRates = item.personalRatesJson ? JSON.parse(item.personalRatesJson) : {}; } catch { /* Invalid catalogue rates pay no commission. */ }
@@ -281,6 +304,11 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
         for (const role of ['seller', 'guide', 'instructor', 'photo', 'video'] as const) {
           const amount = parsedRates && parsedRates[role];
           if (typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) rates[role] = amount;
+        }
+        if (item.includesComplimentaryMedia) {
+          // Included photos are billed and credited once on the linked Photo line.
+          delete rates.photo;
+          delete rates.video;
         }
         const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + ((line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0);
         const lineGross = line.unitPrice * line.quantity;
@@ -290,7 +318,10 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
         grossAmount += lineGross;
         totalDiscount += discount;
 
-        return {
+        const parentId = randomUUID();
+        lineItemsData.push({
+          id: parentId,
+          linePosition: lineItemsData.length,
           itemId: line.itemId || null,
           itemName: item.name,
           categoryName: item.category.name,
@@ -298,15 +329,35 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
           unitPrice: line.unitPrice,
           discountPercent: line.discountPercent,
           lineTotal,
+          poolTypeSnapshot: item.poolType,
+          poolContributionAmount: poolContributionAmount(item.poolType, item.poolContribution, line.quantity, lineTotal),
           sellerStaffId: line.sellerStaffId || null,
           guideStaffId: line.guideStaffId || null,
           instructorStaffId: line.instructorStaffId || null,
-          photoStaffId: line.photoStaffId || null,
-          videoStaffId: line.videoStaffId || null,
+          photoStaffId: item.includesComplimentaryMedia ? null : line.photoStaffId || null,
+          videoStaffId: item.includesComplimentaryMedia ? null : line.videoStaffId || null,
+          includesComplimentaryMedia: item.includesComplimentaryMedia,
           personalCommissionsJson: JSON.stringify(rates),
           totalPersonalCommission,
-        };
-      });
+        });
+        if (item.includesComplimentaryMedia) {
+          const photo = photoLines.get(line.clientLineId!)!;
+          const photoGross = 57.5 * line.quantity;
+          const photoDiscount = photoGross * photo.discountPercent / 100;
+          grossAmount += photoGross;
+          totalDiscount += photoDiscount;
+          lineItemsData.push({
+            id: randomUUID(), autoPhotoForLineId: parentId, linePosition: lineItemsData.length,
+            itemId: null, itemName: 'Photo', categoryName: 'Photo & Video', quantity: line.quantity,
+            unitPrice: 57.5, discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
+            poolTypeSnapshot: 'NONE', poolContributionAmount: 0,
+            photoStaffId: photo.photoStaffId || null, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
+            includesComplimentaryMedia: false, personalCommissionsJson: '{"photo":4.5}',
+            totalPersonalCommission: photo.photoStaffId ? 4.5 * line.quantity : 0,
+          });
+        }
+      }
+
 
       const netBeforeCharges = grossAmount - totalDiscount;
       const serviceChargeAmount = (netBeforeCharges * property.serviceChargeRate) / 100;
@@ -338,7 +389,7 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
           },
         },
         include: {
-          items: true,
+          items: { orderBy: { linePosition: 'asc' } },
         },
       });
 

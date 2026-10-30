@@ -439,7 +439,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
                             {line.sellerStaff && <span>Seller: {line.sellerStaff.name}</span>}
                             {line.guideStaff && <span>Guide: {line.guideStaff.name}</span>}
                             {line.instructorStaff && <span>Inst: {line.instructorStaff.name}</span>}
-                            {line.photoStaff && <span>Photo: {line.photoStaff.name}</span>}
+                            {line.photoStaff && <span>{line.includesComplimentaryMedia ? 'Photo / video' : 'Photo'}: {line.photoStaff.name}</span>}
                             {line.videoStaff && <span>Video: {line.videoStaff.name}</span>}
                           </div>
                         </td>

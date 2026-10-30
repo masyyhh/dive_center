@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadTypeScript, request, FixedDate } = require('./helpers/runtime.cjs');
 const auth = { requireAuth: (req, res, next) => next() };
-const emptyCommissions = { staffResults: [], personalDetails: [], grandTotal: 0 };
+const emptyCommissions = { staffResults: [], personalDetails: [], certificationPoolTotal: 0, grandTotal: 0 };
 
 function reportFixture(lockedMonth = '2026-09') {
   let calculations = 0;

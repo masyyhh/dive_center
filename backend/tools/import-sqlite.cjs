@@ -36,11 +36,30 @@ async function importSqlite(sourcePath, targetUrl) {
       if (!tables.has(name)) throw Error('Source schema is incomplete. Upgrade the SQLite source before importing.');
       const columns = new Set(source.prepare(`PRAGMA table_info("${name}")`).all().map(row => row.name));
       const fields = model.fields.filter(field => field.kind === 'scalar');
-      const additive = new Set(name === 'Property' ? ['pmsPropertyCodes'] : name === 'StaffMember' ? ['userId'] : name === 'User' ? ['deletedAt'] : []);
+      const additive = new Set(name === 'Property' ? ['pmsPropertyCodes'] : name === 'StaffMember' ? ['userId'] : name === 'User' ? ['deletedAt'] : name === 'Item' ? ['includesComplimentaryMedia'] : name === 'BillItem' ? ['includesComplimentaryMedia', 'poolTypeSnapshot', 'poolContributionAmount', 'linePosition', 'autoPhotoForLineId'] : []);
       if (fields.some(field => !columns.has(field.name) && !additive.has(field.name))) throw Error('Source schema is outdated. Use the final SQLite application schema before importing.');
-      const records = source.prepare(`SELECT * FROM "${name}"`).all().map(row => Object.fromEntries(fields.map(field => [field.name, columns.has(field.name) ? normalize(field, row[field.name]) : field.name === 'pmsPropertyCodes' ? (row.pmsPropertyCode ? [row.pmsPropertyCode] : []) : null])));
+      const records = source.prepare(`SELECT * FROM "${name}"`).all().map(row => Object.fromEntries(fields.map(field => [field.name, columns.has(field.name) ? normalize(field, row[field.name]) : field.name === 'pmsPropertyCodes' ? (row.pmsPropertyCode ? [row.pmsPropertyCode] : []) : field.name === 'includesComplimentaryMedia' ? false : field.name === 'linePosition' ? 0 : null])));
       return { name, delegate: name[0].toLowerCase() + name.slice(1), fields, records };
     });
+    // Derive additive pool snapshots for old SQLite files using their original
+    // catalogue amounts and locks before converting course/dive rates to 10%.
+    const rowsFor = name => dataset.find(table => table.name === name).records;
+    const billsById = new Map(rowsFor('Bill').map(bill => [bill.id, bill]));
+    const itemsById = new Map(rowsFor('Item').map(item => [item.id, item]));
+    const lockedMonths = new Set(rowsFor('MonthLock').filter(lock => lock.isLocked).map(lock => JSON.stringify([lock.propertyId, lock.yearMonth])));
+    for (const line of rowsFor('BillItem')) {
+      if (line.poolTypeSnapshot != null && line.poolContributionAmount != null) continue;
+      const bill = billsById.get(line.billId);
+      const candidate = itemsById.get(line.itemId);
+      const item = candidate?.propertyId === bill?.propertyId ? candidate : null;
+      line.poolTypeSnapshot = item?.poolType || 'NONE';
+      const percentage = ['COURSE_POOL', 'DIVE_POOL'].includes(line.poolTypeSnapshot);
+      line.poolContributionAmount = percentage && !lockedMonths.has(JSON.stringify([bill.propertyId, bill.businessDate.slice(0, 7)]))
+        ? Math.max(0, line.lineTotal) * 0.10
+        : item && ['COURSE_POOL', 'DIVE_POOL', 'CERTIFICATION_POOL'].includes(item.poolType) && Number.isFinite(item.poolContribution) && item.poolContribution >= 0
+          ? item.poolContribution * line.quantity : 0;
+    }
+    for (const item of rowsFor('Item')) if (['COURSE_POOL', 'DIVE_POOL'].includes(item.poolType)) item.poolContribution = 10;
     await target.$transaction(async tx => {
       for (const table of dataset) if (await tx[table.delegate].count()) throw Error('Target application tables must be empty. Existing records will never be replaced.');
       for (const table of dataset) {

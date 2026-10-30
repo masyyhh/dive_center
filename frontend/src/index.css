@@ -399,3 +399,14 @@ button:disabled { opacity: .55; }
 .signin-card:has(.recovery-code-list) { max-height: 95vh; overflow: auto; }
 
 .authenticator-card { color: var(--signin-ink); font-size: 14px; line-height: 20px; }
+
+.shortcuts-dialog { padding: 24px; }
+.shortcuts-dialog h2 { font-size: 20px; font-weight: 700; }
+.shortcuts-dialog > p { color: var(--muted); font-size: 13px; margin: 16px 0; }
+.shortcuts-list > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.shortcuts-list dd { white-space: nowrap; font-size: 12px; }
+.shortcuts-list kbd { display: inline-block; border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; background: var(--soft); font-family: inherit; }
+@media (max-width: 480px) { .shortcuts-dialog { padding: 16px; } .shortcuts-list > div { gap: 10px; font-size: 12px; } }
+
+.sidebar-shortcuts { display: flex; align-items: center; gap: 10px; padding: 10px 0; font-size: 12px; color: #c8dde5; }
+@media (max-width: 767px) { .topbar .shortcuts-trigger { display: none; } }

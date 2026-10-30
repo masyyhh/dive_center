@@ -1,3 +1,10 @@
+import { PersonalCommissionEditor, PersonalCommissionSummary } from './PersonalCommissionEditor';
+import { CommissionSelection, hasNoCommissions, readCommissionSelections, serializeCommissionSelections } from '../utils/commissionEditor';
+import { CommissionCalculatorPreview } from './CommissionCalculator';
+import { BulkMediaReview, BulkMediaReviewData } from './BulkMediaReview';
+import { CatalogueFilters, emptyCatalogueFilters, filterCatalogue } from '../utils/catalogueFilters';
+import { CatalogueTransferPanel } from './CatalogueTransferPanel';
+import { CatalogueImportReview, CatalogueImportPreview } from './CatalogueImportReview';
 import { pmsResortCodes } from '../utils/pmsGuests';
 import { passwordHelp, passwordPattern } from './PasswordRecoveryView';
 import { formatMoney } from '../utils/format';
@@ -113,18 +120,31 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   });
 
   const [transferBusy, setTransferBusy] = useState(false);
-  const [catalogueImport, setCatalogueImport] = useState<{ propertyId: string; content: string; format: 'csv' | 'xlsx'; created: number; updated: number; total: number; previewRows: { code: string; name: string; category: string; price: number; isActive: boolean; commission: { poolType: string; poolContribution: number; personalRates: Record<string, number> } }[] } | null>(null);
+  const [catalogueImport, setCatalogueImport] = useState<(CatalogueImportPreview & { propertyId: string; content: string; format: 'csv' | 'xlsx'; fileName: string }) | null>(null);
   // Items & Categories state
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showCategoryInput, setShowCategoryInput] = useState(false);
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [catalogueFilters, setCatalogueFilters] = useState<CatalogueFilters>(emptyCatalogueFilters);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [bulkReview, setBulkReview] = useState<BulkMediaReviewData | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const [showArchivedItems, setShowArchivedItems] = useState(false);
+  const visibleItems = filterCatalogue(items, catalogueFilters, showArchivedItems);
+  const selectableItems = visibleItems.filter(item => item.isActive);
+  const selectedVisibleCount = selectableItems.filter(item => selectedItemIds.includes(item.id)).length;
+  useEffect(() => { setCatalogueFilters(emptyCatalogueFilters); setSelectedItemIds([]); setBulkReview(null); setBulkError(null); setCatalogueImport(null); }, [activeProperty?.id]);
+  useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && item.isActive))); }, [items]);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
   const [itemBusy, setItemBusy] = useState(false);
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
+  const [noCommissions, setNoCommissions] = useState(false);
+  const previousCommissionSettings = React.useRef<{ poolType: Item['poolType']; poolContribution: number; includesComplimentaryMedia: boolean; selections: CommissionSelection[] } | null>(null);
+  const [commissionSelections, setCommissionSelections] = useState(() => readCommissionSelections('seller,guide', '{"seller":5,"guide":10}'));
   const [itemForm, setItemForm] = useState({
     categoryId: '',
     code: '',
@@ -134,6 +154,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     poolContribution: 10.0,
     personalRoles: 'seller,guide',
     personalRatesJson: '{"seller": 5, "guide": 10}',
+    includesComplimentaryMedia: false,
   });
 
   // Audit Logs state
@@ -450,7 +471,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const exportCatalogue = async (format: 'csv' | 'xlsx', template = false) => {
     if (!activeProperty || transferBusy) return;
     setTransferBusy(true); setErrorMsg(null);
-    try { await downloadFile(`/items/export?propertyId=${encodeURIComponent(activeProperty.id)}&format=${format}&template=${template}`, `catalogue${template ? '-template' : ''}.${format}`); }
+    try { await downloadFile(`/items/export?propertyId=${encodeURIComponent(activeProperty.id)}&format=${format}&template=${template}`, `catalogue-${activeProperty.code.toLowerCase()}-${businessToday()}${template ? '-template' : ''}.${format}`); }
     catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not export catalogue.'); }
     finally { setTransferBusy(false); }
   };
@@ -463,8 +484,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     try {
       const content = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Could not read this file.')); reader.readAsDataURL(file); });
       const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' as const : 'xlsx' as const;
-      const result = await apiFetch<{ created: number; updated: number; total: number; previewRows: { code: string; name: string; category: string; price: number; isActive: boolean; commission: { poolType: string; poolContribution: number; personalRates: Record<string, number> } }[] }>('/items/import', { method: 'POST', body: JSON.stringify({ propertyId, content, format, preview: true }) });
-      setCatalogueImport({ propertyId, content, format, ...result });
+      const result = await apiFetch<CatalogueImportPreview>('/items/import', { method: 'POST', body: JSON.stringify({ propertyId, content, format, preview: true }) });
+      if (roleTitleProperty.current === propertyId) setCatalogueImport({ propertyId, content, format, fileName: file.name, ...result });
     } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not read catalogue.'); }
     finally { setTransferBusy(false); }
   };
@@ -479,12 +500,15 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   };
 
   const openItemEditor = (item?: Item) => {
+    setNoCommissions(item ? hasNoCommissions(item) : false);
+    previousCommissionSettings.current = null;
+    setCommissionSelections(readCommissionSelections(item ? item.personalRoles : 'seller,guide', item ? item.personalRatesJson : '{"seller":5,"guide":10}'));
     setEditingItem(item || null); setErrorMsg(null); setShowCategoryInput(false); setNewCategoryName('');
     setItemForm(item ? {
       categoryId: item.categoryId, code: item.code, name: item.name, price: item.price,
       poolType: item.poolType, poolContribution: item.poolContribution,
-      personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '',
-    } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}' });
+      personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '', includesComplimentaryMedia: item.includesComplimentaryMedia,
+    } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: /^certifications?$/i.test(categories[0]?.name || '') ? 'CERTIFICATION_POOL' : 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}', includesComplimentaryMedia: false });
     setShowItemModal(true);
   };
   const closeItemEditor = () => { if (!itemBusy && !categoryBusy) { setShowItemModal(false); setEditingItem(null); setErrorMsg(null); } };
@@ -494,9 +518,11 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     if (!activeProperty || itemBusy || categoryBusy) return;
     setItemBusy(true); setErrorMsg(null);
     try {
+      const payments = noCommissions ? { personalRoles: '', personalRatesJson: '{}' } : serializeCommissionSelections(commissionSelections, itemForm.includesComplimentaryMedia);
+      const activity = { ...itemForm, ...payments, ...(noCommissions ? { poolType: 'NONE', poolContribution: 0, includesComplimentaryMedia: false } : {}) };
       await apiFetch(editingItem ? `/items/${editingItem.id}` : '/items', {
         method: editingItem ? 'PUT' : 'POST',
-        body: JSON.stringify(editingItem ? itemForm : { ...itemForm, code: undefined, propertyId: activeProperty.id }),
+        body: JSON.stringify(editingItem ? activity : { ...activity, code: undefined, propertyId: activeProperty.id }),
       });
       setShowItemModal(false); setEditingItem(null);
       showNotification(`Activity '${itemForm.name}' ${editingItem ? 'updated' : 'added'} for ${activeProperty.name}.`);
@@ -504,6 +530,53 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save activity.');
     } finally { setItemBusy(false); }
+  };
+
+  const toggleComplimentaryMedia = async (item: Item, enabled: boolean) => {
+    if (!activeProperty || !canManageAccounts || itemBusy) return;
+    const propertyId = activeProperty.id;
+    setItemBusy(true); setErrorMsg(null);
+    try {
+      await apiFetch(`/items/${item.id}`, { method: 'PUT', body: JSON.stringify({ includesComplimentaryMedia: enabled }) });
+      if (roleTitleProperty.current !== propertyId) return;
+      showNotification(`Automatic Photo ${enabled ? 'enabled' : 'disabled'} for '${item.name}' on new bills.`);
+      await loadItems();
+    } catch (error) {
+      if (roleTitleProperty.current === propertyId) setErrorMsg(error instanceof Error ? error.message : 'Could not update automatic Photo.');
+    } finally { setItemBusy(false); }
+  };
+
+  const reviewBulkMedia = async (enabled: boolean, ids = selectedItemIds) => {
+    if (!activeProperty || !ids.length || bulkBusy || itemBusy) return;
+    const propertyId = activeProperty.id;
+    setBulkBusy(true); setBulkError(null); setErrorMsg(null);
+    try {
+      const review = await apiFetch<Omit<BulkMediaReviewData, 'propertyId'>>('/items/bulk-complimentary-media', {
+        method: 'POST', body: JSON.stringify({ propertyId, itemIds: ids, includesComplimentaryMedia: enabled, preview: true }),
+      });
+      if (roleTitleProperty.current === propertyId) setBulkReview({ ...review, propertyId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not review the selected services.';
+      if (roleTitleProperty.current === propertyId) { if (bulkReview) setBulkError(message); else setErrorMsg(message); }
+    } finally { setBulkBusy(false); }
+  };
+
+  const applyBulkMedia = async () => {
+    if (!bulkReview || bulkBusy || bulkReview.propertyId !== activeProperty?.id) return;
+    const propertyId = bulkReview.propertyId;
+    setBulkBusy(true); setBulkError(null);
+    try {
+      const result = await apiFetch<{ changedCount: number }>('/items/bulk-complimentary-media', {
+        method: 'POST', body: JSON.stringify({ propertyId, itemIds: bulkReview.items.map(item => item.id), includesComplimentaryMedia: bulkReview.includesComplimentaryMedia, preview: false,
+          expectedItems: bulkReview.items.map(item => ({ id: item.id, updatedAt: item.updatedAt })) }),
+      });
+      if (roleTitleProperty.current !== propertyId) return;
+      setBulkReview(null); setSelectedItemIds([]);
+      showNotification(`Updated automatic Photo settings for ${result.changedCount} service${result.changedCount === 1 ? '' : 's'}.`);
+      await loadItems();
+    } catch (error) {
+      if (roleTitleProperty.current === propertyId) setBulkError(error instanceof Error ? error.message : 'Could not save the bulk update.');
+    } finally { setBulkBusy(false); }
   };
 
   const handleDeleteItem = async () => {
@@ -928,20 +1001,24 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-3 items-center">
-            <button type="button" className="secondary-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('xlsx')}>Export Excel</button>
-            <button type="button" className="secondary-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('csv')}>Export CSV</button>
-            <button type="button" className="text-button" disabled={!activeProperty || transferBusy} onClick={() => exportCatalogue('xlsx', true)}>Download import template</button>
-            <label className="text-sm" htmlFor="catalogue-file">Import catalogue<input id="catalogue-file" type="file" accept=".csv,.xlsx" className="block mt-1" disabled={!activeProperty || transferBusy} onChange={e => { void previewCatalogue(e.target.files?.[0]); e.target.value = ''; }} /></label>
+          <CatalogueTransferPanel propertyName={activeProperty?.name} available={Boolean(activeProperty)} busy={transferBusy}
+            onExport={exportCatalogue} onImport={previewCatalogue} />
+          {catalogueImport?.propertyId === activeProperty?.id && catalogueImport && <CatalogueImportReview data={catalogueImport}
+            fileName={catalogueImport.fileName} propertyName={activeProperty?.name || ''} currencySymbol={activeProperty?.currencySymbol || '$'}
+            busy={transferBusy} onApply={commitCatalogue} onCancel={() => setCatalogueImport(null)} />}
+
+          <div className="catalogue-filters">
+            <label>Search services<input type="search" placeholder="Name, code or category" value={catalogueFilters.query} onChange={event => setCatalogueFilters({ ...catalogueFilters, query: event.target.value })} /></label>
+            <label>Category<select value={catalogueFilters.categoryId} onChange={event => setCatalogueFilters({ ...catalogueFilters, categoryId: event.target.value })}><option value="">All categories</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <label>Pool<select value={catalogueFilters.poolType} onChange={event => setCatalogueFilters({ ...catalogueFilters, poolType: event.target.value })}><option value="">All pools</option><option value="COURSE_POOL">Course pool</option><option value="DIVE_POOL">Dive pool</option><option value="CERTIFICATION_POOL">Certifications</option><option value="NONE">No pool</option></select></label>
+            <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · $57.50</option><option value="excluded">Separate settings</option></select></label>
           </div>
-          <p className="text-xs text-slate-500">Columns: Item Code, Items, Category, Price, Commission, Status. Existing codes update this property's items; new codes are preserved when creating items. Leave Item Code blank to generate a code automatically. Status: Active or Inactive. Commission accepts a pool amount (courses use the course pool; other categories use the dive pool), or the full settings object from an export. Up to 2,000 items / 3 MB. Imports are checked before saving.</p>
-          {transferBusy && <p role="status">Processing catalogue…</p>}
-          {catalogueImport?.propertyId === activeProperty?.id && catalogueImport && <div className="surface p-4 space-y-3">
-            <h4 className="font-bold">Review catalogue import</h4>
-            <p>{catalogueImport.created} new items, {catalogueImport.updated} updates. New categories will be added. Your item codes are retained; blank codes are generated on save.</p>
-            <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Item Code</th><th>Items</th><th>Category</th><th>Price</th><th>Commission</th><th>Status</th></tr></thead><tbody>{catalogueImport.previewRows.map((row, index) => <tr key={index}><td>{row.code || 'Generated on save'}</td><td>{row.name}</td><td>{row.category}</td><td>{row.price}</td><td>{JSON.stringify(row.commission)}</td><td>{row.isActive ? 'Active' : 'Inactive'}</td></tr>)}</tbody></table></div>
-            {catalogueImport.total > 20 && <p>Showing the first 20 of {catalogueImport.total} validated rows.</p>}
-            <div className="flex gap-3"><button type="button" className="primary-button" disabled={transferBusy} onClick={commitCatalogue}>Import {catalogueImport.total} items</button><button type="button" className="secondary-button" disabled={transferBusy} onClick={() => setCatalogueImport(null)}>Cancel import</button></div>
+          <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {items.filter(item => showArchivedItems || item.isActive).length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
+          {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar">
+            <div><strong>{selectedItemIds.length} selected</strong>{selectedItemIds.length > selectedVisibleCount && <span> · {selectedItemIds.length - selectedVisibleCount} hidden by filters</span>}<small>Review changes before saving. Up to 200 services per update.</small></div>
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : 'Add Photo · $57.50'}</button>
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
+            <button type="button" className="text-button" disabled={bulkBusy} onClick={() => setSelectedItemIds([])}>Clear selection</button>
           </div>}
 
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" checked={showArchivedItems} onChange={event => setShowArchivedItems(event.target.checked)} />Show deleted activities</label>
@@ -949,19 +1026,28 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
+                  <th className="py-3 px-4"><input type="checkbox" aria-label="Select all visible active services"
+                    checked={selectableItems.length > 0 && selectedVisibleCount === selectableItems.length}
+                    ref={node => { if (node) node.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < selectableItems.length; }}
+                    disabled={bulkBusy || itemBusy || !selectableItems.length || (new Set([...selectedItemIds, ...selectableItems.map(item => item.id)]).size > 200 && selectedVisibleCount !== selectableItems.length)}
+                    onChange={event => setSelectedItemIds(ids => event.target.checked ? [...new Set([...ids, ...selectableItems.map(item => item.id)])] : ids.filter(id => !selectableItems.some(item => item.id === id)))} /></th>
                   <th className="py-3 px-4">Code & Item</th>
                   <th className="py-3 px-4">Category</th>
                   <th className="py-3 px-4">Price</th>
                   <th className="py-3 px-4">Pool Contribution</th>
-                  <th className="py-3 px-4">Personal Roles & Fixed Amounts</th>
+                  <th className="py-3 px-4">Employee Payments</th>
+                  <th className="py-3 px-4">Include Photo ($57.50)</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {!items.some(item => showArchivedItems || item.isActive) && <tr><td colSpan={7} className="py-12 text-center text-slate-500">No active activities. Add activities and prices to start writing bills, or show deleted activities to restore them.</td></tr>}
-                {items.filter(item => showArchivedItems || item.isActive).map((it) => (
+                {!visibleItems.length && <tr><td colSpan={9} className="py-12 text-center text-slate-500">{items.length ? 'No services match these filters. Clear filters to see more services.' : 'No activities yet. Add an activity to get started.'}</td></tr>}
+                {visibleItems.map((it) => (
                   <tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                    <td className="py-3 px-4"><input type="checkbox" aria-label={`Select ${it.name} for bulk update`} checked={selectedItemIds.includes(it.id)}
+                      disabled={!it.isActive || bulkBusy || itemBusy || (selectedItemIds.length >= 200 && !selectedItemIds.includes(it.id))}
+                      onChange={event => setSelectedItemIds(ids => event.target.checked ? [...new Set([...ids, it.id])] : ids.filter(id => id !== it.id))} /></td>
                     <td className="py-3 px-4">
                       <span className="font-mono text-sky-500 font-bold mr-2">[{it.code}]</span>
                       <span className="font-bold text-slate-900 dark:text-white">{it.name}</span>
@@ -975,29 +1061,24 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4">
                       {it.poolType !== 'NONE' ? (
                         <span className="px-2 py-0.5 rounded text-xs font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-                          {it.poolType}: {formatMoney(it.poolContribution, activeProperty?.currencySymbol || '$')}
+                          {{ COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', CERTIFICATION_POOL: 'Certifications', NONE: 'No pool' }[it.poolType]}: {it.poolType === 'COURSE_POOL' || it.poolType === 'DIVE_POOL' ? `${it.poolContribution}%` : formatMoney(it.poolContribution, activeProperty?.currencySymbol || '$')}
                         </span>
                       ) : (
                         <span className="text-slate-400">None</span>
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      {it.personalRoles ? (
-                        <div className="space-y-0.5">
-                          <span className="font-semibold text-purple-600 dark:text-purple-400">
-                            {it.personalRoles}
-                          </span>
-                          <span className="text-xs text-slate-400 font-mono block">
-                            Rates: {it.personalRatesJson || 'N/A'}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
+                      <PersonalCommissionSummary item={it} currencySymbol={activeProperty?.currencySymbol || '$'} />
                     </td>
+                    <td className="py-3 px-4"><label className="flex items-start gap-2">
+                      <input type="checkbox" checked={it.includesComplimentaryMedia} disabled={itemBusy || bulkBusy || !it.isActive}
+                        aria-label={`Automatic Photo for ${it.name}`}
+                        onChange={event => toggleComplimentaryMedia(it, event.target.checked)} />
+                      <span className="text-xs">Adds $57.50 per unit · employee earns $4.50</span>
+                    </label></td>
                     <td className="py-3 px-4">{it.isActive ? 'Active' : 'Deleted'}</td>
                     <td className="py-3 px-4"><div className="flex gap-2">
-                      <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => openItemEditor(it)} aria-label={`Edit ${it.name}`}><Edit2 size={14} />Edit</button>
+                      <button type="button" className="secondary-button" disabled={itemBusy || bulkBusy} onClick={() => openItemEditor(it)} aria-label={`Edit ${it.name}`}><Edit2 size={14} />Edit</button>
                       {it.isActive ? <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(it); setErrorMsg(null); }} aria-label={`Delete ${it.name}`}><Trash2 size={14} />Delete</button> : <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => handleRestoreItem(it)} aria-label={`Restore ${it.name}`}>Restore</button>}
                     </div></td>
                   </tr>
@@ -1586,7 +1667,11 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     value={itemForm.categoryId}
                     required
                     disabled={categoryBusy}
-                    onChange={(e) => setItemForm({ ...itemForm, categoryId: e.target.value })}
+                    onChange={(e) => {
+                      const categoryId = e.target.value;
+                      const isCertification = /^certifications?$/i.test(categories.find(category => category.id === categoryId)?.name.trim() || '');
+                      setItemForm({ ...itemForm, categoryId, ...(!editingItem && !noCommissions && isCertification ? { poolType: 'CERTIFICATION_POOL' as const } : {}) });
+                    }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                   >
                     {!categories.length && <option value="">Add a category first</option>}
@@ -1618,7 +1703,26 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="commission-free-option">
+                <label><input type="checkbox" checked={noCommissions}
+                  disabled={Boolean(editingItem?.hasBillHistory && editingItem.poolType !== 'NONE')}
+                  onChange={event => {
+                    const checked = event.target.checked;
+                    if (checked) {
+                      previousCommissionSettings.current = { poolType: itemForm.poolType, poolContribution: itemForm.poolContribution, includesComplimentaryMedia: itemForm.includesComplimentaryMedia, selections: commissionSelections };
+                      setItemForm(form => ({ ...form, poolType: 'NONE', poolContribution: 0, includesComplimentaryMedia: false }));
+                      setCommissionSelections(rows => rows.map(row => ({ ...row, enabled: false })));
+                    } else if (previousCommissionSettings.current) {
+                      const previous = previousCommissionSettings.current;
+                      setItemForm(form => ({ ...form, poolType: previous.poolType, poolContribution: previous.poolContribution, includesComplimentaryMedia: previous.includesComplimentaryMedia }));
+                      setCommissionSelections(previous.selections);
+                    }
+                    setNoCommissions(checked);
+                  }} /><span><strong>No commissions for this activity</strong><small>No pool contribution, employee payments or automatically added Photo.</small></span></label>
+                {editingItem?.hasBillHistory && editingItem.poolType !== 'NONE' && <p>Pool rules are protected on this billed service. Create a new activity to change them.</p>}
+              </div>
+
+              <div className={noCommissions ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-2 gap-3'}>
                 <div>
                   <label htmlFor="adminview-field-17" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Price ({activeProperty?.currencySymbol || '$'}) *
@@ -1633,50 +1737,44 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
                   />
                 </div>
-                <div>
+                <div hidden={noCommissions}>
                   <label htmlFor="adminview-field-18" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                     Pool Type
                   </label>
                   <select id="adminview-field-18"
-                    disabled={editingItem?.hasBillHistory}
+                    disabled={editingItem?.hasBillHistory || noCommissions}
                     value={itemForm.poolType}
                     onChange={(e) => setItemForm({ ...itemForm, poolType: e.target.value as any })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                   >
                     <option value="DIVE_POOL">Dive Pool</option>
                     <option value="COURSE_POOL">Course Pool</option>
+                    <option value="CERTIFICATION_POOL">Certifications Pool (No Staff Commission)</option>
                     <option value="NONE">None (No Pool Share)</option>
                   </select>
                 </div>
               </div>
 
-              <div><label htmlFor="activity-pool-contribution" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">Pool contribution ({activeProperty?.currencySymbol || '$'})</label><input id="activity-pool-contribution" type="number" min="0" step="0.01" required disabled={editingItem?.hasBillHistory} value={itemForm.poolContribution} onChange={event => setItemForm({ ...itemForm, poolContribution: Number(event.target.value) })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />{editingItem?.hasBillHistory && <p className="text-xs text-slate-500 mt-1">Pool rules are fixed for activities used on saved bills. Create a new activity to use different rules.</p>}</div>
+              {noCommissions ? <p className="commission-free-notice">This service earns no commissions. You can still set its guest price above.</p> : <>
+              {itemForm.poolType === 'CERTIFICATION_POOL' && <p className="text-sm text-slate-500">Certifications pool contributions are tracked in reports and are not paid to staff or included in the base-leader override. Personal commission settings below are separate.</p>}
 
-              <div>
-                <label htmlFor="adminview-field-19" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Personal Commission Roles (comma-separated, e.g. seller,guide)
+              <div><label htmlFor="activity-pool-contribution" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">{itemForm.poolType === 'COURSE_POOL' || itemForm.poolType === 'DIVE_POOL' ? 'Pool commission rate (%)' : `Pool contribution (${activeProperty?.currencySymbol || '$'})`}</label><input id="activity-pool-contribution" type="number" min="0" max={itemForm.poolType === 'COURSE_POOL' || itemForm.poolType === 'DIVE_POOL' ? 100 : undefined} step="0.01" required disabled={editingItem?.hasBillHistory} value={itemForm.poolContribution} onChange={event => setItemForm({ ...itemForm, poolContribution: Number(event.target.value) })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />{editingItem?.hasBillHistory && <p className="text-xs text-slate-500 mt-1">Pool rules are fixed for activities used on saved bills. Create a new activity to use different rules.</p>}</div>
+
+              {(itemForm.poolType === 'COURSE_POOL' || itemForm.poolType === 'DIVE_POOL') && <p className="text-xs text-slate-500">Calculated from the service total after discounts, before tax and service charge. A 10% rate on a $200 service with a 25% discount contributes $15 to the pool.</p>}
+
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                <label className="flex items-start gap-2"><input type="checkbox" checked={itemForm.includesComplimentaryMedia} onChange={event => setItemForm({ ...itemForm, includesComplimentaryMedia: event.target.checked })} />
+                  <span className="font-semibold">Include Photo ($57.50)</span>
                 </label>
-                <input id="adminview-field-19"
-                  type="text"
-                  value={itemForm.personalRoles}
-                  onChange={(e) => setItemForm({ ...itemForm, personalRoles: e.target.value })}
-                  placeholder="seller,guide,instructor,photo,video"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
-                />
+                <p className="text-xs text-slate-500">Adds a separate Photo line at $57.50 per unit on top of the activity price. Select one team member on that line to earn $4.50 per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
               </div>
 
-              <div>
-                <label htmlFor="adminview-field-20" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  Personal Commission Rates JSON (e.g. {`{"seller": 10, "guide": 15}`})
-                </label>
-                <input id="adminview-field-20"
-                  type="text"
-                  value={itemForm.personalRatesJson}
-                  onChange={(e) => setItemForm({ ...itemForm, personalRatesJson: e.target.value })}
-                  placeholder='{"seller": 5, "guide": 10}'
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
-                />
-              </div>
+              <PersonalCommissionEditor value={commissionSelections} onChange={setCommissionSelections}
+                combinedMedia={itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} showPreview={false} />
+              </>}
+              <CommissionCalculatorPreview price={itemForm.price} poolType={noCommissions ? 'NONE' : itemForm.poolType} poolRate={noCommissions ? 0 : itemForm.poolContribution}
+                selections={noCommissions ? commissionSelections.map(row => ({ ...row, enabled: false })) : commissionSelections}
+                combinedMedia={!noCommissions && itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} />
 
               <div className="flex space-x-2 pt-3">
                 <button
@@ -1700,6 +1798,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
           </div>
         </Modal>
       )}
+      {bulkReview && <BulkMediaReview review={bulkReview} busy={bulkBusy} error={bulkError}
+        onClose={() => { if (!bulkBusy) { setBulkReview(null); setBulkError(null); } }} onApply={applyBulkMedia}
+        onRefresh={() => reviewBulkMedia(bulkReview.includesComplimentaryMedia, bulkReview.items.map(item => item.id))} />}
     </div>
   );
 };

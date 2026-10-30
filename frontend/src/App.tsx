@@ -1,5 +1,7 @@
 import { AuthenticatorSetupView } from './components/AuthenticatorSetupView';
 import { Modal } from './components/Modal';
+import { KeyboardShortcuts } from './components/KeyboardShortcuts';
+import { dispatchWorkspaceShortcut } from './utils/keyboardShortcuts';
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/AuthContext';
 import { useProperty } from './context/PropertyContext';
@@ -15,6 +17,7 @@ const BillsView = lazy(() => import('./components/BillsView').then(module => ({ 
 const PresenceView = lazy(() => import('./components/PresenceView').then(module => ({ default: module.PresenceView })));
 const ReportingView = lazy(() => import('./components/ReportingView').then(module => ({ default: module.ReportingView })));
 const AdminView = lazy(() => import('./components/AdminView').then(module => ({ default: module.AdminView })));
+import { TestingLoginView } from './components/TestingLoginView';
 import { LoginView } from './components/LoginView';
 import { useNavigation } from './context/NavigationContext';
 import { Waves } from 'lucide-react';
@@ -37,6 +40,7 @@ export const AppContent: React.FC = () => {
   const [securityCodesVisible, setSecurityCodesVisible] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
   const commitRoute = (tab: NavTab, nextSection = '', replace = false) => {
@@ -88,14 +92,30 @@ export const AppContent: React.FC = () => {
   }, [requestNavigation, hasUnsavedChanges]);
   useEffect(() => { document.title = `${user ? navLabels[currentTab] : 'Sign in'} · Dive Centre Manager`; mainRef.current?.focus(); }, [currentTab, user]);
   useEffect(() => { const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, []);
+  useEffect(() => {
+    if (loading || !user?.authenticatorEnabled || propertyLoading) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      const editing = event.composedPath().some(target => target instanceof Element &&
+        target.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"]'));
+      dispatchWorkspaceShortcut(event, {
+        canAdmin, waterSportsEnabled,
+        blocked: editing || menuOpen || securityOpen || shortcutsOpen || !!document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'),
+        navigate,
+        openHelp: () => setShortcutsOpen(true),
+      });
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  });
   if (loading) return <div className="app-loading" role="status"><Waves size={32} /><span>Opening your workspace…</span></div>;
-  if (!user) return <LoginView />;
+  if (!user) return import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? <TestingLoginView /> : <LoginView />;
   if (!user.authenticatorEnabled) return <div className="signin-page"><AuthenticatorSetupView onComplete={() => { void refreshUser(); }} /></div>;
   return <div className="app-shell">
+    {shortcutsOpen && <KeyboardShortcuts canAdmin={canAdmin} onClose={() => setShortcutsOpen(false)} />}
     {securityOpen && <Modal label="Personal authenticator" busy={securityCodesVisible} onClose={() => { if (!securityCodesVisible) setSecurityOpen(false); }}><AuthenticatorSetupView onCodesVisible={setSecurityCodesVisible} onCancel={() => setSecurityOpen(false)} onComplete={() => { setSecurityOpen(false); void refreshUser(); }} /></Modal>}
     <a href="#main-content" className="skip-link" onClick={e => { e.preventDefault(); mainRef.current?.focus(); }}>Skip to content</a>
-    <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} />
-    <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => setSecurityOpen(true))} />
+    <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} onShortcuts={() => setShortcutsOpen(true)} />
+    <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => { if (import.meta.env.VITE_DEPLOYMENT_MODE === 'testing') window.location.assign('/'); else setSecurityOpen(true); })} onShortcuts={() => setShortcutsOpen(true)} />
       <main id="main-content" className={`main-content view-${currentTab}`} ref={mainRef} tabIndex={-1}>
         {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
           {waterSportsEnabled && currentTab === 'water-sports' && <WaterSportsView />}

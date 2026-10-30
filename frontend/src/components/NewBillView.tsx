@@ -1,3 +1,5 @@
+import { nationalityCountries as countries } from '../utils/nationalities';
+import { addActivityWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity } from '../utils/automaticPhotos';
 import { guestBillFields } from '../utils/pmsGuests';
 import { useMonthLock } from '../hooks/useMonthLock';
 import { formatMoney } from '../utils/format';
@@ -122,6 +124,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
         setCategories(itemsData.categories);
         setItems(itemsData.items);
+        setBillLines(lines => normalizeAutomaticPhotos(lines, itemsData.items));
         setNextCheck(nextCheckData.nextCheckNumber);
         if (!restoredDraft) setCheckNumber(nextCheckData.nextCheckNumber);
       } catch (err) {
@@ -208,59 +211,13 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     setGuestPickerOpen(false); setPmsMessage(`Loaded ${guest.fullName} from PMS (${guest.propertyCode}). You can edit the details below.`);
   };
 
-  // Add item from catalogue to bill
+  // Included activities add a linked Photo line at $57.50 per service unit.
   const handleAddItem = (item: Item) => {
-    // Parse personal roles and amounts
-    let personalRoles: string[] = [];
-    if (item.personalRoles) {
-      personalRoles = item.personalRoles.split(',').map((r) => r.trim().toLowerCase());
-    }
-
-    let personalCommissionsJson = item.personalRatesJson || null;
-
-    // Check if line item already exists
-    const existingIndex = billLines.findIndex((l) => l.itemId === item.id);
-    if (existingIndex >= 0) {
-      const updated = [...billLines];
-      const line = updated[existingIndex];
-      const newQty = line.quantity + 1;
-      const lineGross = newQty * line.unitPrice;
-      const discount = (lineGross * line.discountPercent) / 100;
-      line.quantity = newQty;
-      line.lineTotal = lineGross - discount;
-      setBillLines(updated);
-      return;
-    }
-
-    const newLine: BillItem = {
-      itemId: item.id,
-      itemName: item.name,
-      categoryName: item.category?.name || 'General',
-      quantity: 1,
-      unitPrice: item.price,
-      discountPercent: 0,
-      lineTotal: item.price,
-      personalCommissionsJson,
-      sellerStaffId: null,
-      guideStaffId: null,
-      instructorStaffId: null,
-      photoStaffId: null,
-      videoStaffId: null,
-    };
-
-    setBillLines([...billLines, newLine]);
+    try { setBillLines(addActivityWithPhoto(billLines, item, items)); setErrorMsg(null); }
+    catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not add the activity.'); }
   };
 
-  const updateQuantity = (index: number, delta: number) => {
-    const updated = [...billLines];
-    const line = updated[index];
-    const newQty = Math.max(1, line.quantity + delta);
-    const lineGross = newQty * line.unitPrice;
-    const discount = (lineGross * line.discountPercent) / 100;
-    line.quantity = newQty;
-    line.lineTotal = lineGross - discount;
-    setBillLines(updated);
-  };
+  const updateQuantity = (index: number, delta: number) => setBillLines(lines => updateLinkedQuantity(lines, index, delta, items));
 
   const updateDiscount = (index: number, discountPercent: number) => {
     const updated = [...billLines];
@@ -288,10 +245,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     setBillLines(updated);
   };
 
-  const removeLine = (index: number) => {
-    const updated = billLines.filter((_, i) => i !== index);
-    setBillLines(updated);
-  };
+  const removeLine = (index: number) => setBillLines(lines => removeActivityWithPhoto(lines, index));
 
   // Calculations per PDF Page 3 & 4:
   // Gross -> - Discount -> + Service charge -> + Tax -> + Tip -> Net
@@ -369,22 +323,6 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     }
   };
 
-  const countries = [
-    'Other',
-    'Australia',
-    'China',
-    'France',
-    'Germany',
-    'India',
-    'Italy',
-    'Japan',
-    'Maldives',
-    'Russia',
-    'Singapore',
-    'Switzerland',
-    'United Kingdom',
-    'United States',
-  ];
 
   const reviewBill = () => {
     setAttemptedReview(true); setErrorMsg(null);
@@ -393,6 +331,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
       document.getElementById(!roomNumber.trim() ? 'bill-room' : 'bill-guest')?.focus();
       return;
     }
+    if (billLines.length > 200) { setErrorMsg('A bill can contain up to 200 lines, including automatic Photos. Remove an activity before saving.'); return; }
     if (!billLines.length) { document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     if (monthLock.locked !== false) { setErrorMsg(monthLock.locked ? 'Choose a business date in an open month before saving.' : 'Please wait for payroll status to load, or retry if it failed.'); return; }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before reviewing.'); return; }
@@ -462,7 +401,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
         </div>
       )}
 
-      <div className="bill-sticky-summary"><div><span>{billLines.reduce((count, line) => count + line.quantity, 0)} {billLines.reduce((count, line) => count + line.quantity, 0) === 1 ? 'activity' : 'activities'} · Net total</span><strong>{formatMoney(netTotal, currencySymbol)}</strong></div><button className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>Review bill<ChevronRight size={16} /></button></div>
+      <div className="bill-sticky-summary"><div><span>{billLines.reduce((count, line) => count + (line.autoPhotoFor ? 0 : line.quantity), 0)} {billLines.reduce((count, line) => count + (line.autoPhotoFor ? 0 : line.quantity), 0) === 1 ? 'activity' : 'activities'} · Net total</span><strong>{formatMoney(netTotal, currencySymbol)}</strong></div><button className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>Review bill<ChevronRight size={16} /></button></div>
       {monthLock.locked && <div className="notice notice-info"><span>This business month is locked for payroll. Your draft can be edited, but choose a date in an open month before saving.</span></div>}
       {monthLock.error && <div role="alert" className="notice notice-error"><span>Could not check payroll status. Your draft is safe; retry before saving.</span><button onClick={monthLock.retry}>Retry</button></div>}
       {/* Two-half layout: Item Catalogue (Left) & Bill Draft (Right) */}
@@ -523,7 +462,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
             {/* Item List */}
             <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
               {filteredItems.map((item) => {
-                const hasPersonalRoles = Boolean(item.personalRoles && item.personalRoles.trim().length > 0);
+                const hasPersonalRoles = item.includesComplimentaryMedia || Boolean(item.personalRoles && item.personalRoles.trim().length > 0);
                 return (
                   <button
                     type="button"
@@ -539,12 +478,12 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                         </span>
                         {hasPersonalRoles && (
                           <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                            Commission: {item.personalRoles}
+                            {item.includesComplimentaryMedia ? 'Adds Photo $57.50 · team commission $4.50' : `Commission: ${item.personalRoles}`}
                           </span>
                         )}
                         {item.poolType !== 'NONE' && (
                           <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-                            {item.poolType === 'COURSE_POOL' ? 'Course Pool' : 'Dive Pool'}
+                            {item.poolType === 'COURSE_POOL' ? `Course Pool ${item.poolContribution}%` : item.poolType === 'CERTIFICATION_POOL' ? 'Certifications Pool' : `Dive Pool ${item.poolContribution}%`}
                           </span>
                         )}
                       </div>
@@ -661,7 +600,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                3. Review activities ({billLines.length})
+                3. Review bill lines ({billLines.length})
               </h3>
               <span className="text-sm text-slate-400">
                 Click items on the left to add
@@ -676,15 +615,20 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
               <div className="space-y-3">
                 {billLines.map((line, idx) => {
                   let personalRoles: string[] = [];
+                  let personalRates: Record<string, number> = {};
                   if (line.personalCommissionsJson) {
                     try {
-                      personalRoles = Object.keys(JSON.parse(line.personalCommissionsJson));
+                      const rates = JSON.parse(line.personalCommissionsJson);
+                      if (rates && typeof rates === 'object' && !Array.isArray(rates)) {
+                        personalRates = Object.fromEntries(Object.entries(rates).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] >= 0));
+                        personalRoles = Object.keys(personalRates);
+                      }
                     } catch {}
                   }
 
                   return (
                     <div
-                      key={idx}
+                      key={line.clientLineId || idx}
                       className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2 text-sm"
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -697,20 +641,25 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                           </span>
                         </div>
                         <button
+                          type="button"
+                          disabled={Boolean(line.autoPhotoFor)}
+                          aria-label={line.autoPhotoFor ? 'Photo is linked to its activity' : `Remove ${line.itemName}`}
                           onClick={() => removeLine(idx)}
                           className="p-1 text-slate-400 hover:text-rose-500 transition"
-                          title="Remove item"
+                          title={line.autoPhotoFor ? 'Remove the activity to remove its Photo line' : 'Remove item'}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
 
+                      {line.autoPhotoFor && <p className="text-xs text-slate-500">Automatically added with {billLines.find(parent => parent.clientLineId === line.autoPhotoFor)?.itemName}. Quantity follows the activity; choose the team member who took the photo below.</p>}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-center">
                         {/* Quantity Stepper */}
                         <div className="flex items-center space-x-1">
                           <span className="text-slate-400 text-xs">Qty:</span>
                           <button
                             type="button"
+                            disabled={Boolean(line.autoPhotoFor)}
                             onClick={() => updateQuantity(idx, -1)}
                             className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-bold"
                           >
@@ -721,6 +670,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                           </span>
                           <button
                             type="button"
+                            disabled={Boolean(line.autoPhotoFor)}
                             onClick={() => updateQuantity(idx, 1)}
                             className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-700 flex items-center justify-center font-bold"
                           >
@@ -830,7 +780,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                             {personalRoles.includes('photo') && (
                               <div>
                                 <label htmlFor={`newbillview-field-8-${idx}`} className="block text-xs font-medium text-slate-500">
-                                  Photographer:
+                                  {line.autoPhotoFor ? 'Team member who took the photo' : 'Photographer'}: {formatMoney(personalRates.photo, activeProperty?.currencySymbol || '$')} per service unit
                                 </label>
                                 <select id={`newbillview-field-8-${idx}`}
                                   disabled={!staffReady || saving}
@@ -838,20 +788,21 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                   onChange={(e) => updateStaffAssignment(idx, 'photo', e.target.value)}
                                   className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
                                 >
-                                  <option value="">Select photographer...</option>
+                                  <option value="">{line.autoPhotoFor ? 'Select team member...' : 'Select photographer...'}</option>
                                   {staffList.map((s) => (
                                     <option key={s.id} value={s.id}>
                                       {s.name} ({s.roleTitle})
                                     </option>
                                   ))}
                                 </select>
+                                {line.photoStaffId && <p className="text-xs text-slate-500 mt-1">Employee payment: {formatMoney(personalRates.photo * line.quantity, activeProperty?.currencySymbol || '$')}. Applies even when the service is complimentary.</p>}
                               </div>
                             )}
 
                             {personalRoles.includes('video') && (
                               <div>
                                 <label htmlFor={`newbillview-field-9-${idx}`} className="block text-xs font-medium text-slate-500">
-                                  Videographer:
+                                  Videographer: {formatMoney(personalRates.video, activeProperty?.currencySymbol || '$')} per service unit
                                 </label>
                                 <select id={`newbillview-field-9-${idx}`}
                                   disabled={!staffReady || saving}
@@ -866,6 +817,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                                     </option>
                                   ))}
                                 </select>
+                                {line.videoStaffId && <p className="text-xs text-slate-500 mt-1">Employee payment: {formatMoney(personalRates.video * line.quantity, activeProperty?.currencySymbol || '$')}. Applies even when the service is complimentary.</p>}
                               </div>
                             )}
                           </div>

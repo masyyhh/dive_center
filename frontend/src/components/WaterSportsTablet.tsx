@@ -1,3 +1,4 @@
+import { API_BASE } from '../services/api';
 import React, { useEffect, useState } from 'react';
 import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './WaterSportsShared';
 import './water-sports.css';
@@ -12,7 +13,7 @@ export const WaterSportsTablet = ({ token }: { token: string }) => {
   const [room, setRoom] = useState(''), [guests, setGuests] = useState<Guest[]>([]), [selected, setSelected] = useState('');
   const [age, setAge] = useState(''), [guardian, setGuardian] = useState(''), [signature, setSignature] = useState<Signature>([]);
   const request = async <T,>(path: string, body?: unknown): Promise<T> => {
-    const response = await fetch(`/api/water-sports/tablet${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store' });
+    const response = await fetch(`${API_BASE}/water-sports/tablet${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}), cache: 'no-store' });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Unable to open this form.'); return result;
   };
   const load = async () => { setBusy(true); setError(''); try { const s = await request<Session>(''); setSession(s); setDocumentId(s.documents?.[0]?.id || ''); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };

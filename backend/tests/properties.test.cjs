@@ -54,7 +54,7 @@ test('creation and deletion are global-admin only, including managers assigned t
 test('global admin creates a property with standard categories, validated inputs, normalized code and audit entry', async () => {
   const result = await call('POST', '/', { name: '  New Centre  ', code: ' new ', pmsPropertyCode: 'OLHU' });
   assert.equal(result.status, 201); assert.equal(result.body.property.name, 'New Centre'); assert.equal(result.body.property.code, 'NEW');
-  assert.equal(await prisma.category.count({ where: { propertyId: result.body.property.id } }), 5);
+  assert.equal(await prisma.category.count({ where: { propertyId: result.body.property.id } }), 6);
   assert.equal((await prisma.auditLog.findFirst({ where: { action: 'PROPERTY_CREATE' } })).userId, 'admin');
   assert.equal((await call('POST', '/', { name: 'Duplicate', code: 'new' })).status, 409);
   assert.equal((await call('POST', '/', { name: '   ', code: 'BAD' })).status, 400);
@@ -77,7 +77,7 @@ test('the name-only form generates unique codes for omitted, empty and whitespac
     assert.match(result.body.property.code, /^[A-Z0-9-]{2,10}$/);
     assert.deepEqual(result.body.property.pmsPropertyCodes, ['VILU']);
     codes.push(result.body.property.code);
-    assert.equal(await prisma.category.count({ where: { propertyId: result.body.property.id } }), 5);
+    assert.equal(await prisma.category.count({ where: { propertyId: result.body.property.id } }), 6);
   }
   assert.equal(codes[0], 'VILLU-REEF');
   assert.equal(new Set(codes).size, 3);
