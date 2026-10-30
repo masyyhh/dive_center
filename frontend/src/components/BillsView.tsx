@@ -1,6 +1,6 @@
 import { formatMoney } from '../utils/format';
 import { Modal } from './Modal';
-import { businessToday, displayDate } from '../utils/dates';
+import { businessToday, displayDate, isBusinessDate } from '../utils/dates';
 import React, { useState, useEffect, useRef } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { apiFetch } from '../services/api';
@@ -41,6 +41,9 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
 
   // Selected bill for detailed modal
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
+  const detailRequest = useRef(0);
+  const closeBillDetails = () => { detailRequest.current++; setSelectedBill(null); };
+  useEffect(() => () => { detailRequest.current++; }, []);
 
   // Action Modals
   const [redateModalOpen, setRedateModalOpen] = useState<boolean>(false);
@@ -58,7 +61,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
   const fetchBills = async () => {
     if (!activeProperty) return;
     const request = ++requestVersion.current;
-    if (!startDate || !endDate || startDate > endDate) { setErrorMsg('Choose a valid date range. The start date must be on or before the end date.'); setLoading(false); return; }
+    if (!isBusinessDate(startDate) || !isBusinessDate(endDate) || startDate > endDate) { setErrorMsg('Choose a valid date range. The start date must be on or before the end date.'); setBills([]); setLoading(false); return; }
     try {
       setLoading(true);
       setErrorMsg(null);
@@ -75,6 +78,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
       setBills(res.bills);
     } catch (err: any) {
       if (request !== requestVersion.current) return;
+      setBills([]);
       setErrorMsg(err.message || 'Failed to load bills.');
     } finally {
       if (request === requestVersion.current) setLoading(false);
@@ -92,11 +96,14 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
   };
 
   const openBillDetails = async (billId: string) => {
+    const request = ++detailRequest.current;
     setErrorMsg(null);
     try {
       const res = await apiFetch<{ bill: Bill }>(`/bills/${billId}`);
+      if (request !== detailRequest.current) return;
       setSelectedBill(res.bill);
     } catch (err) {
+      if (request !== detailRequest.current) return;
       setErrorMsg(err instanceof Error ? err.message : 'Could not open this bill.');
     }
   };
@@ -149,7 +156,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
         method: 'DELETE',
       });
       setDeleteModalOpen(false);
-      setSelectedBill(null);
+      closeBillDetails();
       fetchBills();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete bill.');
@@ -333,7 +340,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
 
       {/* Bill Details Modal (Printable receipt + Re-date, Rebate, Delete actions) */}
       {selectedBill && (
-        <Modal label="Bill details" onClose={() => { if (!actionLoading) { setSelectedBill(null); setErrorMsg(null); } } } busy={actionLoading} error={errorMsg}>
+        <Modal label="Bill details" onClose={() => { if (!actionLoading) { closeBillDetails(); setErrorMsg(null); } } } busy={actionLoading} error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -362,7 +369,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
               </div>
 
               <button
-                onClick={() => setSelectedBill(null)}
+                onClick={closeBillDetails}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-lg"
               >
                 ✕
@@ -432,7 +439,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
                             {line.sellerStaff && <span>Seller: {line.sellerStaff.name}</span>}
                             {line.guideStaff && <span>Guide: {line.guideStaff.name}</span>}
                             {line.instructorStaff && <span>Inst: {line.instructorStaff.name}</span>}
-                            {line.photoStaff && <span>Photo: {line.photoStaff.name}</span>}
+                            {line.photoStaff && <span>{line.includesComplimentaryMedia ? 'Photo / video' : 'Photo'}: {line.photoStaff.name}</span>}
                             {line.videoStaff && <span>Video: {line.videoStaff.name}</span>}
                           </div>
                         </td>

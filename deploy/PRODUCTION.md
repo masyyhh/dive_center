@@ -1,11 +1,13 @@
 # Production hosting guide
 
-For TLS terminated by a reverse proxy on another private server, use the
-[external reverse proxy guide](REVERSE-PROXY.md) instead of publishing Caddy's
-public HTTPS listener. It covers Node port 5001, frontend port 8080, proxy
-trust, private bindings and firewall requirements.
+This deployment requires an external HTTPS reverse proxy. Follow the
+[external reverse proxy guide](REVERSE-PROXY.md) for Node port 5001, frontend
+port 8080, trusted proxy addresses and firewall requirements. Caddy serves the
+frontend over private HTTP and never requests certificates.
 
-This guide deploys a small, single-server installation using PostgreSQL 18, the Node API and Caddy HTTPS. It is not a high-availability design. The database persists in the `postgres_data` Docker volume at `/var/lib/postgresql`; only Caddy publishes host ports. Use a separate staging server/project before admitting real guests or financial records.
+This is a small, single-server application deployment, not a high-availability
+design. PostgreSQL persists in the `postgres_data` Docker volume at
+`/var/lib/postgresql`. Use separate staging before admitting real records.
 
 ## 1. Release gate
 
@@ -13,7 +15,7 @@ Ship a reviewed Git commit containing the application, `scripts/`, `deploy/`, te
 
 The workflow in `.github/workflows/ci.yml` runs root deployment-tool tests, the full backend/frontend suites, builds and a disposable Docker smoke test. The smoke test migrates an empty database, bootstraps/enrolls an administrator, exercises billing/attendance/export/locking, creates a backup, restores it into a separate database and compares all application model data, authenticator decryption and the live-check unique index.
 
-A green CI run for the exact release commit is required. The CI-only `deploy/compose.smoke.yaml` disables HTTPS and must **never** be used for public hosting. The smoke tools create fixture records and refuse normal non-CI execution.
+A green CI run for the exact release commit is required. The CI-only `deploy/compose.smoke.yaml` disables the proxy-only API gate and must **never** be used for public hosting. The smoke tools create fixture records and refuse normal non-CI execution.
 
 Local verification with Node 22.13+ or Node 24 and an explicitly separate `_test` PostgreSQL database:
 
@@ -29,15 +31,15 @@ Integration tests create and remove random schemas in `TEST_DATABASE_URL`. Never
 
 ## 2. Prepare the host and domain
 
-Use a supported Ubuntu LTS server and Docker Engine with the Compose v2 plugin. A reasonable initial estimate for a small internal installation is 2 vCPUs, 4 GB RAM and SSD storage; measure actual usage and database/backup growth before selecting final capacity. This estimate is not a load-test result.
+Use a supported Ubuntu LTS server and Docker Engine with the Compose v2 plugin (2.24.4+ for the CI/compatibility overrides). A reasonable initial estimate for a small internal installation is 2 vCPUs, 4 GB RAM and SSD storage; measure actual usage and database/backup growth before selecting final capacity. This estimate is not a load-test result.
 
 - Install Docker from its [official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/), including Buildx and the Compose plugin. Avoid the convenience installer for production.
 - Use a dedicated deployment account, SSH keys, restricted administrator access and a private checkout such as `/srv/dive-centre`. Docker access is effectively root-level access; grant it only to trusted operators. Do not expose the Docker daemon remotely.
-- Restrict SSH to your administrator IPs/VPN. In the provider firewall permit TCP 80/443 publicly and optionally UDP 443 for HTTP/3. Do not open PostgreSQL 5432 or backend 5001. Docker-published ports can bypass UFW: enforce provider firewall rules and review Docker's [port-publishing behavior](https://docs.docker.com/engine/network/port-publishing/).
-- Point your application domain's A record at the VPS. Publish an AAAA record only if IPv6 reaches the same server and is correctly firewalled. Ensure outbound DNS/HTTPS and clock synchronization work.
+- Restrict SSH to your administrator IPs/VPN. Permit inbound TCP 5001 and 8080 only from the external proxy at the provider firewall. Keep PostgreSQL 5432 private. Public 80/443 belong to the external proxy. Docker-published ports can bypass UFW: enforce provider firewall rules and review Docker's [port-publishing behavior](https://docs.docker.com/engine/network/port-publishing/).
+- Point your application domain at the external proxy or its tunnel, according to that service's instructions. Ensure outbound DNS/HTTPS and clock synchronization work.
 - Enable host security updates and plan/rehearse reboots. Monitor disk, memory, service health and certificate expiry externally.
 
-Caddy obtains/renews certificates and redirects HTTP to HTTPS when the configured domain resolves correctly and ports 80/443 are reachable. See [Caddy HTTPS requirements](https://caddyserver.com/docs/quick-starts/https).
+The external proxy manages certificates, HTTP-to-HTTPS redirects and HSTS. Caddy automatic HTTPS is disabled.
 
 Verify the tools before preparing configuration:
 
@@ -50,7 +52,7 @@ docker compose version
 
 From the repository root, with Node 22 or 24 on the host:
 
-Production requires a registered domain and HTTPS. Point its DNS at this server before starting Caddy. Public IP/no-domain HTTP hosting is no longer supported because it exposes passwords and sessions.
+Production requires a registered domain and HTTPS. Configure DNS and TLS on the external proxy. Public IP/no-domain HTTP hosting is no longer supported because it exposes passwords and sessions.
 
 ```sh
 umask 077
@@ -69,10 +71,11 @@ docker run --rm --user "$(id -u):$(id -g)" \
 Preparation creates `.env.production` (0600) and `secrets/` (0700) with independently generated signing, encryption, app/admin database and bootstrap passwords. Existing keys/configuration are preserved; inconsistent existing database credentials fail rather than being silently replaced. Secret files are 0444 inside the private parent so nonroot containers can read their selected mounts. Do not loosen the directory's permissions. Keep the checkout on a private local filesystem; verify host ACLs as well as modes.
 
 Review `.env.production` privately:
-- `APP_DOMAIN` must be the FQDN without a scheme, path or port. Caddy explicitly enables HTTPS and redirects HTTP to HTTPS.
+- `APP_DOMAIN` must be the FQDN without a scheme, path or port. The external proxy serves this domain over HTTPS.
 - `CORS_ORIGIN` must include `https://` followed by that domain. Any additional allowed origins must also use HTTPS.
 - For an existing HTTP installation, update **both** `APP_DOMAIN=dive.your-domain.com` and `CORS_ORIGIN=https://dive.your-domain.com` before rebuilding. Preparation rejects unsafe existing configuration without replacing it or rotating keys. Preserve the original `secrets/` and database volume.
-- Rebuild and restart with `docker compose --env-file .env.production up -d --build`, then verify HTTPS before signing in. The new Caddy configuration will not serve plaintext browser traffic even if an old `:80` address is left behind.
+- Rebuild and restart with `docker compose --env-file .env.production up -d --build`, then verify HTTPS before signing in. Application ports are private HTTP upstreams and must be reachable only by the proxy.
+- Set `REVERSE_PROXY_BIND_IP` to this server's private address (loopback for a local proxy) and `REVERSE_PROXY_TRUSTED_IPS` to the actual proxy source seen by Node. Missing/invalid proxy trust prevents API startup. Configure the firewall and split routing from REVERSE-PROXY.md before starting.
 - Use `docker compose ... config --quiet` to validate without printing interpolated configuration.
 - Keep the CI-only HTTP configuration confined to disposable CI; never use `deploy/compose.smoke.yaml` for public hosting.
 
@@ -112,18 +115,18 @@ Create properties, catalogue entries, managers and operational accounts through 
 
 ```sh
 docker compose --env-file .env.production ps
-# For domain / HTTPS:
-# curl --fail https://dive.your-domain.com/api/health
-# curl --fail https://dive.your-domain.com/api/ready
-# curl --head https://dive.your-domain.com/
-
-# For no-domain / HTTP (port 80 or IP):
-curl --fail http://127.0.0.1/api/health
-curl --fail http://127.0.0.1/api/ready
-curl --head http://127.0.0.1/
+curl --fail https://dive.your-domain.com/api/health
+curl --fail https://dive.your-domain.com/api/ready
+curl --head https://dive.your-domain.com/
 ```
 
-Confirm public HTTPS, HTTP redirect, expected CSP/security headers and automatic certificate management. The readiness endpoint must return 200, and unauthenticated sensitive APIs must return 401. In the browser, exercise sign-in/enrollment/recovery, manager/staff permissions across two properties, bill creation/re-date/rebate/delete, attendance, payroll locks and daily/monthly exports. Check a shared-occupant PMS room and provider failure if that integration is enabled. Use fixture-only data in staging.
+Confirm public HTTPS, HTTP redirect, expected CSP/security headers and external
+certificate management. Through the trusted HTTPS proxy, readiness must return
+200 and unauthenticated sensitive APIs must return 401. Direct untrusted API
+requests must be rejected (except read-only health/readiness probes), and the
+firewall must restrict both application ports. In staging, exercise sign-in,
+enrollment, recovery, manager/staff property boundaries and operational flows.
+Check client IPs in audit logs and test any enabled PMS integration.
 
 Run a backup and restore rehearsal below before go-live. Confirm that notifications reach an operator when readiness fails, disk fills, backup/off-site transfer fails or repeated account attacks occur. Container logs rotate at 10 MB × 3 per service; that is not a complete security-log retention or alerting system. Define audit/export/guest-data retention and access policies for your business.
 

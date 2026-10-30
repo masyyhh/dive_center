@@ -99,7 +99,7 @@ test('CSV preview is read-only; commit creates categories, generates codes and r
   const course = await prisma.item.findFirst({ where: { name: 'Open Water' } });
   assert.equal(course.code, 'COU-001'); assert.equal(course.poolType, 'COURSE_POOL'); assert.equal(course.poolContribution, 20); assert.equal(course.isActive, false);
 });
-test('CSV and Excel exports round-trip all six fields; imports update only matching property codes', async () => {
+test('labelled CSV and Excel exports round-trip all settings; imports update only matching property codes', async () => {
   for (const format of ['csv', 'xlsx']) {
     const exported = await exportFile(format);
     assert.equal(exported.status, 200);
@@ -110,7 +110,7 @@ test('CSV and Excel exports round-trip all six fields; imports update only match
   assert.equal(updated.status, 200);
   assert.equal((await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: 'DIV-006' } } })).price, 80);
   const before = await prisma.item.count();
-  assert.equal((await importFile([['DIV-999', 'Unknown', 'Diving', 10, 0, 'Active']], { preview: false })).status, 400);
+  assert.equal((await importFile([['DIV-999', 'Duplicate one', 'Diving', 10, 0, 'Active'], ['DIV-999', 'Duplicate two', 'Diving', 10, 0, 'Active']], { preview: false })).status, 400);
   assert.equal((await importFile([['', 'Foreign', 'Diving', 10, 0, 'Active']], { propertyId: 'b', preview: false })).status, 403);
   assert.equal((await importFile([['', 'No rights', 'Diving', 10, 0, 'Active']], { preview: false }, staff)).status, 403);
   assert.equal((await exportFile('csv', staff)).status, 403);
@@ -141,4 +141,69 @@ test('spreadsheet formulas are rejected and formula-like item names remain safe 
   assert(exported.bytes.toString().includes("'=SUM(1,2)"));
   assert.equal((await call(itemsRouter, 'POST', '/import', { propertyId: 'a', format: 'csv', content: exported.bytes.toString('base64'), preview: false })).status, 200);
   assert.equal(await prisma.item.count({ where: { name: '=SUM(1,2)' } }), 1);
+});
+
+test('CSV and Excel preserve new supplied codes, preview without writes, and update them on reimport', async () => {
+  for (const [format, code] of [['csv', '13152'], ['xlsx', '0013153']]) {
+    // The same external code in another property must not become an update target.
+    const category = await prisma.category.create({ data: { propertyId: 'b', name: `External ${format}` } });
+    const foreign = await prisma.item.create({ data: { propertyId: 'b', categoryId: category.id, code, name: 'Other property item', price: 777 } });
+    const rows = [[code, `External ${format}`, 'Imported activities', 45, 5, 'Active']];
+    const body = { propertyId: 'a', format, content: await file(rows, format) };
+    const before = await prisma.item.count();
+    const auditBefore = await prisma.auditLog.count();
+    const preview = await call(itemsRouter, 'POST', '/import', body);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.created, 1);
+    assert.equal(preview.body.updated, 0);
+    assert.equal(preview.body.previewRows[0].code, code);
+    assert.equal(await prisma.item.count(), before);
+    assert.equal(await prisma.auditLog.count(), auditBefore);
+
+    const created = await call(itemsRouter, 'POST', '/import', { ...body, preview: false });
+    assert.equal(created.status, 200);
+    assert.equal(created.body.created, 1);
+    assert.equal(created.body.updated, 0);
+    const item = await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code } } });
+    assert(item);
+    assert.equal(item.code, code);
+    assert.equal(item.price, 45);
+    assert.equal(await prisma.auditLog.count({ where: { action: 'ITEM_CREATE', targetId: item.id } }), 1);
+
+    const updatedBody = { ...body, content: await file([[code, 'Reimported item', 'Imported activities', 60, 5, 'Inactive']], format) };
+    const updatePreview = await call(itemsRouter, 'POST', '/import', updatedBody);
+    assert.equal(updatePreview.body.created, 0);
+    assert.equal(updatePreview.body.updated, 1);
+    const updated = await call(itemsRouter, 'POST', '/import', { ...updatedBody, preview: false });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.created, 0);
+    assert.equal(updated.body.updated, 1);
+    const saved = await prisma.item.findUnique({ where: { id: item.id } });
+    assert.equal(saved.code, code);
+    assert.equal(saved.price, 60);
+    assert.equal(saved.isActive, false);
+    assert.equal(await prisma.item.count(), before + 1);
+    assert.equal(await prisma.auditLog.count({ where: { action: 'ITEM_UPDATE', targetId: item.id } }), 1);
+    assert.deepEqual(await prisma.item.findUnique({ where: { id: foreign.id } }), foreign);
+  }
+});
+
+test('mixed batches count creates and updates correctly and reserve supplied codes before generating blank codes', async () => {
+  const rows = [
+    ['', 'Generated first', 'Reserved codes', 10, 0, 'Active'],
+    ['RES-001', 'Supplied second', 'Reserved codes', 20, 0, 'Active'],
+    ['13152', 'Updated existing', 'Imported activities', 70, 5, 'Active'],
+  ];
+  const preview = await importFile(rows);
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.created, 2);
+  assert.equal(preview.body.updated, 1);
+  assert.equal(preview.body.total, 3);
+  const result = await importFile(rows, { preview: false });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.created, 2);
+  assert.equal(result.body.updated, 1);
+  assert.equal((await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: 'RES-001' } } })).name, 'Supplied second');
+  assert.equal((await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: 'RES-002' } } })).name, 'Generated first');
+  assert.equal((await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: '13152' } } })).price, 70);
 });

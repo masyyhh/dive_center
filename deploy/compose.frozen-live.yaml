@@ -1,0 +1,10 @@
+# Capture the running images before updating source; never build live during testing.
+services:
+  backend:
+    image: ${FROZEN_LIVE_BACKEND_IMAGE:?Run prepare-parallel-testing.cjs first}
+    build: !reset null
+    pull_policy: never
+  web:
+    image: ${FROZEN_LIVE_WEB_IMAGE:?Run prepare-parallel-testing.cjs first}
+    build: !reset null
+    pull_policy: never

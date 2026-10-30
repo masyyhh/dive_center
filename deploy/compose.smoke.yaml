@@ -1,8 +1,13 @@
-# CI only: disable public ACME for a disposable container smoke test.
-# Never include this override in a public deployment.
+# CI only: disposable HTTP fixture, never a public deployment.
 services:
+  backend:
+    environment:
+      TRUST_PROXY: "1"
+      TRUST_PROXY_ADDRESSES: !reset null
+      REQUIRE_TRUSTED_PROXY: "0"
+    ports: !reset []
   web:
+    ports: !override
+      - "127.0.0.1:80:80"
     volumes:
       - ./deploy/Caddyfile.smoke:/etc/caddy/Caddyfile:ro
-    environment:
-      APP_DOMAIN: ":80"

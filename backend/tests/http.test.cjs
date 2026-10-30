@@ -8,6 +8,7 @@ process.env.NODE_ENV = 'production';
 process.env.JWT_SECRET = randomBytes(48).toString('hex');
 process.env.CORS_ORIGIN = 'https://dive.example.test';
 process.env.TRUST_PROXY = '1';
+delete process.env.ENABLE_WATER_SPORTS;
 delete process.env.JWT_SECRET_FILE;
 let databaseAvailable = true;
 const auditEntries = [];
@@ -40,6 +41,13 @@ test('only the configured frontend origin receives CORS permission', async () =>
   assert.equal(allowed.headers.get('access-control-allow-credentials'), null);
   const denied = await fetch(`${origin}/api/health`, { headers: { Origin: 'https://untrusted.example.test' } });
   assert.equal(denied.headers.get('access-control-allow-origin'), null);
+});
+
+test('production disables Water Sports API routes by default, including tablet links', async () => {
+  for (const [method, path] of [['GET', '/api/water-sports/records'], ['POST', '/api/water-sports/sessions'], ['GET', '/api/water-sports/tablet'], ['POST', '/api/water-sports/tablet/guests'], ['POST', '/api/water-sports/tablet/sign']]) {
+    const response = await fetch(`${origin}${path}`, { method });
+    assert.equal(response.status, 404);
+  }
 });
 
 test('HTTP audit records request outcomes and access times while omitting query secrets', async () => {

@@ -13,7 +13,7 @@ export interface BillDraft {
   notes: string;
   checkEdited: boolean;
 }
-export const billDraftKey = (userId: string, propertyId: string) => `dcm_bill_draft:${userId}:${propertyId}`;
+export const billDraftKey = (userId: string, propertyId: string) => `${import.meta.env?.VITE_DEPLOYMENT_MODE === 'testing' ? 'dcm_testing_' : 'dcm_'}bill_draft:${userId}:${propertyId}`;
 export const isBillDraft = (value: unknown): value is BillDraft => {
   if (!value || typeof value !== 'object') return false;
   const d = value as BillDraft;

@@ -1,0 +1,28 @@
+# Use LAST after the current live deployment files and compose.frozen-live.yaml.
+services:
+  web:
+    environment:
+      TESTING_GATEWAY_IP: ${TESTING_GATEWAY_IP:-172.30.252.2}
+    volumes:
+      - ./deploy/Caddyfile.parallel:/etc/caddy/Caddyfile:ro
+      - ./deploy/Caddyfile.parallel-routes:/etc/caddy/parallel-routes:ro
+      - ./deploy/version-chooser.html:/opt/parallel/version-chooser.html:ro
+    networks:
+      default: {}
+      testing_frontend:
+        ipv4_address: ${TESTING_GATEWAY_IP:-172.30.252.2}
+  parallel-config-check:
+    profiles: [tools]
+    image: ${FROZEN_LIVE_WEB_IMAGE:?Run prepare-parallel-testing.cjs first}
+    pull_policy: never
+    network_mode: none
+    environment:
+      NPM_PROXY_IP: ${NPM_PROXY_IP:-127.0.0.1}
+    volumes:
+      - ./deploy/Caddyfile.parallel:/etc/caddy/Caddyfile:ro
+      - ./deploy/Caddyfile.parallel-routes:/etc/caddy/parallel-routes:ro
+      - ./deploy/version-chooser.html:/opt/parallel/version-chooser.html:ro
+networks:
+  testing_frontend:
+    external: true
+    name: dive-centre-testing_frontend

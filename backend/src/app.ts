@@ -5,8 +5,11 @@ import express, { Request, Response, NextFunction } from 'express';
 import { prisma } from './db';
 import { configureSecurity, apiLimiter } from './middleware/security';
 import { configureProxySecurity } from './middleware/proxy';
+import { waterSportsRouter } from './routes/water-sports.routes';
 import { guestsRouter } from './routes/guests.routes';
 import { passwordRouter } from './routes/password.routes';
+import { testingAuthRouter } from './routes/testing-auth.routes';
+import { testingLiveAuthEnabled } from './services/testingLiveAuth';
 import { authRouter } from './routes/auth.routes';
 import { propertiesRouter } from './routes/properties.routes';
 import { usersRouter } from './routes/users.routes';
@@ -48,13 +51,19 @@ app.get('/api/ready', async (_req: Request, res: Response) => {
 });
 
 // Mount modular API routes
-app.use('/api/auth', passwordRouter);
-app.use('/api/auth', authRouter);
+if (testingLiveAuthEnabled()) app.use('/api/auth', testingAuthRouter);
+else {
+  app.use('/api/auth', passwordRouter);
+  app.use('/api/auth', authRouter);
+}
 app.use('/api/properties', propertiesRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/items', itemsRouter);
 app.use('/api/guests', guestsRouter);
+const waterSportsEnabled = process.env.ENABLE_WATER_SPORTS === 'true' ||
+  (process.env.NODE_ENV !== 'production' && process.env.ENABLE_WATER_SPORTS !== 'false');
+if (waterSportsEnabled) app.use('/api/water-sports', waterSportsRouter);
 app.use('/api/bills', billsRouter);
 app.use('/api/presence', presenceRouter);
 app.use('/api/reports', reportsRouter);

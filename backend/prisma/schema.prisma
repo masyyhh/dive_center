@@ -26,18 +26,23 @@ model Property {
 
   users               UserProperty[]
   staffMembers        StaffMember[]
+  staffRoleTitles     StaffRoleTitle[]
   categories          Category[]
   items               Item[]
   bills               Bill[]
   attendanceRecords   Attendance[]
   monthLocks          MonthLock[]
   auditLogs           AuditLog[]
+  waterSportsDocuments WaterSportsDocument[]
+  waterSportsSessions WaterSportsSession[]
+  waterSportsRecords WaterSportsRecord[]
 }
 
 model User {
   id                  String         @id @default(uuid())
   username            String         @unique
   email               String?
+  testingLiveSessions TestingLiveSession[]
   authenticator       Authenticator?
   name                String
   mustChangePassword  Boolean        @default(false)
@@ -56,6 +61,9 @@ model User {
   createdBills        Bill[]         @relation("CreatedBills")
   auditLogs           AuditLog[]
   monthLocksCreated   MonthLock[]
+  waterSportsDocuments WaterSportsDocument[]
+  waterSportsSessions WaterSportsSession[]
+  waterSportsRecords WaterSportsRecord[]
 
   @@index([email])
 }
@@ -70,6 +78,17 @@ model UserProperty {
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([userId, propertyId])
+}
+
+model StaffRoleTitle {
+  id             String   @id @default(uuid())
+  propertyId     String
+  name           String
+  normalizedName String
+  createdAt      DateTime @default(now())
+  property       Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, normalizedName])
 }
 
 model StaffMember {
@@ -120,12 +139,13 @@ model Item {
   code               String     // e.g. "DIVE-01", "CRS-OWD"
   name               String     // e.g. "Single Boat Dive", "Open Water Diver"
   price              Float      // e.g. 75.00
-  poolType           String     @default("NONE") // "COURSE_POOL", "DIVE_POOL", "NONE"
-  poolContribution   Float      @default(0.0)    // Amount or share contributed to the pool
+  poolType           String     @default("NONE") // "COURSE_POOL", "CERTIFICATION_POOL", "DIVE_POOL", "NONE"
+  poolContribution   Float      @default(0.0)    // Percentage for course/dive pools; fixed amount per unit for Certifications
   // Comma-separated roles with personal commission, e.g. "seller,instructor" or "photo"
   personalRoles      String?    
   // JSON string defining fixed per-line amount per role, e.g. '{"seller":10, "instructor":25}'
   personalRatesJson  String?    
+  includesComplimentaryMedia Boolean @default(false)
   isActive           Boolean    @default(true)
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -185,6 +205,12 @@ model BillItem {
   unitPrice               Float
   discountPercent         Float        @default(0.0)
   lineTotal               Float        // (unitPrice * quantity) - discount
+  poolTypeSnapshot        String?
+  poolContributionAmount  Float?       // Saved currency amount, after discounts and before service charge/tax.
+  linePosition            Int          @default(0)
+  autoPhotoForLineId      String?      @unique
+  autoPhotoForLine        BillItem?    @relation("AutomaticPhoto", fields: [autoPhotoForLineId], references: [id], onDelete: Cascade)
+  automaticPhotoLine      BillItem?    @relation("AutomaticPhoto")
   
   // Personal commission assignments
   sellerStaffId           String?
@@ -196,6 +222,7 @@ model BillItem {
   // Personal commissions breakdown JSON: e.g. '{"seller":10, "instructor":20}'
   personalCommissionsJson String?
   totalPersonalCommission Float        @default(0.0)
+  includesComplimentaryMedia Boolean    @default(false)
 
   bill                    Bill         @relation(fields: [billId], references: [id], onDelete: Cascade)
   item                    Item?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
@@ -289,6 +316,88 @@ model Authenticator {
 model RevokedToken {
   tokenHash String   @id
   expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// Published documents are append-only. Sessions pin the versions offered at handoff.
+model WaterSportsDocument {
+  id           String   @id @default(uuid())
+  propertyId   String
+  kind         String
+  language     String
+  languageName String
+  title        String
+  body         String
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  @@index([propertyId, kind, language, createdAt])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+}
+
+model WaterSportsSession {
+  id           String   @id @default(uuid())
+  propertyId   String
+  formType     String
+  roomNumber   String
+  staffFields  Json
+  documents    Json
+  candidates   Json     @default("[]")
+  tokenHash    String   @unique
+  lookupCount  Int      @default(0)
+  createdById  String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  record       WaterSportsRecord?
+
+  @@index([propertyId, createdAt])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+}
+
+model WaterSportsRecord {
+  id               String   @id @default(uuid())
+  runningNumber    Int      @unique @default(autoincrement())
+  sessionId        String   @unique
+  session          WaterSportsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  propertyId       String
+  formType         String
+  businessDate     String
+  guestName        String
+  roomNumber       String
+  departureDate    String?
+  confirmationNumber String?
+  pmsPropertyCode  String
+  staffFields      Json
+  documentSnapshot Json
+  documentHash     String
+  isMinor          Boolean
+  guardianName     String?
+  signature        Json
+  createdById      String
+  signedAt         DateTime @default(now())
+
+  @@index([propertyId, businessDate, runningNumber])
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+}
+
+// Used only by the isolated testing deployment; never stores live passwords or factors.
+model TestingLiveSession {
+  id                  String   @id @default(uuid())
+  userId              String
+  liveUserId          String
+  tokenHash           String   @unique
+  liveTokenCiphertext  String
+  expiresAt           DateTime
+  createdAt           DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
 }

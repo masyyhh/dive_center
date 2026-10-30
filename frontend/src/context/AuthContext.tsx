@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
-import { apiFetch, getAuthToken, setAuthToken, revokeSession } from '../services/api';
+import { apiFetch, getAuthToken, setAuthToken, revokeSession, connectTestingLiveSignIn } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string; attemptsRemaining?: number; changeToken?: string }>;
+  connectLive: () => Promise<void>;
   logout: () => Promise<void>;
   signingOut: boolean;
   logoutError: string;
@@ -61,6 +62,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const connectLive = async () => {
+    const data = await connectTestingLiveSignIn();
+    setAuthToken(data.token); setUser(data.user);
+  };
+
   const logout = async () => {
     if (signingOut) return;
     setSigningOut(true); setLogoutError('');
@@ -73,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, signingOut, logoutError }}>
+    <AuthContext.Provider value={{ user, loading, login, connectLive, logout, refreshUser, signingOut, logoutError }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,0 +1,47 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { loadTypeScript, request } = require('./helpers/runtime.cjs');
+const { createTestDatabase } = require('./helpers/postgres.cjs');
+const database = createTestDatabase('nocommission');
+const { prisma } = database;
+const user = { id: 'manager', role: 'PROPERTY_MANAGER', assignedPropertyIds: ['a'] };
+const stubs = { '../db': { prisma }, '../middleware/auth': { requireAuth: (req, res, next) => next() } };
+const { itemsRouter } = loadTypeScript('src/routes/items.routes.ts', stubs);
+const { billsRouter } = loadTypeScript('src/routes/bills.routes.ts', stubs);
+const { calculateCommissionForPeriod } = loadTypeScript('src/services/commissionService.ts', stubs);
+const { catalogueSpreadsheetHeaders } = loadTypeScript('src/services/catalogueTransfer.ts');
+const call = (router, method, url, body) => request(router, method, url, { user, body });
+test.before(async () => {
+  await prisma.property.create({ data: { id: 'a', code: 'A', name: 'Centre', serviceChargeRate: 10, taxRate: 16 } });
+  await prisma.user.create({ data: { id: 'manager', username: 'manager', name: 'Manager', passwordHash: 'fixture' } });
+  await prisma.staffMember.create({ data: { id: 'employee', propertyId: 'a', name: 'Employee', roleTitle: 'Staff', hireDate: '2026-01-01' } });
+  await prisma.category.create({ data: { id: 'services', propertyId: 'a', name: 'Services' } });
+});
+test.after(() => database.dispose());
+test('a labelled no-commission service can be imported and billed at its normal guest price without pool or employee payouts', async () => {
+  const row = ['NO-COMM', 'Equipment replacement', 'Services', 100, 'No pool', '', '', '', '', '', '', '', 'No', 'Active'];
+  const content = Buffer.from([catalogueSpreadsheetHeaders.join(','), row.join(',')].join('\n')).toString('base64');
+  const imported = await call(itemsRouter, 'POST', '/import', { propertyId: 'a', format: 'csv', content, preview: false });
+  assert.equal(imported.status, 200);
+  const item = await prisma.item.findUnique({ where: { propertyId_code: { propertyId: 'a', code: 'NO-COMM' } } });
+  assert.equal(item.poolType, 'NONE'); assert.equal(item.poolContribution, 0); assert.equal(item.personalRatesJson, '{}'); assert.equal(item.includesComplimentaryMedia, false);
+  const result = await call(billsRouter, 'POST', '/', { propertyId: 'a', checkNumber: 100, businessDate: '2026-10-30', guestName: 'Guest', roomNumber: '101', items: [{ itemId: item.id, itemName: item.name, categoryName: 'Services', quantity: 2, unitPrice: 100, discountPercent: 10 }] });
+  assert.equal(result.status, 201);
+  assert.equal(result.body.bill.items[0].lineTotal, 180);
+  assert.equal(result.body.bill.items[0].poolContributionAmount, 0);
+  assert.equal(result.body.bill.items[0].totalPersonalCommission, 0);
+  assert.equal(result.body.bill.serviceChargeAmount, 18);
+  assert.equal(result.body.bill.taxAmount, 31.68);
+  assert.equal((await calculateCommissionForPeriod('a', '2026-10-30', '2026-10-30')).grandTotal, 0);
+});
+test('normalizing an unused legacy No pool amount to zero is allowed without changing saved payroll', async () => {
+  await prisma.item.create({ data: { id: 'legacy', propertyId: 'a', categoryId: 'services', code: 'LEGACY', name: 'Legacy no pool', price: 100, poolType: 'NONE', poolContribution: 10 } });
+  await prisma.bill.create({ data: { propertyId: 'a', checkNumber: 101, businessDate: '2026-10-30', guestName: 'Guest', roomNumber: '101', createdById: 'manager', items: { create: { itemId: 'legacy', itemName: 'Legacy', categoryName: 'Services', quantity: 1, unitPrice: 100, lineTotal: 100, poolTypeSnapshot: 'NONE', poolContributionAmount: 0 } } } });
+  const row = ['LEGACY', 'Legacy no pool', 'Services', 100, 'No pool', '', '', '', '', '', '', '', 'No', 'Active'];
+  const content = Buffer.from([catalogueSpreadsheetHeaders.join(','), row.join(',')].join('\n')).toString('base64');
+  assert.equal((await call(itemsRouter, 'POST', '/import', { propertyId: 'a', format: 'csv', content, preview: false })).status, 200);
+  const edited = await call(itemsRouter, 'PUT', '/legacy', { poolType: 'NONE', poolContribution: 0, personalRoles: '', personalRatesJson: '{}', includesComplimentaryMedia: false });
+  assert.equal(edited.status, 200);
+  assert.equal((await prisma.billItem.findFirst({ where: { itemId: 'legacy' } })).poolContributionAmount, 0);
+  assert.equal((await call(itemsRouter, 'PUT', '/legacy', { poolType: 'DIVE_POOL', poolContribution: 10 })).status, 409);
+});

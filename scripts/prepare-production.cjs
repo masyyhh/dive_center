@@ -70,11 +70,12 @@ try {
   catch (error) { if (error.code !== 'EEXIST') throw error; }
   regularFile(pmsFile); fs.chmodSync(pmsFile, 0o444);
   const envFile = path.join(root, '.env.production');
-  const envContent = `APP_DOMAIN=${appDomain}\nCORS_ORIGIN=${corsOrigin}\nACME_EMAIL=${email}\nADMIN_EMAIL=${email}\nADMIN_NAME=Administrator\n`;
+  const envContent = `APP_DOMAIN=${appDomain}\nCORS_ORIGIN=${corsOrigin}\nADMIN_EMAIL=${email}\nADMIN_NAME=Administrator\nREVERSE_PROXY_BIND_IP=127.0.0.1\nREVERSE_PROXY_TRUSTED_IPS=\n`;
   try { fs.writeFileSync(envFile, envContent, { flag: 'wx', mode: 0o600 }); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
   regularFile(envFile); fs.chmodSync(envFile, 0o600);
   console.log('Production configuration prepared. Existing keys and configuration were preserved.');
+  console.log('Before startup, configure REVERSE_PROXY_BIND_IP and REVERSE_PROXY_TRUSTED_IPS in .env.production, plus proxy routing and firewall rules; see deploy/REVERSE-PROXY.md.');
   console.log('Keep secrets/ private and back it up encrypted. The bootstrap password is in secrets/admin_password.');
 } catch (error) {
   console.error(`Production preparation failed: ${error.message}`);

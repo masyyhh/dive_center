@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
+const themeKey = import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? 'dcm_testing_theme' : 'dcm_theme';
+
 type Theme = 'light' | 'dark';
 
 interface ThemeContextType {
@@ -11,13 +13,13 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem('dcm_theme');
+    const saved = localStorage.getItem(themeKey);
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
   useEffect(() => {
-    localStorage.setItem('dcm_theme', theme);
+    localStorage.setItem(themeKey, theme);
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {

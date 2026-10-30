@@ -1,27 +1,29 @@
-// Vite proxies /api in development; production uses the same origin.
-const API_BASE = '/api';
+// Build-time isolation: a testing tab always calls the testing API, even when
+// live and testing tabs are open together at the same origin.
+export const API_BASE = import.meta.env?.VITE_DEPLOYMENT_MODE === 'testing' ? '/__testing/api' : '/api';
+const storagePrefix = import.meta.env?.VITE_DEPLOYMENT_MODE === 'testing' ? 'dcm_testing_' : 'dcm_';
 
 export const getAuthToken = (): string | null => {
-  return localStorage.getItem('dcm_auth_token');
+  return localStorage.getItem(`${storagePrefix}auth_token`);
 };
 
 export const setAuthToken = (token: string | null) => {
   if (token) {
-    localStorage.setItem('dcm_auth_token', token);
+    localStorage.setItem(`${storagePrefix}auth_token`, token);
   } else {
-    localStorage.removeItem('dcm_auth_token');
+    localStorage.removeItem(`${storagePrefix}auth_token`);
   }
 };
 
 export const getStoredPropertyId = (): string | null => {
-  return localStorage.getItem('dcm_active_property_id');
+  return localStorage.getItem(`${storagePrefix}active_property_id`);
 };
 
 export const setStoredPropertyId = (id: string | null) => {
   if (id) {
-    localStorage.setItem('dcm_active_property_id', id);
+    localStorage.setItem(`${storagePrefix}active_property_id`, id);
   } else {
-    localStorage.removeItem('dcm_active_property_id');
+    localStorage.removeItem(`${storagePrefix}active_property_id`);
   }
 };
 
@@ -112,4 +114,14 @@ export async function downloadFile(endpoint: string, filename: string) {
   a.click();
   a.remove();
   window.URL.revokeObjectURL(url);
+}
+
+// Called only after the user explicitly chooses Connect live sign-in.
+export async function connectTestingLiveSignIn() {
+  if (import.meta.env?.VITE_DEPLOYMENT_MODE !== 'testing') throw new Error('Open the testing version first.');
+  const liveToken = localStorage.getItem('dcm_auth_token');
+  if (!liveToken) throw new Error('Sign in to the live version in another tab, then return here and connect.');
+  return apiFetch<{ token: string; user: import('../types').User }>('/auth/live-session', {
+    method: 'POST', body: JSON.stringify({ liveToken }),
+  });
 }

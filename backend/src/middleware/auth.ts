@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { loadJwtSecret } from '../config/secrets';
 import { prisma } from '../db';
+import { authenticateTestingLive, testingLiveAuthEnabled } from '../services/testingLiveAuth';
 
 const JWT_SECRET = loadJwtSecret();
 const credentialBinding = (id: string, hash: string) => createHmac('sha256', JWT_SECRET).update(JSON.stringify([id, hash])).digest('hex');
@@ -18,6 +19,8 @@ export interface AuthenticatedUser {
 declare global {
   namespace Express {
     interface Request {
+      testingLiveSessionId?: string;
+      testingLiveUsername?: string;
       user?: AuthenticatedUser;
       authenticatedPasswordHash?: string;
       authenticatedTokenHash?: string;
@@ -37,6 +40,10 @@ export const signToken = (payload: { id: string; email: string | null; role: str
 
 
 const authenticate = (mode: 'workspace' | 'account' | 'initial' | 'logout') => async (req: Request, res: Response, next: NextFunction) => {
+  if (testingLiveAuthEnabled()) {
+    if (mode === 'initial') return res.status(403).json({ error: 'Manage your password in the live version.' });
+    return authenticateTestingLive(req, res, next, mode === 'logout');
+  }
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {

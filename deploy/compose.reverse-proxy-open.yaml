@@ -1,19 +1,22 @@
-# Temporary unrestricted source access. Use instead of the restricted override,
-# not together with it. The external proxy remains responsible for HTTPS.
+# Legacy filename retained for existing deployment commands.
+# Unrestricted mode has been retired: use the same fail-closed proxy controls.
+# Configure the actual proxy source address before starting the backend.
+# Compose >= 2.24.4. Paths resolve from the root compose.yaml.
+# TLS terminates at the external proxy. Publish on loopback unless using a
+# firewall-restricted private interface. Never expose these HTTP ports publicly.
 services:
   backend:
     environment:
       TRUST_PROXY: "0"
-      TRUST_PROXY_ADDRESSES: !reset null
-      REQUIRE_TRUSTED_PROXY: "0"
-    ports:
-      - "0.0.0.0:5001:5001"
+      TRUST_PROXY_ADDRESSES: ${REVERSE_PROXY_TRUSTED_IPS:?Set the proxy source IPs seen by Node, separated by commas}
+      REQUIRE_TRUSTED_PROXY: "1"
+    ports: !override
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:5001:5001"
   web:
     ports: !override
-      - "0.0.0.0:8080:8080"
+      - "${REVERSE_PROXY_BIND_IP:-127.0.0.1}:8080:8080"
     volumes:
       - ./deploy/Caddyfile.reverse-proxy:/etc/caddy/Caddyfile:ro
     cap_drop: [ALL]
-    # The official Caddy binary carries cap_net_bind_service. Keep that
-    # capability in its bounding set so exec succeeds, even on port 8080.
+    # Required to execute the capability-marked official Caddy binary.
     cap_add: [NET_BIND_SERVICE]

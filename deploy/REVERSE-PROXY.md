@@ -1,39 +1,25 @@
 # External reverse proxy on a private network
 
+If you cannot change NPM and it forwards everything to 8080, use
+[the proxy relay mode](PROXY-RELAY.md). It keeps Node internal and validates
+NPM at Caddy. The split-routing instructions below apply to the base mode.
+
 Use this mode when another server terminates public HTTPS and this application
 server provides both the React website and Node API. The external proxy routes
 `/api` and `/api/*` to port 5001, and all other paths to port 8080. Port 5001 is
 the API only; pointing the entire website at it will not serve React.
 
-## Temporary access from any source IP
+## Default deployment
 
-When the server and proxy private IPs are not yet known, use the separate
-`deploy/compose.reverse-proxy-open.yaml` override. It publishes HTTP ports
-5001 (API) and 8080 (website with API forwarding) on all IPv4 interfaces without a source-IP
-allowlist. It replaces the server's public Caddy 80/443 mappings. No IP variables
-are required. Network/provider firewalls still need to permit those ports;
-Compose does not modify those external firewalls.
+The base `compose.yaml` now uses this mode. Caddy serves HTTP on port 8080 with
+`auto_https off`; it neither opens port 443 nor requests certificates. Node's
+port 5001 is published on the configured bind address, defaulting to loopback.
+The backend refuses to serve with an empty/invalid trusted-proxy list.
 
-```sh
-docker compose --env-file .env.production -f compose.yaml -f deploy/compose.reverse-proxy-open.yaml config --quiet
-docker compose --env-file .env.production -f compose.yaml -f deploy/compose.reverse-proxy-open.yaml up -d --build --wait backend web
-```
-
-This mode deliberately disables proxy-only enforcement and forwarded-header
-trust; it does not disable authentication, authorization, rate limits, audit
-logging, security headers or request limits. Rate limits and audit IPs use the
-actual TCP peer, so users behind the same proxy share its rate limit bucket.
-The proxy routing example below still applies. Public users should use the
-proxy's HTTPS domain; these HTTP upstreams do not encrypt passwords or tokens.
-Port 8080 forwards `/api` and `/api/*` to Node, so temporary direct access to
-`http://SERVER_IP:8080` works for the website and API on the same origin.
-Requests through Caddy share its backend rate-limit bucket while forwarded
-header trust is disabled. The external proxy can either forward the entire
-origin to 8080 in this temporary mode, or use the split routing example below.
-
-When the addresses become available, configure the private bind IP and trusted
-proxy IP below, restrict network access, and switch from the open override to
-`deploy/compose.reverse-proxy.yaml`. Never combine the two overrides.
+The legacy `compose.reverse-proxy-open.yaml` filename now applies the same
+restricted configuration. It no longer permits unrestricted API access or
+disables the HTTPS/proxy gate. Configure the actual proxy address before
+restarting an existing deployment that used this file.
 
 ## Network and TLS boundary
 
@@ -76,27 +62,39 @@ changes the connection's source, use the source actually seen by Node and
 restrict access before that NAT boundary. Do not trust the entire Docker or
 private subnet to work around a 403.
 
-The override defaults to loopback when the bind IP is omitted and refuses to
-start without the trusted proxy address. It replaces the web port mappings,
-removing public 80/443 from this server. It disables Caddy's certificate
-issuance and uses Caddy to serve the website over HTTP on port 8080. In the
-restricted mode, keep the split routing below: API requests forwarded through
-Caddy are rejected unless its source address is explicitly trusted as well.
-The Node gate rejects non-proxy API clients and requires forwarded HTTPS,
-except for read-only health/readiness probes. API responses use no-store.
-Existing authentication, RBAC, rate limits, audit logging, request body limits,
-security headers and container privilege restrictions remain active.
+The base configuration defaults to loopback when the bind IP is omitted. Set
+`REVERSE_PROXY_TRUSTED_IPS` to the actual proxy source seen by Node; without it
+Node fails closed at startup. The optional `compose.reverse-proxy.yaml` override
+also rejects an unset/empty address during Compose configuration.
 
-Require Docker Compose 2.24.4 or newer for port replacement. From the repo root:
+Keep the split routing below: API requests forwarded through Caddy are rejected
+unless its source address is explicitly trusted as well. The Node gate rejects
+non-proxy API clients and requires forwarded HTTPS, except for read-only
+health/readiness probes. API responses use no-store. Existing authentication,
+RBAC, rate limits, audit logging, request body limits, security headers and
+container privilege restrictions remain active.
+
+Require Docker Compose 2.24.4 or newer for the compatibility overrides. From the
+repo root, after configuring the addresses and firewall:
 
 ```sh
-docker compose --env-file .env.production -f compose.yaml -f deploy/compose.reverse-proxy.yaml config --quiet
-docker compose --env-file .env.production -f compose.yaml -f deploy/compose.reverse-proxy.yaml up -d --build --wait backend web
-docker compose --env-file .env.production -f compose.yaml -f deploy/compose.reverse-proxy.yaml ps
+docker compose --env-file .env.production config --quiet
+docker compose --env-file .env.production up -d --build --no-deps --wait --wait-timeout 120 backend web
+docker compose --env-file .env.production ps
 ```
 
-Use both `-f` arguments for subsequent updates so the deployment stays in this
-mode. Do not run the base Compose `up` alone, which restores Caddy public HTTPS.
+This recreates the application containers and removes the previous Caddy
+80/443 listeners without deleting the database or certificate volumes. Keep
+the existing secrets and database volume. For a fresh deployment, start the
+database and apply migrations/bootstrap as described in PRODUCTION.md first.
+Existing commands that include `-f compose.yaml -f deploy/compose.reverse-proxy.yaml`
+remain supported.
+
+For a remote proxy, bind to this server's private interface and allow the proxy
+through the network firewall. For a connector running on this host, loopback
+may be used, but Docker NAT can change the source seen by Node. Do not assume
+that a Cloudflare edge IP is that source. Determine the actual connector/proxy
+source and preserve the restriction at the network boundary.
 
 ## Proxy routing example (Nginx HTTPS server block)
 

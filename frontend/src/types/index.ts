@@ -67,15 +67,20 @@ export interface Item {
   code: string;
   name: string;
   price: number;
-  poolType: 'COURSE_POOL' | 'DIVE_POOL' | 'NONE';
+  poolType: 'COURSE_POOL' | 'CERTIFICATION_POOL' | 'DIVE_POOL' | 'NONE';
   poolContribution: number;
   personalRoles?: string | null;
   personalRatesJson?: string | null;
+  includesComplimentaryMedia: boolean;
   isActive: boolean;
   hasBillHistory?: boolean;
 }
 
 export interface BillItem {
+  clientLineId?: string;
+  autoPhotoFor?: string | null;
+  autoPhotoForLineId?: string | null;
+  linePosition?: number;
   id?: string;
   itemId?: string | null;
   itemName: string;
@@ -84,6 +89,8 @@ export interface BillItem {
   unitPrice: number;
   discountPercent: number;
   lineTotal: number;
+  poolTypeSnapshot?: Item['poolType'] | null;
+  poolContributionAmount?: number | null;
   sellerStaffId?: string | null;
   guideStaffId?: string | null;
   instructorStaffId?: string | null;
@@ -96,6 +103,7 @@ export interface BillItem {
   videoStaff?: { id: string; name: string };
   personalCommissionsJson?: string | null;
   totalPersonalCommission?: number;
+  includesComplimentaryMedia?: boolean;
 }
 
 export interface Bill {
@@ -175,6 +183,29 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
+export interface PayrollBreakdownDetail {
+  id: string;
+  billId: string;
+  billItemId: string | null;
+  checkNumber: number;
+  businessDate: string;
+  itemName: string;
+  quantity: number | null;
+  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL';
+  basisAmount: number;
+  recipientCount: number;
+  factor: number;
+  unitRate?: number;
+  explanation: string;
+  amount: number;
+}
+export interface PayrollBreakdownData {
+  staff: StaffCommissionResult;
+  details: PayrollBreakdownDetail[];
+  roundingAdjustment: number;
+  period: { startDate: string; endDate: string };
+}
+
 export interface DashboardReport {
   property: {
     id: string;
@@ -194,6 +225,7 @@ export interface DashboardReport {
     billCount: number;
     averageBill: number;
     totalCommission: number;
+    certificationPoolTotal: number;
     netRevenue: number;
   };
   charts: {

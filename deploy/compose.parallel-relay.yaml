@@ -1,0 +1,13 @@
+# Use after compose.parallel-live.yaml when the live site uses NPM relay mode.
+services:
+  web:
+    networks: !override
+      proxy_relay:
+        ipv4_address: ${PROXY_RELAY_CADDY_IP:-172.30.251.2}
+      testing_frontend:
+        ipv4_address: ${TESTING_GATEWAY_IP:-172.30.252.2}
+    volumes:
+      - ./deploy/Caddyfile.parallel-relay:/etc/caddy/Caddyfile:ro
+  parallel-config-check:
+    volumes:
+      - ./deploy/Caddyfile.parallel-relay:/etc/caddy/Caddyfile:ro

@@ -1,10 +1,12 @@
 import ExcelJS from 'exceljs';
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
+import { isYearMonth } from '../utils/dates';
 
 export const generateDailyExcelReport = async (propertyId: string, date: string) => {
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) throw new Error('Property not found');
+  const currency = property.currency;
 
   const bills = await prisma.bill.findMany({
     where: { propertyId, businessDate: date, status: 'ACTIVE' },
@@ -12,7 +14,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     orderBy: { checkNumber: 'asc' },
   });
 
-  const { staffResults } = await calculateCommissionForPeriod(propertyId, date, date);
+  const { staffResults, certificationPoolTotal } = await calculateCommissionForPeriod(propertyId, date, date);
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Dive Centre Manager';
@@ -26,12 +28,12 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     { header: 'Guest Name', key: 'guestName', width: 25 },
     { header: 'Nationality', key: 'nationality', width: 18 },
     { header: 'Items Count', key: 'itemsCount', width: 14 },
-    { header: 'Gross ($)', key: 'gross', width: 14 },
-    { header: 'Discount ($)', key: 'discount', width: 14 },
-    { header: 'Service Charge ($)', key: 'sc', width: 18 },
-    { header: 'Tax ($)', key: 'tax', width: 14 },
-    { header: 'Tip ($)', key: 'tip', width: 14 },
-    { header: 'Net Total ($)', key: 'net', width: 16 },
+    { header: `Gross (${currency})`, key: 'gross', width: 14 },
+    { header: `Discount (${currency})`, key: 'discount', width: 14 },
+    { header: `Service Charge (${currency})`, key: 'sc', width: 18 },
+    { header: `Tax (${currency})`, key: 'tax', width: 14 },
+    { header: `Tip (${currency})`, key: 'tip', width: 14 },
+    { header: `Net Total (${currency})`, key: 'net', width: 16 },
   ];
 
   // Header style
@@ -44,12 +46,14 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
 
   let totalGross = 0;
   let totalNet = 0;
+  let totalDiscount = 0;
   let totalSc = 0;
   let totalTax = 0;
   let totalTip = 0;
 
   for (const b of bills) {
     totalGross += b.grossAmount;
+    totalDiscount += b.discountAmount;
     totalNet += b.netAmount;
     totalSc += b.serviceChargeAmount;
     totalTax += b.taxAmount;
@@ -75,6 +79,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     checkNumber: 'TOTAL',
     itemsCount: bills.length,
     gross: totalGross.toFixed(2),
+    discount: totalDiscount.toFixed(2),
     sc: totalSc.toFixed(2),
     tax: totalTax.toFixed(2),
     tip: totalTip.toFixed(2),
@@ -87,12 +92,12 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
   commSheet.columns = [
     { header: 'Staff Member', key: 'staffName', width: 25 },
     { header: 'Role', key: 'roleTitle', width: 20 },
-    { header: 'Course Pool ($)', key: 'courseCommission', width: 16 },
-    { header: 'Dive Pool ($)', key: 'diveCommission', width: 16 },
-    { header: 'Base Leader Override ($)', key: 'overrideCommission', width: 24 },
-    { header: 'Tips ($)', key: 'tipsCommission', width: 14 },
-    { header: 'Personal ($)', key: 'personalCommission', width: 16 },
-    { header: 'Total Pay ($)', key: 'totalCommission', width: 16 },
+    { header: `Course Pool (${currency})`, key: 'courseCommission', width: 16 },
+    { header: `Dive Pool (${currency})`, key: 'diveCommission', width: 16 },
+    { header: `Base Leader Override (${currency})`, key: 'overrideCommission', width: 24 },
+    { header: `Tips (${currency})`, key: 'tipsCommission', width: 14 },
+    { header: `Personal (${currency})`, key: 'personalCommission', width: 16 },
+    { header: `Total Pay (${currency})`, key: 'totalCommission', width: 16 },
   ];
   commSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   commSheet.getRow(1).fill = {
@@ -114,15 +119,25 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     });
   }
 
+  const poolSheet = workbook.addWorksheet('Certifications Pool');
+  poolSheet.columns = [{ header: 'Metric', key: 'metric', width: 36 }, { header: 'Value', key: 'value', width: 45 }];
+  poolSheet.getRow(1).font = { bold: true };
+  poolSheet.addRow({ metric: `Certifications Pool (${currency})`, value: certificationPoolTotal.toFixed(2) });
+  poolSheet.addRow({ metric: 'Distribution', value: 'No staff commission or base-leader override' });
+
   return workbook.xlsx.writeBuffer();
 };
 
 export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth: string) => {
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) throw new Error('Property not found');
+  const currency = property.currency;
 
+  if (!isYearMonth(yearMonth)) throw new Error('Choose a valid month (YYYY-MM).');
   const startDate = `${yearMonth}-01`;
-  const endDate = `${yearMonth}-31`;
+  const monthEnd = new Date(`${yearMonth}-01T12:00:00Z`);
+  monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1, 0);
+  const endDate = monthEnd.toISOString().slice(0, 10);
 
   const bills = await prisma.bill.findMany({
     where: {
@@ -134,7 +149,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     orderBy: { businessDate: 'asc' },
   });
 
-  const { staffResults, personalDetails } = await calculateCommissionForPeriod(
+  const { staffResults, personalDetails, certificationPoolTotal } = await calculateCommissionForPeriod(
     propertyId,
     startDate,
     endDate
@@ -172,24 +187,25 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
   summarySheet.addRow({ metric: 'Property', value: property.name });
   summarySheet.addRow({ metric: 'Month', value: yearMonth });
   summarySheet.addRow({ metric: 'Total Active Bills', value: bills.length });
-  summarySheet.addRow({ metric: 'Turnover (Gross)', value: `$${turnover.toFixed(2)}` });
-  summarySheet.addRow({ metric: 'Service Charge (10%)', value: `$${totalSc.toFixed(2)}` });
-  summarySheet.addRow({ metric: 'Tax (16%)', value: `$${totalTax.toFixed(2)}` });
-  summarySheet.addRow({ metric: 'Total Tips Paid', value: `$${totalTips.toFixed(2)}` });
-  summarySheet.addRow({ metric: 'Net Revenue', value: `$${totalNet.toFixed(2)}` });
-  summarySheet.addRow({ metric: 'Total Staff Commission', value: `$${totalCommission.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Turnover (Gross)', value: `${currency} ${turnover.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Service Charge', value: `${currency} ${totalSc.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Tax', value: `${currency} ${totalTax.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Total Tips Paid', value: `${currency} ${totalTips.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Net Revenue', value: `${currency} ${totalNet.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Total Staff Commission', value: `${currency} ${totalCommission.toFixed(2)}` });
+  summarySheet.addRow({ metric: 'Certifications Pool (not paid to staff)', value: `${currency} ${certificationPoolTotal.toFixed(2)}` });
 
   // Sheet 2: Staff Commission
   const commSheet = workbook.addWorksheet('Staff Commission Breakdown');
   commSheet.columns = [
     { header: 'Staff Name', key: 'name', width: 24 },
     { header: 'Role', key: 'role', width: 20 },
-    { header: 'Course Pool ($)', key: 'course', width: 16 },
-    { header: 'Dive Pool ($)', key: 'dive', width: 16 },
-    { header: 'Base Leader Override ($)', key: 'override', width: 22 },
-    { header: 'Tips ($)', key: 'tips', width: 14 },
-    { header: 'Personal ($)', key: 'personal', width: 16 },
-    { header: 'Total Pay ($)', key: 'total', width: 16 },
+    { header: `Course Pool (${currency})`, key: 'course', width: 16 },
+    { header: `Dive Pool (${currency})`, key: 'dive', width: 16 },
+    { header: `Base Leader Override (${currency})`, key: 'override', width: 22 },
+    { header: `Tips (${currency})`, key: 'tips', width: 14 },
+    { header: `Personal (${currency})`, key: 'personal', width: 16 },
+    { header: `Total Pay (${currency})`, key: 'total', width: 16 },
   ];
   commSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   commSheet.getRow(1).fill = {
@@ -221,7 +237,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     { header: 'Item / Activity', key: 'item', width: 30 },
     { header: 'Role', key: 'role', width: 14 },
     { header: 'Staff Member', key: 'staff', width: 24 },
-    { header: 'Amount ($)', key: 'amount', width: 14 },
+    { header: `Amount (${currency})`, key: 'amount', width: 14 },
   ];
   personalSheet.getRow(1).font = { bold: true };
   for (const p of personalDetails) {
