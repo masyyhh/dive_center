@@ -26,6 +26,7 @@ model Property {
 
   users               UserProperty[]
   staffMembers        StaffMember[]
+  staffRoleTitles     StaffRoleTitle[]
   categories          Category[]
   items               Item[]
   bills               Bill[]
@@ -76,6 +77,17 @@ model UserProperty {
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@unique([userId, propertyId])
+}
+
+model StaffRoleTitle {
+  id             String   @id @default(uuid())
+  propertyId     String
+  name           String
+  normalizedName String
+  createdAt      DateTime @default(now())
+  property       Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, normalizedName])
 }
 
 model StaffMember {

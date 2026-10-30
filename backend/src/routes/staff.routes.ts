@@ -10,8 +10,52 @@ import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
+import { defaultStaffRoleTitles, normalizeRoleTitle, uniqueRoleTitles } from '../utils/staffRoleTitles';
 
 export const staffRouter = Router();
+
+const roleTitleSchema = z.string().transform(normalizeRoleTitle).pipe(z.string().min(2).max(100));
+const createRoleTitleSchema = z.object({ propertyId: z.string().min(1), name: roleTitleSchema });
+
+async function listRoleTitles(propertyId: string) {
+  const [saved, existing] = await Promise.all([
+    prisma.staffRoleTitle.findMany({ where: { propertyId }, orderBy: { name: 'asc' } }),
+    prisma.staffMember.findMany({ where: { propertyId }, select: { roleTitle: true }, distinct: ['roleTitle'] }),
+  ]);
+  return uniqueRoleTitles([...defaultStaffRoleTitles, ...saved.map(title => title.name), ...existing.map(staff => staff.roleTitle)]);
+}
+
+staffRouter.get('/role-titles', requireAuth, requirePropertyAccess('query'), async (req: Request, res: Response) => {
+  const propertyId = req.query.propertyId;
+  if (typeof propertyId !== 'string' || !propertyId) return res.status(400).json({ error: 'Property ID is required.' });
+  try {
+    return res.json({ roleTitles: await listRoleTitles(propertyId) });
+  } catch (error) {
+    console.error('Fetch role titles error:', error);
+    return res.status(500).json({ error: 'Failed to fetch role titles.' });
+  }
+});
+
+staffRouter.post('/role-titles', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req: Request, res: Response) => {
+  const parsed = createRoleTitleSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Enter a role title between 2 and 100 characters and select a property.' });
+  const { propertyId, name } = parsed.data;
+  try {
+    const property = await prisma.property.findUnique({ where: { id: propertyId } });
+    if (!property?.isActive || property.deletedAt) return res.status(400).json({ error: 'Select an active property.' });
+    const normalizedName = name.toLowerCase();
+    if ((await listRoleTitles(propertyId)).some(title => title.toLowerCase() === normalizedName)) {
+      return res.status(409).json({ error: 'This role title already exists for this property.' });
+    }
+    const title = await prisma.staffRoleTitle.create({ data: { propertyId, name, normalizedName } });
+    await logAuditEvent({ req, propertyId, action: 'STAFF_ROLE_TITLE_CREATE', targetType: 'StaffRoleTitle', targetId: title.id, details: { name } });
+    return res.status(201).json({ roleTitle: title.name });
+  } catch (error) {
+    if ((error as any)?.code === 'P2002') return res.status(409).json({ error: 'This role title already exists for this property.' });
+    console.error('Create role title error:', error);
+    return res.status(500).json({ error: 'Failed to create role title.' });
+  }
+});
 
 // GET /api/staff?propertyId=...&diveStaffOnly=...&activeOnDate=...
 staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
@@ -61,7 +105,7 @@ const staffSchema = z.object({
   propertyId: z.string(),
   name: z.string().min(2),
   email: z.string().email().optional().or(z.literal('')),
-  roleTitle: z.string().min(2),
+  roleTitle: roleTitleSchema,
   isDiveStaff: z.boolean().default(true),
   isCoursePoolSharing: z.boolean().default(false),
   isDivePoolSharing: z.boolean().default(true),
@@ -144,10 +188,12 @@ staffRouter.put(
 
       if (existing.property?.deletedAt) return res.status(410).json({ error: 'This property has been removed. Its records are read-only.' });
 
+      const parsedRoleTitle = roleTitleSchema.optional().safeParse(req.body.roleTitle);
+      if (!parsedRoleTitle.success) return res.status(400).json({ error: 'Enter a role title between 2 and 100 characters.' });
+
       const {
         name,
         email,
-        roleTitle,
         isDiveStaff,
         isCoursePoolSharing,
         isDivePoolSharing,
@@ -162,7 +208,7 @@ staffRouter.put(
         data: {
           name: name ?? undefined,
           email: email !== undefined ? (email ? email : null) : undefined,
-          roleTitle: roleTitle ?? undefined,
+          roleTitle: parsedRoleTitle.data,
           isDiveStaff: isDiveStaff !== undefined ? Boolean(isDiveStaff) : undefined,
           isCoursePoolSharing: isCoursePoolSharing !== undefined ? Boolean(isCoursePoolSharing) : undefined,
           isDivePoolSharing: isDivePoolSharing !== undefined ? Boolean(isDivePoolSharing) : undefined,

@@ -93,6 +93,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
   // Staff state
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [roleTitles, setRoleTitles] = useState<string[]>([]);
+  const [newRoleTitle, setNewRoleTitle] = useState('');
+  const [roleTitleBusy, setRoleTitleBusy] = useState(false);
+  const [roleTitlesLoading, setRoleTitlesLoading] = useState(false);
+  const roleTitleProperty = React.useRef(activeProperty?.id);
+  roleTitleProperty.current = activeProperty?.id;
   const [showStaffModal, setShowStaffModal] = useState<boolean>(false);
   const [staffForm, setStaffForm] = useState({
     name: '',
@@ -143,6 +149,40 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     setSuccessMsg(msg);
     setErrorMsg(null);
     setTimeout(() => setSuccessMsg(null), 3500);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setRoleTitles([]);
+    setNewRoleTitle('');
+    setShowStaffModal(false);
+    setStaffForm(form => ({ ...form, roleTitle: 'Instructor', isBaseLeaderOverride: false, isCoursePoolSharing: true }));
+    if (!activeProperty) return;
+    setRoleTitlesLoading(true);
+    apiFetch<{ roleTitles: string[] }>(`/staff/role-titles?propertyId=${encodeURIComponent(activeProperty.id)}`)
+      .then(result => { if (!cancelled) setRoleTitles(result.roleTitles); })
+      .catch(error => { if (!cancelled) setErrorMsg(error instanceof Error ? error.message : 'Could not load role titles.'); })
+      .finally(() => { if (!cancelled) setRoleTitlesLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeProperty?.id]);
+
+  const handleCreateRoleTitle = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeProperty || !canManageAccounts || roleTitleBusy || !newRoleTitle.trim()) return;
+    const propertyId = activeProperty.id;
+    setRoleTitleBusy(true); setErrorMsg(null);
+    try {
+      const result = await apiFetch<{ roleTitle: string }>('/staff/role-titles', {
+        method: 'POST', body: JSON.stringify({ propertyId, name: newRoleTitle }),
+      });
+      if (roleTitleProperty.current !== propertyId) return;
+      setRoleTitles(titles => [...titles, result.roleTitle]);
+      setStaffForm(form => ({ ...form, roleTitle: result.roleTitle, isBaseLeaderOverride: false, isCoursePoolSharing: false }));
+      setNewRoleTitle('');
+      showNotification(`Role title '${result.roleTitle}' added. You can now select it when adding staff.`);
+    } catch (error) {
+      if (roleTitleProperty.current === propertyId) setErrorMsg(error instanceof Error ? error.message : 'Could not add role title.');
+    } finally { setRoleTitleBusy(false); }
   };
 
   // Fetch Users
@@ -787,6 +827,20 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             </button>
           </div>
 
+          {canManageAccounts && <form onSubmit={handleCreateRoleTitle} className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-4 space-y-2">
+            <label htmlFor="new-staff-role-title" className="block text-sm font-semibold">Add role title</label>
+            <div className="flex flex-wrap gap-2">
+              <input id="new-staff-role-title" value={newRoleTitle} onChange={event => setNewRoleTitle(event.target.value)}
+                required minLength={2} maxLength={100} disabled={!activeProperty || roleTitleBusy || roleTitlesLoading}
+                placeholder="e.g. Marine Biologist" className="flex-1 min-w-48 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700" />
+              <button type="submit" disabled={!activeProperty || roleTitleBusy || roleTitlesLoading || newRoleTitle.trim().length < 2}
+                className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-sm font-bold disabled:opacity-50">
+                {roleTitleBusy ? 'Adding…' : 'Add role title'}
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">Saved for {activeProperty?.name || 'the selected property'} and available when adding staff. Configure pool sharing for each staff member.</p>
+          </form>}
+
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
               <thead>
@@ -1392,13 +1446,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   }}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                 >
-                  <option value="Base Leader">Base Leader</option>
-                  <option value="Assistant Base Leader">Assistant Base Leader</option>
-                  <option value="Instructor">Instructor</option>
-                  <option value="Divemaster">Divemaster</option>
-                  <option value="Underwater Photographer">Underwater Photographer</option>
-                  <option value="Boat Crew">Boat Crew</option>
-                  <option value="Receptionist">Receptionist (Non-dive)</option>
+                  {[...new Set([staffForm.roleTitle, ...roleTitles])].map(title => (
+                    <option key={title} value={title}>{title === 'Receptionist' ? 'Receptionist (Non-dive)' : title}</option>
+                  ))}
                 </select>
               </div>
 
