@@ -139,16 +139,22 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const itemLoadGeneration = React.useRef(0);
   const [catalogueFilters, setCatalogueFilters] = useState<CatalogueFilters>(emptyCatalogueFilters);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
-  const [bulkDeleteTarget, setBulkDeleteTarget] = useState<{ propertyId: string; items: Item[] } | null>(null);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState<{ propertyId: string; items: Item[]; permanent?: boolean } | null>(null);
+  const deleteItemNoun = bulkDeleteTarget?.items.length === 1 ? 'activity' : 'activities';
+  const [permanentDeleteConfirmation, setPermanentDeleteConfirmation] = useState('');
+  useEffect(() => { setPermanentDeleteConfirmation(''); }, [bulkDeleteTarget]);
   const [bulkReview, setBulkReview] = useState<BulkMediaReviewData | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [showArchivedItems, setShowArchivedItems] = useState(false);
   const visibleItems = filterCatalogue(items, catalogueFilters, showArchivedItems);
-  const selectableItems = visibleItems.filter(item => item.isActive);
+  const selectableItems = visibleItems;
+  const selectedItems = items.filter(item => selectedItemIds.includes(item.id));
+  const selectedAreActive = selectedItems.length > 0 && selectedItems.every(item => item.isActive);
+  const canPermanentlyDeleteSelected = selectedItems.length > 0 && selectedItems.every(item => !item.isActive && !item.hasBillHistory && !item.hasPackageUsage);
   const selectedVisibleCount = selectableItems.filter(item => selectedItemIds.includes(item.id)).length;
   useEffect(() => { setCatalogueFilters(emptyCatalogueFilters); setSelectedItemIds([]); setBulkReview(null); setBulkError(null); setCatalogueImport(null); setBulkDeleteTarget(null); }, [activeProperty?.id]);
-  useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && item.isActive))); }, [items]);
+  useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && (item.isActive || showArchivedItems)))); }, [items, showArchivedItems]);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
   const [itemBusy, setItemBusy] = useState(false);
@@ -779,15 +785,16 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
   const handleBulkDeleteItems = async () => {
     if (!bulkDeleteTarget || bulkDeleteTarget.propertyId !== activeProperty?.id || itemBusy || bulkBusy) return;
-    const { propertyId, items: targets } = bulkDeleteTarget;
+    const { propertyId, items: targets, permanent } = bulkDeleteTarget;
+    if (permanent && permanentDeleteConfirmation !== 'DELETE PERMANENTLY') return;
     setItemBusy(true); setErrorMsg(null);
     try {
-      const result = await apiFetch<{ deletedCount: number }>('/items/bulk-delete', {
-        method: 'POST', body: JSON.stringify({ propertyId, itemIds: targets.map(item => item.id) }),
+      const result = await apiFetch<{ deletedCount: number }>(permanent ? '/items/bulk-permanent-delete' : '/items/bulk-delete', {
+        method: 'POST', body: JSON.stringify({ propertyId, itemIds: targets.map(item => item.id), ...(permanent ? { confirmation: permanentDeleteConfirmation } : {}) }),
       });
       if (roleTitleProperty.current !== propertyId) return;
       setBulkDeleteTarget(null); setSelectedItemIds([]);
-      showNotification(`${result.deletedCount} activities deleted. Existing bills and history retained.`);
+      showNotification(permanent ? `${result.deletedCount} ${result.deletedCount === 1 ? 'activity' : 'activities'} permanently deleted.` : `${result.deletedCount} activities deleted. Existing bills and history retained.`);
       await loadItems();
     } catch (error) {
       if (roleTitleProperty.current === propertyId) setErrorMsg(error instanceof Error ? error.message : 'Could not delete the selected activities.');
@@ -1268,13 +1275,18 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
           <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {items.filter(item => showArchivedItems || item.isActive).length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
           {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar">
             <div><strong>{selectedItemIds.length} selected</strong>{selectedItemIds.length > selectedVisibleCount && <span> · {selectedItemIds.length - selectedVisibleCount} hidden by filters</span>}<small>Review changes before saving. Up to 200 services per update.</small></div>
-            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : `Add Photo · ${photoPriceLabel}`}</button>
-            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
-            <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty} onClick={() => {
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy || !selectedAreActive} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : `Add Photo · ${photoPriceLabel}`}</button>
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy || !selectedAreActive} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
+            <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty || !selectedAreActive} onClick={() => {
               if (!activeProperty) return;
               setErrorMsg(null);
               setBulkDeleteTarget({ propertyId: activeProperty.id, items: items.filter(item => item.isActive && selectedItemIds.includes(item.id)) });
             }}><Trash2 size={14} />Delete selected ({selectedItemIds.length})</button>
+            <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty || !canPermanentlyDeleteSelected} onClick={() => {
+              if (!activeProperty || !canPermanentlyDeleteSelected) return;
+              setErrorMsg(null); setBulkDeleteTarget({ propertyId: activeProperty.id, items: selectedItems, permanent: true });
+            }}>Permanently delete selected</button>
+            {!selectedAreActive && <p className="text-sm">Photo changes and normal deletion require active activities only. Permanent deletion requires deleted activities with no bill or package links.</p>}
             <button type="button" className="text-button" disabled={bulkBusy || itemBusy} onClick={() => setSelectedItemIds([])}>Clear selection</button>
           </div>}
 
@@ -1283,7 +1295,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
-                  <th className="py-3 px-4"><input type="checkbox" aria-label="Select all visible active services"
+                  <th className="py-3 px-4"><input type="checkbox" aria-label="Select all visible activities"
                     checked={selectableItems.length > 0 && selectedVisibleCount === selectableItems.length}
                     ref={node => { if (node) node.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < selectableItems.length; }}
                     disabled={bulkBusy || itemBusy || !selectableItems.length || (new Set([...selectedItemIds, ...selectableItems.map(item => item.id)]).size > 200 && selectedVisibleCount !== selectableItems.length)}
@@ -1303,7 +1315,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 {visibleItems.map((it) => (
                   <tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4"><input type="checkbox" aria-label={`Select ${it.name} for bulk update`} checked={selectedItemIds.includes(it.id)}
-                      disabled={!it.isActive || bulkBusy || itemBusy || (selectedItemIds.length >= 200 && !selectedItemIds.includes(it.id))}
+                      disabled={bulkBusy || itemBusy || (selectedItemIds.length >= 200 && !selectedItemIds.includes(it.id))}
                       onChange={event => setSelectedItemIds(ids => event.target.checked ? [...new Set([...ids, it.id])] : ids.filter(id => id !== it.id))} /></td>
                     <td className="py-3 px-4">
                       <span className="font-mono text-sky-500 font-bold mr-2">[{it.code}]</span>
@@ -1337,6 +1349,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4"><div className="flex gap-2">
                       <button type="button" className="secondary-button" disabled={itemBusy || bulkBusy} onClick={() => openItemEditor(it)} aria-label={`Edit ${it.name}`}><Edit2 size={14} />Edit</button>
                       {it.isActive ? <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(it); setErrorMsg(null); }} aria-label={`Delete ${it.name}`}><Trash2 size={14} />Delete</button> : <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => handleRestoreItem(it)} aria-label={`Restore ${it.name}`}>Restore</button>}
+                      {!it.isActive && <div className="space-y-1"><button type="button" className="danger-button" disabled={itemBusy || bulkBusy || it.hasBillHistory || it.hasPackageUsage} onClick={() => {
+                        if (!activeProperty) return;
+                        setErrorMsg(null); setBulkDeleteTarget({ propertyId: activeProperty.id, items: [it], permanent: true });
+                      }} aria-label={`Permanently delete ${it.name}`}>Delete permanently</button>
+                        {(it.hasBillHistory || it.hasPackageUsage) && <small className="block text-slate-500">{it.hasBillHistory ? 'Retained for bill history' : 'Used in a package'}</small>}
+                      </div>}
                     </div></td>
                   </tr>
                 ))}
@@ -2302,20 +2320,23 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         </Modal>
       )}
 
-      {activeTab === 'items' && bulkDeleteTarget && bulkDeleteTarget.propertyId === activeProperty?.id && <Modal label="Delete selected catalogue activities" busy={itemBusy} onClose={() => { if (!itemBusy) { setBulkDeleteTarget(null); setErrorMsg(null); } }} error={errorMsg}>
-        <div className="p-6 space-y-4">
-          <h3 className="text-lg font-bold">Delete {bulkDeleteTarget.items.length} selected activities?</h3>
-          <p>These activities will be removed from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore activities from the deleted activities list.</p>
+      {activeTab === 'items' && bulkDeleteTarget && bulkDeleteTarget.propertyId === activeProperty?.id && <Modal label={bulkDeleteTarget.permanent ? "Permanently delete catalogue activities" : "Delete selected catalogue activities"} busy={itemBusy} onClose={() => { if (!itemBusy) { setBulkDeleteTarget(null); setErrorMsg(null); } }} error={errorMsg}>
+        <div className="surface p-6 space-y-4">
+          <h3 className="text-lg font-bold">{bulkDeleteTarget.permanent ? 'Permanently delete' : 'Delete'} {bulkDeleteTarget.items.length} selected {deleteItemNoun}?</h3>
+          {bulkDeleteTarget.permanent ? <p className="notice notice-error">This permanently removes these catalogue records from {activeProperty?.name}. They cannot be restored. Only deleted activities with no saved bill or package links can be permanently deleted. An audit record is retained.</p> : <p>These activities will be removed from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore activities from the deleted activities list.</p>}
           <p className="text-sm text-slate-500">All selected activities are included, even those hidden by the current filters.</p>
           <ul className="max-h-60 overflow-y-auto space-y-1" aria-label="Activities to delete">{bulkDeleteTarget.items.map(item => <li key={item.id}><strong>{item.code}</strong> · {item.name}</li>)}</ul>
+          {bulkDeleteTarget.permanent && <label className="block" htmlFor="permanent-delete-confirmation">Type <strong>DELETE PERMANENTLY</strong> to confirm.
+            <input id="permanent-delete-confirmation" className="field-input w-full mt-2" autoComplete="off" spellCheck={false} disabled={itemBusy} value={permanentDeleteConfirmation} onChange={event => setPermanentDeleteConfirmation(event.target.value)} />
+          </label>}
           <div className="dialog-actions">
             <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setBulkDeleteTarget(null); setErrorMsg(null); }}>Cancel</button>
-            <button type="button" className="danger-button" disabled={itemBusy || !bulkDeleteTarget.items.length} onClick={handleBulkDeleteItems}>{itemBusy ? 'Deleting…' : `Delete ${bulkDeleteTarget.items.length} activities`}</button>
+            <button type="button" className="danger-button" disabled={itemBusy || !bulkDeleteTarget.items.length || (bulkDeleteTarget.permanent && permanentDeleteConfirmation !== 'DELETE PERMANENTLY')} onClick={handleBulkDeleteItems}>{itemBusy ? 'Deleting…' : `${bulkDeleteTarget.permanent ? 'Permanently delete' : 'Delete'} ${bulkDeleteTarget.items.length} ${deleteItemNoun}`}</button>
           </div>
         </div>
       </Modal>}
       {deleteItemTarget && <Modal label="Delete activity" busy={itemBusy} onClose={() => { if (!itemBusy) { setDeleteItemTarget(null); setErrorMsg(null); } }} error={errorMsg}>
-        <div className="p-6 space-y-4"><h3 className="text-lg font-bold">Delete {deleteItemTarget.name}?</h3><p>This removes the activity from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore it from the deleted activities list.</p><div className="flex gap-2"><button className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(null); setErrorMsg(null); }}>Cancel</button><button className="primary-button" disabled={itemBusy} onClick={handleDeleteItem}>{itemBusy ? 'Deleting…' : 'Delete activity'}</button></div></div>
+        <div className="surface p-6 space-y-4"><h3 className="text-lg font-bold">Delete {deleteItemTarget.name}?</h3><p>This removes the activity from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore it from the deleted activities list.</p><div className="flex gap-2"><button className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(null); setErrorMsg(null); }}>Cancel</button><button className="primary-button" disabled={itemBusy} onClick={handleDeleteItem}>{itemBusy ? 'Deleting…' : 'Delete activity'}</button></div></div>
       </Modal>}
 
       {/* MODAL: ADD / EDIT CATALOGUE ACTIVITY */}

@@ -4,6 +4,7 @@ import { withPropertyPayrollTransaction } from '../utils/payrollTransaction';
 import { catalogueSpreadsheetHeaders, catalogueSpreadsheetRow, CatalogueError, parseCatalogue, nextItemCode, itemCodeAllocator, safeSpreadsheetText } from '../services/catalogueTransfer';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
@@ -40,6 +41,42 @@ itemsRouter.post('/bulk-delete', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPE
     if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
     console.error('Bulk catalogue delete failed.');
     return res.status(500).json({ error: 'Could not delete the selected activities. Please try again.' });
+  }
+});
+
+class PermanentDeleteConflict extends Error {}
+const permanentDeleteSchema = bulkDeleteSchema.extend({ confirmation: z.literal('DELETE PERMANENTLY') });
+
+itemsRouter.post('/bulk-permanent-delete', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req, res) => {
+  const parsed = permanentDeleteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Select 1–200 different activities and type DELETE PERMANENTLY to confirm.' });
+  const { propertyId, itemIds } = parsed.data;
+  try {
+    const deletedCount = await withPropertyPayrollTransaction(prisma, propertyId, async tx => {
+      const property = await tx.property.findUnique({ where: { id: propertyId } });
+      if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
+      // FK inserts take key-share locks. Hold these rows until deletion and auditing
+      // commit so a concurrent package save cannot silently lose a service.
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Item" WHERE "propertyId" = ${propertyId} AND "id" IN (${Prisma.join(itemIds)}) ORDER BY "id" FOR UPDATE`);
+      const items = await tx.item.findMany({ where: { propertyId, id: { in: itemIds } }, include: { _count: { select: { billItems: true, packageItems: true } } } });
+      if (items.length !== itemIds.length) throw new PermanentDeleteConflict('Some selected activities are unavailable. Refresh the catalogue and select again.');
+      if (items.some(item => item.isActive)) throw new PermanentDeleteConflict('Delete activities normally first, then permanently delete them from Show deleted activities.');
+      if (items.some(item => item._count.billItems || item._count.packageItems)) throw new PermanentDeleteConflict('Activities used on saved bills or in packages cannot be permanently deleted. Remove package references first; billed activities must stay in history. No activities were deleted.');
+      const result = await tx.item.deleteMany({ where: { propertyId, id: { in: itemIds }, isActive: false } });
+      if (result.count !== items.length) throw new PermanentDeleteConflict('The selection changed. Refresh the catalogue and select again.');
+      for (const item of items) {
+        // Permanent deletion must roll back if its audit record cannot be saved.
+        await tx.auditLog.create({ data: { propertyId, userId: req.user!.id, action: 'ITEM_PERMANENT_DELETE', targetType: 'Item', targetId: item.id,
+          details: JSON.stringify({ code: item.code, name: item.name, permanent: true }), ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1' } });
+      }
+      return result.count;
+    });
+    return res.json({ deletedCount });
+  } catch (error) {
+    if (error instanceof PermanentDeleteConflict) return res.status(409).json({ error: error.message });
+    if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
+    console.error('Permanent catalogue deletion failed.');
+    return res.status(500).json({ error: 'Could not permanently delete the selected activities. No activities were deleted.' });
   }
 });
 
@@ -106,12 +143,12 @@ itemsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       }),
       prisma.item.findMany({
         where: { propertyId, ...(includeInactive ? {} : { isActive: true }) },
-        include: { category: true, _count: { select: { billItems: true } } },
+        include: { category: true, _count: { select: { billItems: true, packageItems: true } } },
         orderBy: [{ categoryId: 'asc' }, { name: 'asc' }],
       }),
     ]);
 
-    return res.json({ categories, items: items.filter(item => item.category.propertyId === propertyId).map(({ _count, ...item }) => ({ ...item, hasBillHistory: _count.billItems > 0 })) });
+    return res.json({ categories, items: items.filter(item => item.category.propertyId === propertyId).map(({ _count, ...item }) => ({ ...item, hasBillHistory: _count.billItems > 0, hasPackageUsage: _count.packageItems > 0 })) });
   } catch (error) {
     console.error('Fetch items error:', error);
     return res.status(500).json({ error: 'Failed to fetch items catalogue.' });

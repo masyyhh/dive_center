@@ -163,3 +163,5 @@ allocates it across bill lines so saved discounts, percentage commission pools,
 reports and exports agree with checkout. Fixed staff payments still follow their
 catalogue rates. The percentage is kept in the browser draft, shown at review,
 and recorded in the bill creation audit entry. No new database migration is needed.
+
+Catalogue deletion options: normal Delete archives an activity and allows restoration. Under Show deleted activities, Delete permanently removes unused archived activities after typing `DELETE PERMANENTLY`; selected batches are supported up to 200 activities. Items referenced by any saved bill or package cannot be permanently deleted. Each batch either completes entirely or changes nothing, and permanent-deletion audit records are retained.

@@ -76,6 +76,7 @@ export interface Item {
   includesComplimentaryMedia: boolean;
   isActive: boolean;
   hasBillHistory?: boolean;
+  hasPackageUsage?: boolean;
 }
 
 export interface BillItem {
