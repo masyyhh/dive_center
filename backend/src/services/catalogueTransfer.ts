@@ -8,7 +8,7 @@ export const catalogueSpreadsheetHeaders = [
   'Item Code', 'Service Name', 'Category', 'Price', 'Pool', 'Pool Rate (%)',
   'Certifications Amount / Unit', 'Seller Payment / Unit', 'Guide Payment / Unit',
   'Instructor Payment / Unit', 'Photographer Payment / Unit', 'Videographer Payment / Unit',
-  'Include Photo ($57.50)', 'Status',
+  'Include Photo ($41.975)', 'Status',
 ];
 export const cataloguePoolLabels: Record<string, string> = { COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', CERTIFICATION_POOL: 'Certifications', NONE: 'No pool' };
 
@@ -51,7 +51,9 @@ export const parseCatalogue = async (content: string, format: 'csv' | 'xlsx'): P
     return /^'+[\s\x00-\x1f]*[=+\-@]/.test(value) ? value.slice(1) : value;
   };
   const matches = (headers: string[]) => headers.every((header, index) => text(1, index + 1).toLowerCase() === header.toLowerCase()) && !cells[0].slice(headers.length).some(Boolean);
-  const labelled = matches(catalogueSpreadsheetHeaders) || matches(catalogueSpreadsheetHeaders.map(header => header === 'Include Photo ($57.50)' ? 'Complimentary Photo / Video' : header));
+  const labelled = matches(catalogueSpreadsheetHeaders) ||
+    matches(catalogueSpreadsheetHeaders.map(header => header === 'Include Photo ($41.975)' ? 'Include Photo ($57.50)' : header)) ||
+    matches(catalogueSpreadsheetHeaders.map(header => header === 'Include Photo ($41.975)' ? 'Complimentary Photo / Video' : header));
   if (!labelled && !matches(catalogueHeaders)) throw new CatalogueError('Use the downloaded catalogue template, or the original six-column catalogue format. Keep column names and order unchanged.');
   const rows: CatalogueRow[] = [];
   const codes = new Set<string>();
@@ -89,7 +91,7 @@ export const parseCatalogue = async (content: string, format: 'csv' | 'xlsx'): P
         if (payment !== undefined) personalRates[role] = payment;
       }
       const media = values[12].toLowerCase();
-      if (media && !['yes', 'no', 'true', 'false', '1', '0'].includes(media)) throw new CatalogueError(`Row ${row}: Include Photo ($57.50) must be Yes or No, or blank to retain the existing setting.`);
+      if (media && !['yes', 'no', 'true', 'false', '1', '0'].includes(media)) throw new CatalogueError(`Row ${row}: Include Photo ($41.975) must be Yes or No, or blank to retain the existing setting.`);
       commission = { poolType: selectedPool, poolContribution: percentage ? rate! : selectedPool === 'CERTIFICATION_POOL' ? fixed! : 0,
         personalRates, ...(media ? { includesComplimentaryMedia: ['yes', 'true', '1'].includes(media) } : {}) };
     } else {

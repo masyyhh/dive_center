@@ -7,9 +7,24 @@ import { calculateCommissionForPeriod } from '../services/commissionService';
 import { generateDailyExcelReport, generateMonthlyExcelWorkbook } from '../services/excelService';
 import { logAuditEvent } from '../services/auditService';
 
+import { globalDashboard } from '../services/globalDashboard';
 import { isBusinessDate, isYearMonth, isDateRange } from '../utils/dates';
 
 export const reportsRouter = Router();
+
+// Cross-property financial and operational overview is restricted to global administrators.
+reportsRouter.get('/global-dashboard', requireAuth, requireRole('GLOBAL_ADMIN'), async (req, res) => {
+  const { startDate, endDate } = req.query;
+  if (!isDateRange(startDate, endDate) || (Date.parse(String(endDate)) - Date.parse(String(startDate))) / 86400000 >= 366) {
+    return res.status(400).json({ error: 'Choose a valid date range of up to 366 days.' });
+  }
+  try {
+    return res.json(await globalDashboard(String(startDate), String(endDate)));
+  } catch (error) {
+    console.error('Global dashboard error:', error);
+    return res.status(500).json({ error: 'Unable to load the global dashboard. Please try again.' });
+  }
+});
 
 reportsRouter.get('/commission-breakdown', requireAuth, requirePropertyAccess('query'), async (req, res) => {
   const { propertyId, staffId, startDate, endDate } = req.query;

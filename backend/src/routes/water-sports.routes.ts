@@ -28,16 +28,37 @@ const handle = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: 
 waterSportsRouter.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 waterSportsRouter.get('/documents', requireAuth, requirePropertyAccess(), handle(async (req, res) => {
-  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['PARTICIPATION', 'SNORKELING']) }).safeParse(req.query);
+  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING']) }).safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: 'Choose a property and disclaimer.' });
   return res.json({ documents: await availableDocuments(parsed.data.propertyId, parsed.data.kind) });
 }));
 waterSportsRouter.post('/documents', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), handle(async (req, res) => {
-  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['PARTICIPATION', 'SNORKELING']), language: languageSchema, languageName: z.string().trim().min(1).max(80), title: z.string().trim().min(1).max(200), body: z.string().trim().min(100).max(30000) }).strict().safeParse(req.body);
+  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING']), language: languageSchema, languageName: z.string().trim().min(1).max(80), title: z.string().trim().min(1).max(200), body: z.string().trim().min(100).max(30000) }).strict().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Enter a language code, language name, title and complete disclaimer text (100–30,000 characters).' });
   const document = await prisma.waterSportsDocument.create({ data: { ...parsed.data, createdById: req.user!.id } });
   await logAuditEvent({ req, propertyId: document.propertyId, action: 'WATER_SPORTS_DOCUMENT_PUBLISH', targetType: 'WaterSportsDocument', targetId: document.id, details: { language: document.language, kind: document.kind } });
   return res.status(201).json(document);
+}));
+// Staff-only operational overview; capability tokens and guest lookup candidates are never returned.
+waterSportsRouter.get('/overview', requireAuth, requirePropertyAccess(), handle(async (req, res) => {
+  const parsed = propertySchema.safeParse(req.query.propertyId);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose a property.' });
+  const propertyId = parsed.data;
+  const pendingWhere = { propertyId, revokedAt: null, expiresAt: { gt: new Date() }, record: { is: null } };
+  const [property, pendingCount, pending, signedToday, totalSigned, diving, snorkeling, equipment] = await Promise.all([
+    prisma.property.findUnique({ where: { id: propertyId } }),
+    prisma.waterSportsSession.count({ where: pendingWhere }),
+    prisma.waterSportsSession.findMany({ where: pendingWhere, orderBy: { createdAt: 'desc' }, take: 20,
+      select: { id: true, formType: true, roomNumber: true, createdAt: true, expiresAt: true, lookupCount: true } }),
+    prisma.waterSportsRecord.count({ where: { propertyId, businessDate: businessToday() } }),
+    prisma.waterSportsRecord.count({ where: { propertyId } }),
+    availableDocuments(propertyId, 'DIVING'), availableDocuments(propertyId, 'SNORKELING'), availableDocuments(propertyId, 'PARTICIPATION'),
+  ]);
+  if (!property?.isActive || property.deletedAt) return res.status(409).json({ error: 'Choose an active property.' });
+  const codes = property.pmsPropertyCodes.length ? property.pmsPropertyCodes : [property.pmsPropertyCode || property.code];
+  return res.json({ businessDate: businessToday(), pendingCount, pending, signedToday, totalSigned,
+    readiness: { pmsPropertyConfigured: z.array(pmsPropertyCodeSchema).min(1).max(7).safeParse(codes).success,
+      documents: { DIVE_PARTICIPATION: diving.length, SNORKELING: snorkeling.length, GEAR_RENTAL: equipment.length, AID_GEAR: equipment.length } } });
 }));
 waterSportsRouter.post('/sessions', requireAuth, requirePropertyAccess('body'), handle(async (req, res) => {
   const parsed = z.object({ propertyId: propertySchema, formType: formTypeSchema, roomNumber: roomSchema, staffFields: staffFieldsSchema }).strict().safeParse(req.body);

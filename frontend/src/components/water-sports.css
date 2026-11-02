@@ -42,3 +42,24 @@
  .ws-record .ws-signature-image { width: 400px; break-inside: avoid; }
  .ws-record small { font-size: 9px; }
 }
+
+.dc-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) auto; gap:16px; align-items:center; margin:24px 0; }
+.dc-summary > div { display:grid; gap:6px; padding:20px; border:1px solid var(--border); border-radius:14px; background:var(--surface); }
+.dc-summary strong { font-size:32px; line-height:1.1; }
+.dc-summary span, .dc-summary small { color:var(--muted); }
+.dc-readiness { padding:20px; background:var(--soft); border-radius:12px; margin:20px 0; }
+.dc-readiness h3 { margin-top:0; }
+.dc-readiness ul { list-style:none; padding:0; display:grid; gap:10px; }
+.dc-readiness li[data-ready="true"] { color:var(--ink); }
+.dc-readiness li[data-ready="false"] { color:var(--muted); }
+.dc-progress { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; list-style:none; margin:28px 0 16px; padding:0; }
+.dc-progress li { display:grid; gap:8px; font-size:14px; color:var(--muted); border-top:3px solid var(--border); padding-top:14px; }
+.dc-progress li > span { display:grid; place-items:center; height:30px; width:30px; background:var(--soft); border-radius:50%; font-weight:700; }
+.dc-progress li[aria-current="step"], .dc-progress li[data-complete="true"] { color:var(--ink); border-color:var(--accent); }
+.dc-progress li[aria-current="step"] { font-weight:700; }
+.dc-time, .dc-help { color:var(--muted); font-size:14px; line-height:1.6; }
+.dc-next { margin-top:18px; }
+.dc-completion > span { display:grid; place-items:center; height:54px; width:54px; border-radius:50%; background:var(--surface); font-size:30px; }
+@media (max-width:800px) { .dc-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } .dc-summary > button { grid-column:1/-1; } }
+@media (max-width:480px) { .dc-summary { gap:8px; } .dc-summary > div { padding:12px; } .dc-summary strong { font-size:26px; } .dc-summary small { display:none; } .dc-summary span { font-size:12px; } .dc-progress { gap:8px; } .ws-tablet .dc-next { width:100%; } }
+@media print { .dc-summary { display:none; } }

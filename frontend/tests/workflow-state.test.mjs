@@ -113,3 +113,11 @@ test('logout clears an already expired or revoked session', async () => {
   globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Session expired.' }), { status: 401 });
   await revokeSession(); assert.equal(store.has('dcm_auth_token'), false);
 });
+
+test('checkout percentage restores with the draft and older drafts remain compatible', () => {
+  const discounted = { ...draft, checkoutDiscountPercent: '12.5' };
+  globalThis.sessionStorage = { getItem: () => JSON.stringify(discounted) };
+  assert.deepEqual(loadBillDraft('checkout-draft'), discounted);
+  assert.equal(isBillDraft(draft), true);
+  assert.equal(isBillDraft({ ...draft, checkoutDiscountPercent: 12.5 }), false);
+});

@@ -1,0 +1,125 @@
+name: Release to testing
+on:
+  workflow_run:
+    workflows: [Application checks]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: dive-testing-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      vars.CD_ENABLED == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      manifest: ${{ steps.manifest.outputs.json }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Publish the exact checked commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_USER: ${{ github.actor }}
+          RELEASE: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE" =~ ^[a-f0-9]{40}$ ]]
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          for service in backend web; do
+            args=()
+            if [ "$service" = web ]; then
+              args+=(--build-arg VITE_DEPLOYMENT_MODE=live --build-arg VITE_ENABLE_WATER_SPORTS=false)
+            fi
+            docker buildx build --platform linux/amd64 --push \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$RELEASE" \
+              --tag "ghcr.io/masyyhh/dive_center-$service:sha-$RELEASE" \
+              --metadata-file "$RUNNER_TEMP/$service.json" \
+              "${args[@]}" "$service"
+          done
+      - name: Record immutable release
+        id: manifest
+        env:
+          RELEASE: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          value={'release':os.environ['RELEASE'], 'run_id':os.environ['GITHUB_RUN_ID']}
+          for service in ['backend','web']:
+              digest=json.loads((Path(os.environ['RUNNER_TEMP'])/(service+'.json')).read_text())['containerimage.digest']
+              if not re.fullmatch(r'sha256:[a-f0-9]{64}',digest): raise SystemExit('Invalid published digest')
+              value[service]='ghcr.io/masyyhh/dive_center-'+service+'@'+digest
+          Path('release.json').write_text(json.dumps(value,indent=2))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as stream: stream.write('json='+json.dumps(value)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: release.json
+          retention-days: 90
+          if-no-files-found: error
+  testing:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: testing
+      url: https://diving-staging.ssrsys.com
+    timeout-minutes: 60
+    steps:
+      - name: Connect privately to testing
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TEST_TS_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TEST_TS_CLIENT_SECRET }}
+          tags: tag:dive-ci-testing
+          ping: ${{ vars.TEST_TAILSCALE_IP }}
+      - name: Deploy immutable images to testing
+        env:
+          MANIFEST: ${{ needs.publish.outputs.manifest }}
+          DEPLOY_KEY: ${{ secrets.TEST_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.TEST_TAILSCALE_IP }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          key="$RUNNER_TEMP/testing-key"
+          hosts="$RUNNER_TEMP/testing-known-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts"
+          printf '%s\n' "$MANIFEST" | ssh -T -i "$key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+            "dive-deploy@$DEPLOY_HOST"
+      - name: Verify testing through HTTPS proxy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 10 --max-time 30 \
+            https://diving-staging.ssrsys.com/api/ready | tee "$RUNNER_TEMP/ready.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"]=="ready"' "$RUNNER_TEMP/ready.json"
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            https://diving-staging.ssrsys.com/environment.js | grep -F '"testing"'
+      - name: Record testing result
+        env:
+          MANIFEST: ${{ needs.publish.outputs.manifest }}
+        run: |
+          printf '### Testing release ready for review\n\n```json\n%s\n```\n\nPromote using release run ID **%s** after manual acceptance testing.\n' \
+            "$MANIFEST" "$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"

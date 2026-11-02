@@ -13,7 +13,7 @@ export function calculateCommissionPreview(input: {
   const gross = price * quantity;
   const discountAmount = gross * discount / 100;
   const serviceTotal = gross - discountAmount;
-  const photoCharge = combinedMedia ? 57.5 * quantity : 0;
+  const photoCharge = combinedMedia ? 41.975 * quantity : 0;
   const billSubtotal = serviceTotal + photoCharge;
   const poolAmount = percentage ? serviceTotal * poolRate / 100 : poolType === 'CERTIFICATION_POOL' ? poolRate * quantity : 0;
   const payments = selected.map(row => ({ role: row.role as string, unitRate: Number(row.amount), amount: Number(row.amount) * quantity }));

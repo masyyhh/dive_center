@@ -1,13 +1,20 @@
-import type { BillItem, Item } from '../types';
+import type { BillItem, Item, DivePackage } from '../types';
 import { billPersonalRates } from './personalRates';
 
 const makeId = () => crypto.randomUUID();
 const total = (line: BillItem) => line.unitPrice * line.quantity * (1 - line.discountPercent / 100);
 
+export interface AutoPhotoRates {
+  price?: number;
+  commission?: number;
+}
+
 /** Rebuild activity/photo pairs, including older drafts from the bundled-payment workflow. */
-export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], id = makeId): BillItem[] {
+export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], id = makeId, rates?: AutoPhotoRates): BillItem[] {
   const photos = new Map(lines.filter(line => line.autoPhotoFor).map(line => [line.autoPhotoFor!, line]));
   const result: BillItem[] = [];
+  const photoPrice = rates?.price ?? 41.975;
+  const photoCommission = rates?.commission ?? 4.5;
   for (const original of lines.filter(line => !line.autoPhotoFor)) {
     const item = catalogue.find(item => item.id === original.itemId);
     const included = item?.includesComplimentaryMedia ?? original.includesComplimentaryMedia ?? false;
@@ -28,8 +35,8 @@ export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], i
       const photo: BillItem = {
         clientLineId: previous?.clientLineId || id(), autoPhotoFor: key, itemId: null,
         itemName: 'Photo', categoryName: 'Photo & Video', quantity: parent.quantity,
-        unitPrice: 57.5, discountPercent: previous?.discountPercent ?? 0, lineTotal: 0,
-        personalCommissionsJson: '{"photo":4.5}', includesComplimentaryMedia: false,
+        unitPrice: photoPrice, discountPercent: previous?.discountPercent ?? 0, lineTotal: 0,
+        personalCommissionsJson: JSON.stringify({ photo: photoCommission }), includesComplimentaryMedia: false,
         photoStaffId: previous?.photoStaffId || legacyPhotographer || null,
         sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
       };
@@ -40,24 +47,53 @@ export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], i
   return result;
 }
 
-export function addActivityWithPhoto(lines: BillItem[], item: Item, catalogue: Item[], id = makeId): BillItem[] {
+export function addActivityWithPhoto(lines: BillItem[], item: Item, catalogue: Item[], id = makeId, rates?: AutoPhotoRates): BillItem[] {
   const roots = lines.map(line => ({ ...line }));
   const existing = roots.find(line => !line.autoPhotoFor && line.itemId === item.id);
   if (existing) existing.quantity++;
   else roots.push({ clientLineId: id(), itemId: item.id, itemName: item.name, categoryName: item.category?.name || 'General',
     quantity: 1, unitPrice: item.price, discountPercent: 0, lineTotal: item.price,
     includesComplimentaryMedia: item.includesComplimentaryMedia, personalCommissionsJson: billPersonalRates(item) });
-  const result = normalizeAutomaticPhotos(roots, catalogue, id);
+  const result = normalizeAutomaticPhotos(roots, catalogue, id, rates);
   if (result.length > 200) throw new Error('A bill can contain up to 200 lines, including automatically added Photos.');
   return result;
 }
 
-export function updateLinkedQuantity(lines: BillItem[], index: number, delta: number, catalogue: Item[]): BillItem[] {
+export function addPackageWithPhoto(
+  lines: BillItem[],
+  pkg: DivePackage,
+  catalogue: Item[],
+  id = makeId,
+  rates?: AutoPhotoRates
+): BillItem[] {
+  const roots = lines.map(line => ({ ...line }));
+  for (const pkgItem of pkg.items) {
+    const item = catalogue.find(c => c.id === pkgItem.itemId);
+    if (!item || item.isActive === false) throw new Error('A package item is unavailable. Refresh the catalogue before adding this package.');
+    roots.push({
+      clientLineId: id(),
+      itemId: item.id,
+      itemName: item.name,
+      categoryName: item.category?.name || 'Package',
+      quantity: pkgItem.quantity,
+      unitPrice: item.price,
+      discountPercent: 0,
+      lineTotal: item.price * pkgItem.quantity,
+      includesComplimentaryMedia: item.includesComplimentaryMedia,
+      personalCommissionsJson: billPersonalRates(item),
+    });
+  }
+  const result = normalizeAutomaticPhotos(roots, catalogue, id, rates);
+  if (result.length > 200) throw new Error('A bill can contain up to 200 lines, including automatically added Photos.');
+  return result;
+}
+
+export function updateLinkedQuantity(lines: BillItem[], index: number, delta: number, catalogue: Item[], rates?: AutoPhotoRates): BillItem[] {
   const target = lines[index];
   const key = target.autoPhotoFor || target.clientLineId;
   const updated = lines.map((line, position) => !line.autoPhotoFor && (key ? line.clientLineId === key : position === index)
     ? { ...line, quantity: Math.max(1, line.quantity + delta) } : { ...line });
-  return normalizeAutomaticPhotos(updated, catalogue);
+  return normalizeAutomaticPhotos(updated, catalogue, makeId, rates);
 }
 
 export function removeActivityWithPhoto(lines: BillItem[], index: number): BillItem[] {

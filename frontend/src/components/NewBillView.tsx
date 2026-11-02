@@ -1,8 +1,9 @@
+import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
 import { nationalityCountries as countries } from '../utils/nationalities';
-import { addActivityWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity } from '../utils/automaticPhotos';
+import { addActivityWithPhoto, addPackageWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity } from '../utils/automaticPhotos';
 import { guestBillFields } from '../utils/pmsGuests';
 import { useMonthLock } from '../hooks/useMonthLock';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { useUnsavedChanges } from '../context/NavigationContext';
 import { BillDraft, billDraftKey, loadBillDraft } from '../utils/billDraft';
@@ -11,7 +12,7 @@ import { businessToday, displayDate, isBusinessDate } from '../utils/dates';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { apiFetch, ApiError } from '../services/api';
-import { Item, Category, StaffMember, BillItem, PmsGuest } from '../types';
+import { Item, Category, StaffMember, BillItem, PmsGuest, DivePackage } from '../types';
 import {
   Search,
   Plus,
@@ -24,6 +25,7 @@ import {
   UserCheck,
   ChevronRight,
   Receipt,
+  Package,
 } from 'lucide-react';
 
 interface NewBillViewProps {
@@ -44,9 +46,10 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const [checkEdited, setCheckEdited] = useState(restoredDraft?.checkEdited || false);
   const [nextCheck, setNextCheck] = useState(1001);
 
-  // Catalogue state
+  // Catalogue & Packages state
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [packages, setPackages] = useState<DivePackage[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -54,6 +57,11 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const [staffNotice, setStaffNotice] = useState('');
   const [loadedStaffKey, setLoadedStaffKey] = useState('');
   const [staffReload, setStaffReload] = useState(0);
+
+  const photoRates = useMemo(() => ({
+    price: activeProperty?.autoPhotoPrice,
+    commission: activeProperty?.autoPhotoCommission,
+  }), [activeProperty?.autoPhotoPrice, activeProperty?.autoPhotoCommission]);
 
   // Bill state
   const [checkNumber, setCheckNumber] = useState<number>(restoredDraft?.checkNumber ?? 1001);
@@ -65,6 +73,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const [guestName, setGuestName] = useState<string>(restoredDraft?.guestName ?? '');
   const [departureDate, setDepartureDate] = useState<string>(restoredDraft?.departureDate ?? '');
   const [nationality, setNationality] = useState<string>(restoredDraft?.nationality ?? 'Other');
+  const [checkoutDiscountValue, setCheckoutDiscountValue] = useState(restoredDraft?.checkoutDiscountPercent ?? '');
   const [tipAmount, setTipAmount] = useState<number>(restoredDraft?.tipAmount ?? 0);
   const [tipStaffIds, setTipStaffIds] = useState<string[]>(restoredDraft?.tipStaffIds ?? []);
   const [billLines, setBillLines] = useState<BillItem[]>(restoredDraft?.billLines ?? []);
@@ -89,20 +98,20 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
-  const dirty = billLines.length > 0 || Boolean(roomNumber || guestName || departureDate || notes) || nationality !== 'Other' || tipAmount > 0 || tipStaffIds.length > 0 || checkEdited || businessDate !== businessToday();
+  const dirty = checkoutDiscountValue !== '' || billLines.length > 0 || Boolean(roomNumber || guestName || departureDate || notes) || nationality !== 'Other' || tipAmount > 0 || tipStaffIds.length > 0 || checkEdited || businessDate !== businessToday();
   const releaseGuard = useUnsavedChanges(dirty, saving ? 'Your bill is being saved. Please wait for confirmation.' : draftError ? 'Your bill has unsaved changes. Draft storage is unavailable; leaving will lose this work.' : 'This bill has not been submitted. Its draft is kept in this browser tab for this account and property.', saving);
   useEffect(() => {
     try {
       if (dirty) {
-        const draft: BillDraft = { version: 1, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited };
+        const draft: BillDraft = { version: 1, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountPercent: checkoutDiscountValue };
         sessionStorage.setItem(draftKey, JSON.stringify(draft));
       } else { sessionStorage.removeItem(draftKey); setRestored(false); }
       setDraftError(false);
     } catch { setDraftError(true); }
-  }, [draftKey, dirty, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited]);
+  }, [draftKey, dirty, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountValue]);
   const discardDraft = () => {
     setBillLines([]); setRoomNumber(''); setGuestName(''); setDepartureDate(''); setNationality('Other');
-    setTipAmount(0); setTipStaffIds([]); setNotes(''); setBusinessDate(businessToday()); setCheckNumber(nextCheck);
+    setCheckoutDiscountValue(''); setTipAmount(0); setTipStaffIds([]); setNotes(''); setBusinessDate(businessToday()); setCheckNumber(nextCheck);
     setCheckEdited(false); setRestored(false); setAttemptedReview(false); setErrorMsg(null); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); cancelPmsLookup(); setDiscardOpen(false);
   };
   // Load the catalogue and next check number
@@ -113,18 +122,22 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
       setSetupLoading(true);
       setErrorMsg(null);
       try {
-        const [itemsData, nextCheckData] = await Promise.all([
+        const [itemsData, nextCheckData, packagesData] = await Promise.all([
           apiFetch<{ categories: Category[]; items: Item[] }>(
             `/items?propertyId=${activeProperty.id}`
           ),
           apiFetch<{ nextCheckNumber: number }>(
             `/bills/next-check?propertyId=${activeProperty.id}`
           ),
+          apiFetch<{ packages: DivePackage[] }>(
+            `/packages?propertyId=${activeProperty.id}`
+          ).catch(() => ({ packages: [] })),
         ]);
 
         setCategories(itemsData.categories);
         setItems(itemsData.items);
-        setBillLines(lines => normalizeAutomaticPhotos(lines, itemsData.items));
+        setPackages(packagesData.packages || []);
+        setBillLines(lines => normalizeAutomaticPhotos(lines, itemsData.items, undefined, photoRates));
         setNextCheck(nextCheckData.nextCheckNumber);
         if (!restoredDraft) setCheckNumber(nextCheckData.nextCheckNumber);
       } catch (err) {
@@ -211,13 +224,18 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     setGuestPickerOpen(false); setPmsMessage(`Loaded ${guest.fullName} from PMS (${guest.propertyCode}). You can edit the details below.`);
   };
 
-  // Included activities add a linked Photo line at $57.50 per service unit.
+  // Included activities add a linked Photo line at property autoPhotoPrice per service unit.
   const handleAddItem = (item: Item) => {
-    try { setBillLines(addActivityWithPhoto(billLines, item, items)); setErrorMsg(null); }
+    try { setBillLines(addActivityWithPhoto(billLines, item, items, undefined, photoRates)); setErrorMsg(null); }
     catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not add the activity.'); }
   };
 
-  const updateQuantity = (index: number, delta: number) => setBillLines(lines => updateLinkedQuantity(lines, index, delta, items));
+  const handleAddPackage = (pkg: DivePackage) => {
+    try { setBillLines(addPackageWithPhoto(billLines, pkg, items, undefined, photoRates)); setErrorMsg(null); }
+    catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not add the package.'); }
+  };
+
+  const updateQuantity = (index: number, delta: number) => setBillLines(lines => updateLinkedQuantity(lines, index, delta, items, photoRates));
 
   const updateDiscount = (index: number, discountPercent: number) => {
     const updated = [...billLines];
@@ -252,11 +270,17 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   const scRate = activeProperty?.serviceChargeRate ?? 10.0;
   const taxRate = activeProperty?.taxRate ?? 16.0;
 
+  const checkoutDiscountPercent = checkoutDiscountValue === '' ? 0 : Number(checkoutDiscountValue);
+  const checkoutPreview = useMemo(() => {
+    try { return { ...applyCheckoutDiscount(billLines, checkoutDiscountPercent), error: '' }; }
+    catch (error) { return { lines: billLines, amount: 0, subtotal: 0, error: error instanceof Error ? error.message : 'Enter a valid checkout discount.' }; }
+  }, [billLines, checkoutDiscountValue]);
   const grossAmount = billLines.reduce((acc, l) => acc + l.unitPrice * l.quantity, 0);
-  const discountAmount = billLines.reduce(
+  const lineDiscountAmount = billLines.reduce(
     (acc, l) => acc + (l.unitPrice * l.quantity * l.discountPercent) / 100,
     0
   );
+  const discountAmount = lineDiscountAmount + checkoutPreview.amount;
   const netBeforeCharges = grossAmount - discountAmount;
   const serviceChargeAmount = (netBeforeCharges * scRate) / 100;
   const taxAmount = ((netBeforeCharges + serviceChargeAmount) * taxRate) / 100;
@@ -275,8 +299,20 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     return matchesCat && matchesQuery;
   });
 
+  const filteredPackages = packages.filter((pkg) => {
+    if (!pkg.isActive) return false;
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      pkg.name.toLowerCase().includes(q) ||
+      pkg.code.toLowerCase().includes(q) ||
+      (pkg.description || '').toLowerCase().includes(q)
+    );
+  });
+
   const handleSaveBill = async () => {
     if (!activeProperty || monthLock.locked !== false) return;
+    if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); return; }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before saving.'); return; }
     setErrorMsg(null);
 
@@ -308,6 +344,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
           tipAmount: Number(tipAmount) || 0,
           tipStaffIds,
           items: billLines,
+          checkoutDiscountPercent,
           notes,
         }),
       });
@@ -326,6 +363,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   const reviewBill = () => {
     setAttemptedReview(true); setErrorMsg(null);
+    if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); document.getElementById('checkout-discount')?.focus(); return; }
     if (!isBusinessDate(businessDate)) { document.getElementById('bill-business-date')?.focus(); return; }
     if (!roomNumber.trim() || !guestName.trim()) {
       document.getElementById(!roomNumber.trim() ? 'bill-room' : 'bill-guest')?.focus();
@@ -414,7 +452,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                 1. Choose activities
               </h2>
               <span className="text-sm text-slate-400">
-                {filteredItems.length} items available
+                {selectedCategory === 'PACKAGES' ? `${filteredPackages.length} packages available` : `${filteredItems.length} items available`}
               </span>
             </div>
 
@@ -456,54 +494,149 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                   {c.name}
                 </button>
               ))}
+              {packages.length > 0 && (
+                <button
+                  onClick={() => setSelectedCategory('PACKAGES')}
+                  className={`px-3 py-1 rounded-lg text-sm font-semibold transition flex items-center gap-1.5 ${
+                    selectedCategory === 'PACKAGES'
+                      ? 'bg-sky-500 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Dive Packages ({packages.length})</span>
+                </button>
+              )}
             </div>
 
-            {setupLoading ? <div className="empty-state" role="status"><p>Loading your catalogue…</p></div> : filteredItems.length === 0 && <div className="empty-state"><Receipt size={28} /><h3>{items.length ? 'No matching activities' : 'Your catalogue is empty'}</h3><p>{items.length ? 'Try another search or category.' : canManage ? 'Add your activities and prices to make this property ready for billing.' : 'Ask your property manager to add activities and prices in Administration → Catalogue.'}</p>{!items.length && canManage && <button className="primary-button" onClick={onSetup}>Set up catalogue</button>}{items.length > 0 && <button className="text-button" onClick={() => { setSearchQuery(''); setSelectedCategory('ALL'); }}>Clear search & filters</button>}</div>}
-            {/* Item List */}
-            <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-              {filteredItems.map((item) => {
-                const hasPersonalRoles = item.includesComplimentaryMedia || Boolean(item.personalRoles && item.personalRoles.trim().length > 0);
-                return (
-                  <button
-                    type="button"
-                    aria-label={`Add ${item.name} to bill`}
-                    key={item.id}
-                    onClick={() => handleAddItem(item)}
-                    className="catalogue-item p-3 rounded-xl border border-slate-200 dark:border-slate-800/80 hover:border-sky-400 dark:hover:border-sky-500 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-sky-50/40 dark:hover:bg-sky-950/30 transition cursor-pointer flex items-center justify-between group w-full text-left"
-                  >
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-xs text-slate-400 font-semibold">
-                          {item.code}
-                        </span>
-                        {hasPersonalRoles && (
-                          <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                            {item.includesComplimentaryMedia ? 'Adds Photo $57.50 · team commission $4.50' : `Commission: ${item.personalRoles}`}
-                          </span>
-                        )}
-                        {item.poolType !== 'NONE' && (
-                          <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-                            {item.poolType === 'COURSE_POOL' ? `Course Pool ${item.poolContribution}%` : item.poolType === 'CERTIFICATION_POOL' ? 'Certifications Pool' : `Dive Pool ${item.poolContribution}%`}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition">
-                        {item.name}
-                      </div>
-                    </div>
+            {selectedCategory === 'PACKAGES' ? (
+              <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                {filteredPackages.length === 0 ? (
+                  <div className="empty-state">
+                    <Package size={28} />
+                    <h3>No matching dive packages</h3>
+                    <p>Try clearing your search or create new packages in Administration → Dive Packages.</p>
+                  </div>
+                ) : (
+                  filteredPackages.map((pkg) => {
+                    const totalStandard = pkg.items.reduce((sum, pi) => {
+                      const it = items.find(i => i.id === pi.itemId) || pi.item;
+                      return sum + (it?.price || 0) * pi.quantity;
+                    }, 0);
 
-                    <div className="text-right flex items-center space-x-2">
-                      <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                        {formatMoney(item.price, currencySymbol)}
-                      </span>
-                      <div className="w-6 h-6 rounded-lg bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                        <Plus className="w-3.5 h-3.5" />
+                    return (
+                      <div
+                        key={pkg.id}
+                        className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/40 hover:border-sky-400 dark:hover:border-sky-500 transition space-y-2.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300">
+                              {pkg.code}
+                            </span>
+                            <h4 className="font-bold text-slate-900 dark:text-white mt-1 text-sm">
+                              {pkg.name}
+                            </h4>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-base font-bold text-sky-600 dark:text-sky-400 font-mono">
+                              {formatMoney(totalStandard, currencySymbol)}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              +tax & SC at checkout
+                            </div>
+                          </div>
+                        </div>
+
+                        {pkg.description && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {pkg.description}
+                          </p>
+                        )}
+
+                        <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1 bg-white dark:bg-slate-900/60 p-2 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                            Included in package:
+                          </div>
+                          {pkg.items.map((pi, idx) => {
+                            const it = items.find(i => i.id === pi.itemId) || pi.item;
+                            return (
+                              <div key={idx} className="flex justify-between text-xs text-slate-700 dark:text-slate-300">
+                                <span><strong className="text-sky-600 dark:text-sky-400">{pi.quantity}×</strong> {it?.name || 'Catalogue item'}</span>
+                                <span className="font-mono text-slate-400">{formatMoney((it?.price || 0) * pi.quantity, currencySymbol)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 text-xs">
+                          <div>
+                            <span className="text-slate-400 text-xs">Total of included items</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddPackage(pkg)}
+                            className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Package to Bill</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <>
+                {setupLoading ? <div className="empty-state" role="status"><p>Loading your catalogue…</p></div> : filteredItems.length === 0 && <div className="empty-state"><Receipt size={28} /><h3>{items.length ? 'No matching activities' : 'Your catalogue is empty'}</h3><p>{items.length ? 'Try another search or category.' : canManage ? 'Add your activities and prices to make this property ready for billing.' : 'Ask your property manager to add activities and prices in Administration → Catalogue.'}</p>{!items.length && canManage && <button className="primary-button" onClick={onSetup}>Set up catalogue</button>}{items.length > 0 && <button className="text-button" onClick={() => { setSearchQuery(''); setSelectedCategory('ALL'); }}>Clear search & filters</button>}</div>}
+                {/* Item List */}
+                <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                  {filteredItems.map((item) => {
+                    const hasPersonalRoles = item.includesComplimentaryMedia || Boolean(item.personalRoles && item.personalRoles.trim().length > 0);
+                    return (
+                      <button
+                        type="button"
+                        aria-label={`Add ${item.name} to bill`}
+                        key={item.id}
+                        onClick={() => handleAddItem(item)}
+                        className="catalogue-item p-3 rounded-xl border border-slate-200 dark:border-slate-800/80 hover:border-sky-400 dark:hover:border-sky-500 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-sky-50/40 dark:hover:bg-sky-950/30 transition cursor-pointer flex items-center justify-between group w-full text-left"
+                      >
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-mono text-xs text-slate-400 font-semibold">
+                              {item.code}
+                            </span>
+                            {hasPersonalRoles && (
+                              <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                {item.includesComplimentaryMedia ? `Adds Photo ${formatMoney(photoRates.price ?? 41.975, currencySymbol)} · team ${formatMoney(photoRates.commission ?? 4.5, currencySymbol)}` : `Commission: ${item.personalRoles}`}
+                              </span>
+                            )}
+                            {item.poolType !== 'NONE' && (
+                              <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
+                                {item.poolType === 'COURSE_POOL' ? `Course Pool ${item.poolContribution}%` : item.poolType === 'CERTIFICATION_POOL' ? 'Certifications Pool' : `Dive Pool ${item.poolContribution}%`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition">
+                            {item.name}
+                          </div>
+                        </div>
+
+                        <div className="text-right flex items-center space-x-2">
+                          <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                            {formatMoney(item.price, currencySymbol)}
+                          </span>
+                          <div className="w-6 h-6 rounded-lg bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                            <Plus className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -652,7 +785,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                         </button>
                       </div>
 
-                      {line.autoPhotoFor && <p className="text-xs text-slate-500">Automatically added with {billLines.find(parent => parent.clientLineId === line.autoPhotoFor)?.itemName}. Quantity follows the activity; choose the team member who took the photo below.</p>}
+                      {line.autoPhotoFor && <p className="text-xs text-slate-500">Automatically added with {billLines.find(parent => parent.clientLineId === line.autoPhotoFor)?.itemName}. Rate is pre-tax &amp; pre-SC; 10% SC and 16% Tax are applied at checkout. Select the photographer below.</p>}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-center">
                         {/* Quantity Stepper */}
                         <div className="flex items-center space-x-1">
@@ -682,7 +815,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                         <div>
                           <span className="text-slate-400 text-xs">Price: </span>
                           <span className="font-mono font-semibold">
-                            {formatMoney(line.unitPrice, currencySymbol)}
+                            {formatUnitPrice(line.unitPrice, currencySymbol)}
                           </span>
                         </div>
 
@@ -861,6 +994,14 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
             </div>
 
             <div><label htmlFor="bill-notes" className="block text-sm mb-1">Notes (optional)</label><textarea id="bill-notes" value={notes} onChange={event => setNotes(event.target.value)} rows={2} className="w-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg p-3" /></div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
+              <label htmlFor="checkout-discount" className="block font-semibold">Enter discount (%)</label>
+              <div className="flex gap-2">
+                <input id="checkout-discount" type="number" min="0" max="100" step="0.01" placeholder="0" value={checkoutDiscountValue} disabled={saving} onChange={event => { setCheckoutDiscountValue(event.target.value); if (errorMsg?.startsWith('Checkout discount')) setErrorMsg(null); }} aria-invalid={!!checkoutPreview.error} aria-describedby="checkout-discount-help checkout-discount-error" className="min-w-0 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-2 font-mono" />
+              </div>
+              <p id="checkout-discount-help" className="text-xs text-slate-500">Applies to all remaining item and Photo totals after line discounts, before service charge and tax. Tips are excluded.</p>
+              <p id="checkout-discount-error" role={checkoutPreview.error ? 'alert' : undefined} className="text-sm text-red-600">{checkoutPreview.error}</p>
+            </div>
             {/* Running Totals Breakdown Flow (PDF Page 3) */}
             {/* Gross -> - Discount -> + Service charge -> + Tax -> + Tip -> Net */}
             <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 text-sm">
@@ -868,12 +1009,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                 <span>Gross Total</span>
                 <span className="font-mono font-medium">{formatMoney(grossAmount, currencySymbol)}</span>
               </div>
-              {discountAmount > 0 && (
-                <div className="flex justify-between text-amber-600 dark:text-amber-400">
-                  <span>- Total Discount</span>
-                  <span className="font-mono font-medium">-{formatMoney(discountAmount, currencySymbol)}</span>
-                </div>
-              )}
+              {lineDiscountAmount > 0 && <div className="flex justify-between text-amber-600 dark:text-amber-400"><span>Line discounts</span><span className="font-mono">−{formatMoney(lineDiscountAmount, currencySymbol)}</span></div>}
+              {checkoutPreview.amount > 0 && <div className="flex justify-between text-amber-600 dark:text-amber-400"><span>Checkout discount ({checkoutDiscountPercent}%)</span><span className="font-mono">−{formatMoney(checkoutPreview.amount, currencySymbol)}</span></div>}
               <div className="flex justify-between text-slate-500 dark:text-slate-400">
                 <span>+ Service Charge ({scRate}%)</span>
                 <span className="font-mono font-medium">{formatMoney(serviceChargeAmount, currencySymbol)}</span>
@@ -896,6 +1033,10 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                 <span className="text-xl font-bold text-sky-600 dark:text-sky-400 font-mono">
                   {formatMoney(netTotal, currencySymbol)}
                 </span>
+              </div>
+
+              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-400 dark:text-slate-500 leading-normal">
+                ℹ️ All activities, packages, and automatic Photo lines ({formatMoney(photoRates.price ?? 41.975, currencySymbol)}/unit) are pre-tax and pre-service charge. Service charge ({scRate}%) and tax ({taxRate}%) are calculated at checkout.
               </div>
             </div>
 
@@ -932,7 +1073,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
               Total net charge: <strong>{formatMoney(netTotal, currencySymbol)}</strong>.
             </p>
 
-            <ul className="review-lines">{billLines.map((line, index) => <li key={index}><span>{line.quantity} × {line.itemName}{line.discountPercent > 0 ? ` · ${line.discountPercent}% discount` : ''}</span><strong>{formatMoney(line.lineTotal, currencySymbol)}</strong></li>)}</ul>
+            <ul className="review-lines">{checkoutPreview.lines.map((line, index) => <li key={index}><span>{line.quantity} × {line.itemName}{line.discountPercent > 0 ? ` · ${line.discountPercent.toLocaleString('en-US', { maximumFractionDigits: 4 })}% total discount` : ''}</span><strong>{formatMoney(line.lineTotal, currencySymbol)}</strong></li>)}</ul>
+            {checkoutPreview.amount > 0 && <p>Checkout discount: <strong>{formatMoney(checkoutPreview.amount, currencySymbol)}</strong> ({checkoutDiscountPercent}%), before charges and tax.</p>}
             <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl text-sm space-y-1">
               <div className="flex justify-between">
                 <span className="text-slate-400">Items:</span>

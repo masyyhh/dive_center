@@ -12,6 +12,37 @@ import { isPercentagePool, validPoolRate } from '../utils/poolRates';
 
 export const itemsRouter = Router();
 
+const bulkDeleteSchema = z.object({
+  propertyId: z.string().min(1),
+  itemIds: z.array(z.string().min(1)).min(1).max(200).refine(ids => new Set(ids).size === ids.length),
+}).strict();
+
+itemsRouter.post('/bulk-delete', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req, res) => {
+  const parsed = bulkDeleteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose 1–200 different catalogue activities.' });
+  const { propertyId, itemIds } = parsed.data;
+  try {
+    const deletedCount = await withPropertyPayrollTransaction(prisma, propertyId, async tx => {
+      const property = await tx.property.findUnique({ where: { id: propertyId } });
+      if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
+      const items = await tx.item.findMany({ where: { propertyId, id: { in: itemIds }, isActive: true } });
+      if (items.length !== itemIds.length) throw new CatalogueError('Some selected activities are unavailable. Refresh the catalogue and select again.');
+      const result = await tx.item.updateMany({ where: { propertyId, id: { in: itemIds }, isActive: true }, data: { isActive: false } });
+      if (result.count !== items.length) throw new CatalogueError('The selection changed. Refresh the catalogue and select again.');
+      for (const item of items) {
+        await logAuditEvent({ client: tx, req, propertyId, action: 'ITEM_DELETE', targetType: 'Item', targetId: item.id,
+          details: { code: item.code, name: item.name, historyRetained: true, source: 'catalogue-bulk-delete' } });
+      }
+      return result.count;
+    });
+    return res.json({ deletedCount });
+  } catch (error) {
+    if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
+    console.error('Bulk catalogue delete failed.');
+    return res.status(500).json({ error: 'Could not delete the selected activities. Please try again.' });
+  }
+});
+
 class BulkMediaConflict extends Error {}
 const bulkMediaSchema = z.object({
   propertyId: z.string().min(1),
@@ -160,7 +191,7 @@ itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MA
     for (const index of [4, 7, 8, 9, 10, 11, 12]) sheet.getColumn(index).numFmt = '0.00';
     sheet.getCell('F1').note = 'Enter 10 for a 10% course/dive pool contribution after discounts, before tax and service charge.';
     sheet.getCell('G1').note = 'Fixed amount per unit for Certifications. No staff pool share or base-leader override is paid from Certifications.';
-    sheet.getCell('M1').note = 'Yes adds a separate Photo line at $57.50 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
+    sheet.getCell('M1').note = 'Yes adds a separate Photo line at $41.975 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
     for (let row = 2; row <= sheet.rowCount; row++) {
       sheet.getCell(`E${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Course pool,Dive pool,Certifications,No pool"'], showErrorMessage: true, error: 'Choose one of the listed pools.' };
       sheet.getCell(`M${row}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'], showErrorMessage: true, error: 'Choose Yes or No.' };
@@ -177,9 +208,9 @@ itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MA
         'Pool Rate (%): enter 10 for 10% on course/dive services after discounts, before tax and service charge. Leave blank for other pools.',
         'Certifications Amount / Unit: fixed amount per service unit. Leave blank for other pools. Certifications pay no staff pool commission.',
         'Employee payment columns: fixed amounts per unit. Blank means the role has no payment; 0 explicitly enables the role with a zero payment.',
-        'Include Photo ($57.50): Yes adds a separate $57.50 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
-        'Include Photo ($57.50) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
-        'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($57.50).',
+        'Include Photo ($41.975): Yes adds a separate $41.975 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
+        'Include Photo ($41.975) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
+        'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($41.975).',
         'Status: Active or Inactive. Existing bill prices and saved commissions are retained.',
         'Upload CSV or Excel (.xlsx), up to 3 MB and 2,000 activities. Review the import before applying it.',
       ];

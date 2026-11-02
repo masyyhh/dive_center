@@ -181,3 +181,44 @@ test('every requested language survives the tablet-to-signed-record flow without
     }
   }
 });
+
+test('diving requires its own property-approved document and retains its signed version', async () => {
+  const { defaultDisclaimerDocuments, documentKind } = loadTypeScript('src/services/waterSportsForms.ts');
+  assert.equal(documentKind('DIVE_PARTICIPATION'), 'DIVING');
+  assert.deepEqual(defaultDisclaimerDocuments('DIVING'), []);
+  const missing = await invoke('POST', '/sessions', { body: { propertyId: property.id, formType: 'DIVE_PARTICIPATION', roomNumber: '104', staffFields } });
+  assert.equal(missing.status, 409);
+  const approved = 'Property-approved diving participation wording for this test fixture. '.repeat(4);
+  const published = await invoke('POST', '/documents', { body: { propertyId: property.id, kind: 'DIVING', language: 'en', languageName: 'English', title: 'Diving participation', body: approved } });
+  assert.equal(published.status, 201);
+  const f = await ready('DIVE_PARTICIPATION');
+  assert.equal(f.opened.documents.length, 1);
+  assert.equal(f.opened.documents[0].body, approved.trim());
+  assert.equal((await tablet(f.session, 'POST', '/sign', f.payload)).status, 200);
+  const record = await prisma.waterSportsRecord.findUnique({ where: { sessionId: f.session.id } });
+  assert.equal(record.formType, 'DIVE_PARTICIPATION');
+  assert.equal(record.documentSnapshot.body, approved.trim());
+});
+
+test('staff overview excludes expired, cancelled and signed links without exposing tokens or guest candidates', async () => {
+  const active = await create();
+  const cancelled = await create();
+  const expired = await create();
+  await prisma.waterSportsSession.update({ where: { id: cancelled.id }, data: { revokedAt: new Date() } });
+  await prisma.waterSportsSession.update({ where: { id: expired.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+  const f = await ready();
+  await tablet(f.session, 'POST', '/sign', f.payload);
+  const overview = await invoke('GET', '/overview', { query: { propertyId: property.id } });
+  assert.equal(overview.status, 200);
+  assert.ok(overview.body.pending.some(item => item.id === active.id));
+  assert.ok(!overview.body.pending.some(item => [cancelled.id, expired.id, f.session.id].includes(item.id)));
+  assert.equal(overview.body.pendingCount, await prisma.waterSportsSession.count({ where: { propertyId: property.id, revokedAt: null, expiresAt: { gt: new Date() }, record: { is: null } } }));
+  assert.equal(overview.body.totalSigned, await prisma.waterSportsRecord.count({ where: { propertyId: property.id } }));
+  assert.equal(overview.body.readiness.pmsPropertyConfigured, true);
+  assert.equal(overview.body.readiness.documents.DIVE_PARTICIPATION, 1);
+  for (const row of overview.body.pending) {
+    assert.deepEqual(Object.keys(row).sort(), ['id','formType','roomNumber','createdAt','expiresAt','lookupCount'].sort());
+  }
+  assert.equal((await invoke('GET', '/overview', { user: null, query: { propertyId: property.id } })).status, 401);
+  assert.equal((await invoke('GET', '/overview', { query: { propertyId: otherProperty.id } })).status, 403);
+});

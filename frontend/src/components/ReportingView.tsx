@@ -1,3 +1,4 @@
+import { investigationPeriod } from '../utils/dashboardNavigation';
 import { serializeCsv } from '../utils/csv';
 import { formatMoney } from '../utils/format';
 import { Modal } from './Modal';
@@ -40,7 +41,9 @@ import {
 } from 'lucide-react';
 
 export const ReportingView: React.FC<{ section?: string; onSectionChange: (section: string) => void }> = ({ section, onSectionChange }) => {
-  const reportTab = section === 'commissions' || section === 'exports' ? section : 'performance';
+  const tab = section?.split('?')[0];
+  const reportTab = tab === 'commissions' || tab === 'exports' ? tab : 'performance';
+  const initialPeriod = investigationPeriod(section);
   const [payrollLocked, setPayrollLocked] = useState<boolean | null>(null);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [payrollError, setPayrollError] = useState('');
@@ -55,8 +58,13 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
   const currentYm = todayStr.substring(0, 7);
 
   // Filters
-  const [startDate, setStartDate] = useState<string>(`${currentYm}-01`);
-  const [endDate, setEndDate] = useState<string>(todayStr);
+  const [startDate, setStartDate] = useState<string>(initialPeriod?.startDate || `${currentYm}-01`);
+  const [endDate, setEndDate] = useState<string>(initialPeriod?.endDate || todayStr);
+
+  useEffect(() => {
+    const period = investigationPeriod(section);
+    if (period) { setStartDate(period.startDate); setEndDate(period.endDate); }
+  }, [section]);
 
   // Independent export parameters (PDF Page 6: "Monthly report — pick a month independent of the dashboard range")
   const [exportDate, setExportDate] = useState<string>(todayStr);

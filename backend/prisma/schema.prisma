@@ -20,6 +20,8 @@ model Property {
   taxRate             Float          @default(16.0) // 16% TGST / Tax
   serviceChargeRate   Float          @default(10.0) // 10% Service Charge
   nextCheckNumber     Int            @default(1001)
+  autoPhotoPrice      Float          @default(41.975)
+  autoPhotoCommission Float          @default(4.5)
   isActive            Boolean        @default(true)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
@@ -29,6 +31,7 @@ model Property {
   staffRoleTitles     StaffRoleTitle[]
   categories          Category[]
   items               Item[]
+  divePackages        DivePackage[]
   bills               Bill[]
   attendanceRecords   Attendance[]
   monthLocks          MonthLock[]
@@ -153,8 +156,38 @@ model Item {
   property           Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   category           Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   billItems          BillItem[]
+  packageItems       DivePackageItem[]
 
   @@unique([propertyId, code])
+}
+
+model DivePackage {
+  id          String            @id @default(uuid())
+  propertyId  String
+  code        String            // e.g. "PKG-5DIVE"
+  name        String            // e.g. "5 Boat Dives Package"
+  description String?
+  price       Float             // Package price before tax/SC
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  property    Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items       DivePackageItem[]
+
+  @@unique([propertyId, code])
+}
+
+model DivePackageItem {
+  id          String       @id @default(uuid())
+  packageId   String
+  itemId      String
+  quantity    Int          @default(1)
+
+  package     DivePackage  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  item        Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, itemId])
 }
 
 model Bill {

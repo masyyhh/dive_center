@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 export type Signature = number[][][];
 export type Disclaimer = { id: string; language: string; languageName: string; title: string; body: string };
-export const formNames: Record<string, string> = { PARTICIPATION: 'Water sports participation', SNORKELING: 'Snorkeling excursion', GEAR_RENTAL: 'Snorkeling gear rental', AID_GEAR: 'Aid snorkeling gear' };
+export const formNames: Record<string, string> = { DIVE_PARTICIPATION: 'Diving participation', PARTICIPATION: 'Water sports participation (legacy)', SNORKELING: 'Snorkeling excursion', GEAR_RENTAL: 'Snorkeling gear rental', AID_GEAR: 'Aid snorkeling gear' };
 export const fieldNames: Record<string, string> = { checkNumber: 'Check No.', maskNumber: 'Mask No.', finsNumber: 'Fins No.', rentalDuration: 'Rental duration', returnDate: 'Date of return', notes: 'Staff notes' };
 export const SignatureImage = ({ value }: { value: Signature }) => <svg viewBox="0 0 1000 300" role="img" aria-label="Handwritten signature" className="ws-signature-image">{value.map((stroke, i) => <polyline key={i} points={stroke.map(p => p.join(',')).join(' ')} fill="none" stroke="#19323c" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />)}</svg>;
 export const SignaturePad = ({ value, onChange }: { value: Signature; onChange: (value: Signature) => void }) => {

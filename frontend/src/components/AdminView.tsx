@@ -1,3 +1,5 @@
+import { CommissionRulesView } from './CommissionRulesView';
+import { useNavigation, useUnsavedChanges } from '../context/NavigationContext';
 import { PersonalCommissionEditor, PersonalCommissionSummary } from './PersonalCommissionEditor';
 import { CommissionSelection, hasNoCommissions, readCommissionSelections, serializeCommissionSelections } from '../utils/commissionEditor';
 import { CommissionCalculatorPreview } from './CommissionCalculator';
@@ -14,7 +16,7 @@ import React, { useState, useEffect } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, downloadFile } from '../services/api';
-import { Property, User, StaffMember, Item, Category, AuditLog } from '../types';
+import { Property, User, StaffMember, Item, Category, AuditLog, DivePackage, DivePackageItem } from '../types';
 import {
   Building,
   Users,
@@ -32,20 +34,22 @@ import {
   DollarSign,
   Tag,
   Lock,
+  Package,
 } from 'lucide-react';
 
 export const AdminView: React.FC<{ section?: string; onSectionChange: (section: string) => void }> = ({ section, onSectionChange }) => {
   const { user, refreshUser } = useAuth();
-  const { activeProperty, properties, refreshProperties } = useProperty();
+  const { activeProperty, properties, refreshProperties, setActiveProperty } = useProperty();
 
   const isGlobalAdmin = user?.role === 'GLOBAL_ADMIN';
   const canManageAccounts = isGlobalAdmin || user?.role === 'PROPERTY_MANAGER';
 
-  type AdminTab = 'properties' | 'users' | 'staff' | 'items' | 'audit';
-  const [activeTab, setActiveTab] = useState<AdminTab>(section === 'items' || section === 'staff' || section === 'audit' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && section === 'properties')) ? section : isGlobalAdmin ? 'properties' : 'staff');
+  const { requestNavigation } = useNavigation();
+  type AdminTab = 'properties' | 'users' | 'staff' | 'items' | 'commissions' | 'packages' | 'audit';
+  const [activeTab, setActiveTab] = useState<AdminTab>(section === 'items' || section === 'staff' || section === 'audit' || section === 'packages' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && (section === 'properties' || section === 'commissions'))) ? (section as AdminTab) : isGlobalAdmin ? 'properties' : 'staff');
 
   useEffect(() => {
-    if (section === 'items' || section === 'staff' || section === 'audit' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && section === 'properties'))) setActiveTab(section);
+    if (section === 'items' || section === 'staff' || section === 'audit' || section === 'packages' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && (section === 'properties' || section === 'commissions')))) setActiveTab(section as AdminTab);
   }, [section, isGlobalAdmin, canManageAccounts]);
   // Properties state
   const [propertySaving, setPropertySaving] = useState(false);
@@ -65,6 +69,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     taxRate: 16.0,
     serviceChargeRate: 10.0,
     nextCheckNumber: 1001,
+    autoPhotoPrice: 41.975,
+    autoPhotoCommission: 4.5,
     isActive: true,
   });
 
@@ -127,8 +133,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const itemLoadGeneration = React.useRef(0);
   const [catalogueFilters, setCatalogueFilters] = useState<CatalogueFilters>(emptyCatalogueFilters);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState<{ propertyId: string; items: Item[] } | null>(null);
   const [bulkReview, setBulkReview] = useState<BulkMediaReviewData | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -136,12 +144,17 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const visibleItems = filterCatalogue(items, catalogueFilters, showArchivedItems);
   const selectableItems = visibleItems.filter(item => item.isActive);
   const selectedVisibleCount = selectableItems.filter(item => selectedItemIds.includes(item.id)).length;
-  useEffect(() => { setCatalogueFilters(emptyCatalogueFilters); setSelectedItemIds([]); setBulkReview(null); setBulkError(null); setCatalogueImport(null); }, [activeProperty?.id]);
+  useEffect(() => { setCatalogueFilters(emptyCatalogueFilters); setSelectedItemIds([]); setBulkReview(null); setBulkError(null); setCatalogueImport(null); setBulkDeleteTarget(null); }, [activeProperty?.id]);
   useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && item.isActive))); }, [items]);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
   const [itemBusy, setItemBusy] = useState(false);
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
+  useUnsavedChanges(showItemModal, 'An activity has unfinished catalogue or commission changes.', itemBusy || categoryBusy);
+  useEffect(() => {
+    ++itemLoadGeneration.current;
+    setItems([]); setCategories([]); setShowItemModal(false); setEditingItem(null); setDeleteItemTarget(null);
+  }, [activeProperty?.id]);
   const [noCommissions, setNoCommissions] = useState(false);
   const previousCommissionSettings = React.useRef<{ poolType: Item['poolType']; poolContribution: number; includesComplimentaryMedia: boolean; selections: CommissionSelection[] } | null>(null);
   const [commissionSelections, setCommissionSelections] = useState(() => readCommissionSelections('seller,guide', '{"seller":5,"guide":10}'));
@@ -161,6 +174,22 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditCursor, setAuditCursor] = useState<string | null>(null);
   const auditGeneration = React.useRef(0);
+
+  // Dive Packages state
+  const [packagesList, setPackagesList] = useState<DivePackage[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packageBusy, setPackageBusy] = useState(false);
+  const [showPackageModal, setShowPackageModal] = useState(false);
+  const [editingPackage, setEditingPackage] = useState<DivePackage | null>(null);
+  const [packageForm, setPackageForm] = useState({
+    name: '',
+    code: '',
+    description: '',
+    isActive: true,
+    items: [] as { itemId: string; quantity: number }[],
+  });
+  const [deletePackageTarget, setDeletePackageTarget] = useState<DivePackage | null>(null);
+  const [selectedAddItem, setSelectedAddItem] = useState<string>('');
 
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -238,21 +267,24 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
   // Fetch Items & Categories
   const loadItems = async () => {
-    if (!activeProperty) return;
+    const generation = ++itemLoadGeneration.current;
+    if (!activeProperty) { setItems([]); setCategories([]); return; }
+    const propertyId = activeProperty.id;
     try {
       setLoading(true);
       const res = await apiFetch<{ categories: Category[]; items: Item[] }>(
-        `/items?propertyId=${activeProperty.id}&includeInactive=true`
+        `/items?propertyId=${propertyId}&includeInactive=true`
       );
+      if (generation !== itemLoadGeneration.current || roleTitleProperty.current !== propertyId) return;
       setCategories(res.categories);
       setItems(res.items);
       if (res.categories.length > 0 && !itemForm.categoryId) {
         setItemForm((prev) => ({ ...prev, categoryId: res.categories[0].id }));
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
+      if (generation === itemLoadGeneration.current && roleTitleProperty.current === propertyId) setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
-      setLoading(false);
+      if (generation === itemLoadGeneration.current && roleTitleProperty.current === propertyId) setLoading(false);
     }
   };
 
@@ -276,12 +308,166 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     }
   };
 
+  const loadPackages = async () => {
+    if (!activeProperty) { setPackagesList([]); return; }
+    try {
+      setPackagesLoading(true);
+      const res = await apiFetch<{ packages: DivePackage[] }>(
+        `/packages?propertyId=${activeProperty.id}&includeInactive=true`
+      );
+      setPackagesList(res.packages || []);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Could not load dive packages.');
+    } finally {
+      setPackagesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'users' && canManageAccounts) loadUsers();
     if (activeTab === 'staff') loadStaff();
-    if (activeTab === 'items') loadItems();
+    if (activeTab === 'items' || activeTab === 'commissions' || activeTab === 'packages') loadItems();
+    if (activeTab === 'packages') loadPackages();
     if (activeTab === 'audit') loadAuditLogs();
   }, [activeTab, activeProperty]);
+
+  const openPackageModal = (pkg: DivePackage | null = null) => {
+    if (!activeProperty) return;
+    setEditingPackage(pkg);
+    if (pkg) {
+      setPackageForm({
+        name: pkg.name,
+        code: pkg.code,
+        description: pkg.description || '',
+        isActive: pkg.isActive,
+        items: pkg.items.map(it => ({ itemId: it.itemId, quantity: it.quantity })),
+      });
+    } else {
+      setPackageForm({
+        name: '',
+        code: '',
+        description: '',
+        isActive: true,
+        items: [],
+      });
+    }
+    setSelectedAddItem('');
+    setErrorMsg(null);
+    setShowPackageModal(true);
+  };
+
+  const handleSavePackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeProperty || packageBusy) return;
+    const name = packageForm.name.trim();
+    const code = packageForm.code.trim().toUpperCase();
+    if (name.length < 2) {
+      setErrorMsg('Package name must contain at least 2 characters.');
+      return;
+    }
+    if (code.length < 2) {
+      setErrorMsg('Package code must contain at least 2 characters.');
+      return;
+    }
+    if (packageForm.items.length === 0) {
+      setErrorMsg('Add at least one activity or service to the package.');
+      return;
+    }
+    setPackageBusy(true);
+    setErrorMsg(null);
+    try {
+      const payload = {
+        name,
+        code: editingPackage ? undefined : code,
+        description: packageForm.description.trim() || null,
+        isActive: packageForm.isActive,
+        items: packageForm.items,
+        ...(editingPackage ? {} : { propertyId: activeProperty.id }),
+      };
+      await apiFetch(editingPackage ? `/packages/${editingPackage.id}` : '/packages', {
+        method: editingPackage ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      setShowPackageModal(false);
+      setEditingPackage(null);
+      showNotification(`Dive package '${name}' ${editingPackage ? 'updated' : 'created'} successfully.`);
+      await loadPackages();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to save dive package.');
+    } finally {
+      setPackageBusy(false);
+    }
+  };
+
+  const handleDeletePackage = async () => {
+    if (!deletePackageTarget || packageBusy) return;
+    setPackageBusy(true);
+    setErrorMsg(null);
+    try {
+      await apiFetch(`/packages/${deletePackageTarget.id}`, { method: 'DELETE' });
+      setDeletePackageTarget(null);
+      showNotification(`Package '${deletePackageTarget.name}' deleted.`);
+      await loadPackages();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to delete package.');
+    } finally {
+      setPackageBusy(false);
+    }
+  };
+
+  const handleTogglePackageActive = async (pkg: DivePackage) => {
+    if (packageBusy) return;
+    setPackageBusy(true);
+    setErrorMsg(null);
+    try {
+      await apiFetch(`/packages/${pkg.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ isActive: !pkg.isActive }),
+      });
+      showNotification(`Package '${pkg.name}' ${!pkg.isActive ? 'activated' : 'deactivated'}.`);
+      await loadPackages();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update package status.');
+    } finally {
+      setPackageBusy(false);
+    }
+  };
+
+  const addItemToPackage = (itemId: string) => {
+    if (!itemId) return;
+    setPackageForm(form => {
+      const existing = form.items.find(i => i.itemId === itemId);
+      if (existing) {
+        return {
+          ...form,
+          items: form.items.map(i => i.itemId === itemId ? { ...i, quantity: i.quantity + 1 } : i),
+        };
+      }
+      return {
+        ...form,
+        items: [...form.items, { itemId, quantity: 1 }],
+      };
+    });
+    setSelectedAddItem('');
+  };
+
+  const updatePackageItemQuantity = (itemId: string, delta: number) => {
+    setPackageForm(form => ({
+      ...form,
+      items: form.items.map(i => {
+        if (i.itemId !== itemId) return i;
+        const newQty = Math.max(1, i.quantity + delta);
+        return { ...i, quantity: newQty };
+      }),
+    }));
+  };
+
+  const removePackageItem = (itemId: string) => {
+    setPackageForm(form => ({
+      ...form,
+      items: form.items.filter(i => i.itemId !== itemId),
+    }));
+  };
 
   const [pmsSavingProperty, setPmsSavingProperty] = useState<string | null>(null);
   const updatePmsCode = async (id: string, pmsPropertyCodes: string[]) => {
@@ -300,8 +486,11 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       pmsPropertyCodes: property.pmsPropertyCodes?.length ? [...property.pmsPropertyCodes] : property.pmsPropertyCode ? [property.pmsPropertyCode] : [],
       currency: property.currency, currencySymbol: property.currencySymbol,
       taxRate: property.taxRate, serviceChargeRate: property.serviceChargeRate,
-      nextCheckNumber: property.nextCheckNumber, isActive: property.isActive,
-    } : { name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, isActive: true });
+      nextCheckNumber: property.nextCheckNumber,
+      autoPhotoPrice: property.autoPhotoPrice ?? 41.975,
+      autoPhotoCommission: property.autoPhotoCommission ?? 4.5,
+      isActive: property.isActive,
+    } : { name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, autoPhotoPrice: 41.975, autoPhotoCommission: 4.5, isActive: true });
     setErrorMsg(null);
     setShowPropertyModal(true);
   };
@@ -328,7 +517,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       });
       setShowPropertyModal(false);
       showNotification(`Property '${name}' ${editingProperty ? 'updated' : 'created'} successfully.`);
-      setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, isActive: true });
+      setPropForm({ name: '', code: '', pmsPropertyCodes: [], location: '', currency: 'USD', currencySymbol: '$', taxRate: 16, serviceChargeRate: 10, nextCheckNumber: 1001, autoPhotoPrice: 41.975, autoPhotoCommission: 4.5, isActive: true });
       await refreshProperties();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save property.');
@@ -500,6 +689,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   };
 
   const openItemEditor = (item?: Item) => {
+    if (!activeProperty || (item && item.propertyId !== activeProperty.id)) return;
     setNoCommissions(item ? hasNoCommissions(item) : false);
     previousCommissionSettings.current = null;
     setCommissionSelections(readCommissionSelections(item ? item.personalRoles : 'seller,guide', item ? item.personalRatesJson : '{"seller":5,"guide":10}'));
@@ -510,6 +700,11 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '', includesComplimentaryMedia: item.includesComplimentaryMedia,
     } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: /^certifications?$/i.test(categories[0]?.name || '') ? 'CERTIFICATION_POOL' : 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}', includesComplimentaryMedia: false });
     setShowItemModal(true);
+  };
+  const copyItemRules = (item: Item) => {
+    openItemEditor(item);
+    setEditingItem(null);
+    setItemForm(form => ({ ...form, code: '', name: `${item.name} (new rules)` }));
   };
   const closeItemEditor = () => { if (!itemBusy && !categoryBusy) { setShowItemModal(false); setEditingItem(null); setErrorMsg(null); } };
 
@@ -577,6 +772,23 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     } catch (error) {
       if (roleTitleProperty.current === propertyId) setBulkError(error instanceof Error ? error.message : 'Could not save the bulk update.');
     } finally { setBulkBusy(false); }
+  };
+
+  const handleBulkDeleteItems = async () => {
+    if (!bulkDeleteTarget || bulkDeleteTarget.propertyId !== activeProperty?.id || itemBusy || bulkBusy) return;
+    const { propertyId, items: targets } = bulkDeleteTarget;
+    setItemBusy(true); setErrorMsg(null);
+    try {
+      const result = await apiFetch<{ deletedCount: number }>('/items/bulk-delete', {
+        method: 'POST', body: JSON.stringify({ propertyId, itemIds: targets.map(item => item.id) }),
+      });
+      if (roleTitleProperty.current !== propertyId) return;
+      setBulkDeleteTarget(null); setSelectedItemIds([]);
+      showNotification(`${result.deletedCount} activities deleted. Existing bills and history retained.`);
+      await loadItems();
+    } catch (error) {
+      if (roleTitleProperty.current === propertyId) setErrorMsg(error instanceof Error ? error.message : 'Could not delete the selected activities.');
+    } finally { setItemBusy(false); }
   };
 
   const handleDeleteItem = async () => {
@@ -671,6 +883,20 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
           </button>
 
           <button
+            onClick={() => onSectionChange('packages')}
+            aria-pressed={activeTab === 'packages'}
+            className={`px-3 py-1.5 rounded-lg transition ${
+              activeTab === 'packages'
+                ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            Dive Packages
+          </button>
+
+          {isGlobalAdmin && <button type="button" aria-pressed={activeTab === 'commissions'} className={activeTab === 'commissions' ? 'primary-button' : 'text-button'} onClick={() => onSectionChange('commissions')}>Commission rules</button>}
+
+          <button
             onClick={() => onSectionChange('audit')}
               aria-pressed={activeTab === 'audit'}
             className={`px-3 py-1.5 rounded-lg transition ${
@@ -691,6 +917,17 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
           <span>{successMsg}</span>
         </div>
       )}
+
+      {isGlobalAdmin && (activeTab === 'items' || activeTab === 'commissions' || activeTab === 'staff' || activeTab === 'packages') && <div className="surface p-4 space-y-2">
+        <label htmlFor="customization-property" className="block font-semibold">Customize property</label>
+        <select id="customization-property" value={activeProperty?.id || ''} disabled={itemBusy || bulkBusy || transferBusy || categoryBusy} onChange={event => { const property = properties.find(p => p.id === event.target.value); if (property) requestNavigation(() => setActiveProperty(property)); }}>
+          {!activeProperty && <option value="">Choose a property</option>}
+          {properties.map(property => <option key={property.id} value={property.id}>{property.name} ({property.code}){property.isActive ? '' : ' · Inactive'}</option>)}
+        </select>
+        <p className="text-sm text-slate-500">Catalogue and commission settings belong to the selected property.</p>
+      </div>}
+
+      {activeTab === 'commissions' && isGlobalAdmin && <CommissionRulesView key={activeProperty?.id || 'none'} property={activeProperty} items={items} loading={loading} busy={itemBusy || bulkBusy || categoryBusy} onEdit={openItemEditor} onCopy={copyItemRules} onStaff={() => onSectionChange('staff')} />}
 
       {/* TAB 1: PROPERTIES (Global Admin) */}
       {activeTab === 'properties' && isGlobalAdmin && (
@@ -737,6 +974,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
                 <button type="button" className="text-button" disabled={pmsSavingProperty !== null} aria-label={`Edit property ${p.name}`} onClick={() => openPropertyForm(p)}><Edit2 size={15} /> Edit property</button>
                 <button type="button" className="text-button text-red-600 dark:text-red-400" aria-label={`Delete property ${p.name}`} onClick={() => { setErrorMsg(null); setDeletePropertyCode(''); setDeletePropertyTarget(p); }}><Trash2 size={15} /> Delete property</button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="secondary-button" onClick={() => { setActiveProperty(p); onSectionChange('items'); }}>Customize catalogue</button>
+                  <button type="button" className="secondary-button" onClick={() => { setActiveProperty(p); onSectionChange('commissions'); }}>Customize commission rules</button>
+                </div>
                 <fieldset disabled={pmsSavingProperty !== null} className="space-y-2 text-sm">
                   <legend>PMS resorts for room lookups</legend>
                   <div className="flex flex-wrap gap-3">{pmsResortCodes.map(code => {
@@ -745,7 +986,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   })}</div>
                   <p className="text-xs text-slate-500">Room lookups search every selected resort. With none selected, the centre code is used if supported.</p>
                 </fieldset>
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-sm">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700/60 text-sm">
                   <div>
                     <span className="text-slate-400 block text-xs">Tax Rate:</span>
                     <span className="font-semibold">{p.taxRate}%</span>
@@ -757,6 +998,14 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   <div>
                     <span className="text-slate-400 block text-xs">Next Check #:</span>
                     <span className="font-mono font-bold text-sky-500">#{p.nextCheckNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-xs">Photo Line Price:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatMoney(p.autoPhotoPrice ?? 41.975, p.currencySymbol)} <span className="text-[10px] text-slate-400 font-normal block">+tax & SC</span></span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-xs">Photo Commission:</span>
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">{formatMoney(p.autoPhotoCommission ?? 4.5, p.currencySymbol)}</span>
                   </div>
                 </div>
               </div>
@@ -1011,14 +1260,19 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <label>Search services<input type="search" placeholder="Name, code or category" value={catalogueFilters.query} onChange={event => setCatalogueFilters({ ...catalogueFilters, query: event.target.value })} /></label>
             <label>Category<select value={catalogueFilters.categoryId} onChange={event => setCatalogueFilters({ ...catalogueFilters, categoryId: event.target.value })}><option value="">All categories</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label>Pool<select value={catalogueFilters.poolType} onChange={event => setCatalogueFilters({ ...catalogueFilters, poolType: event.target.value })}><option value="">All pools</option><option value="COURSE_POOL">Course pool</option><option value="DIVE_POOL">Dive pool</option><option value="CERTIFICATION_POOL">Certifications</option><option value="NONE">No pool</option></select></label>
-            <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · $57.50</option><option value="excluded">Separate settings</option></select></label>
+            <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · $41.975</option><option value="excluded">Separate settings</option></select></label>
           </div>
           <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {items.filter(item => showArchivedItems || item.isActive).length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
           {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar">
             <div><strong>{selectedItemIds.length} selected</strong>{selectedItemIds.length > selectedVisibleCount && <span> · {selectedItemIds.length - selectedVisibleCount} hidden by filters</span>}<small>Review changes before saving. Up to 200 services per update.</small></div>
-            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : 'Add Photo · $57.50'}</button>
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : 'Add Photo · $41.975'}</button>
             <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
-            <button type="button" className="text-button" disabled={bulkBusy} onClick={() => setSelectedItemIds([])}>Clear selection</button>
+            <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty} onClick={() => {
+              if (!activeProperty) return;
+              setErrorMsg(null);
+              setBulkDeleteTarget({ propertyId: activeProperty.id, items: items.filter(item => item.isActive && selectedItemIds.includes(item.id)) });
+            }}><Trash2 size={14} />Delete selected ({selectedItemIds.length})</button>
+            <button type="button" className="text-button" disabled={bulkBusy || itemBusy} onClick={() => setSelectedItemIds([])}>Clear selection</button>
           </div>}
 
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" checked={showArchivedItems} onChange={event => setShowArchivedItems(event.target.checked)} />Show deleted activities</label>
@@ -1036,7 +1290,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   <th className="py-3 px-4">Price</th>
                   <th className="py-3 px-4">Pool Contribution</th>
                   <th className="py-3 px-4">Employee Payments</th>
-                  <th className="py-3 px-4">Include Photo ($57.50)</th>
+                  <th className="py-3 px-4">Include Photo ($41.975)</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Actions</th>
                 </tr>
@@ -1074,7 +1328,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                       <input type="checkbox" checked={it.includesComplimentaryMedia} disabled={itemBusy || bulkBusy || !it.isActive}
                         aria-label={`Automatic Photo for ${it.name}`}
                         onChange={event => toggleComplimentaryMedia(it, event.target.checked)} />
-                      <span className="text-xs">Adds $57.50 per unit · employee earns $4.50</span>
+                      <span className="text-xs">Adds $41.975 per unit · employee earns $4.50</span>
                     </label></td>
                     <td className="py-3 px-4">{it.isActive ? 'Active' : 'Deleted'}</td>
                     <td className="py-3 px-4"><div className="flex gap-2">
@@ -1146,6 +1400,385 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             {auditCursor && <button type="button" disabled={loading} onClick={() => loadAuditLogs(auditCursor)}>Load older entries</button>}
           </div>
         </div>
+      )}
+
+      {/* TAB 6: DIVE PACKAGES */}
+      {activeTab === 'packages' && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                <Package className="w-5 h-5 text-sky-500" />
+                <span>Dive Packages ({packagesList.length})</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Bundle catalogue items into multi-dive or certification packages. Totals follow the selected items and quantities, and packages are available when creating bills.
+              </p>
+            </div>
+            {canManageAccounts && activeProperty && (
+              <button
+                type="button"
+                onClick={() => openPackageModal()}
+                className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-semibold text-sm transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Build New Package</span>
+              </button>
+            )}
+          </div>
+
+          {!activeProperty ? (
+            <div className="p-8 text-center text-slate-500">
+              Please select a property to view and manage its dive packages.
+            </div>
+          ) : packagesLoading ? (
+            <div className="p-8 text-center text-slate-500">
+              Loading dive packages…
+            </div>
+          ) : packagesList.length === 0 ? (
+            <div className="p-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl space-y-3">
+              <Package className="w-10 h-10 mx-auto text-slate-400" />
+              <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                No dive packages created yet
+              </div>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Create packages (e.g. 5-Dive Package, 10-Dive Package, Open Water + Nitrox) from catalogue activities. The package total is the sum of selected item prices and quantities.
+              </p>
+              {canManageAccounts && (
+                <button
+                  type="button"
+                  onClick={() => openPackageModal()}
+                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-semibold text-sm transition"
+                >
+                  Build First Package
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {packagesList.map(pkg => {
+                const totalStandardPrice = pkg.items.reduce((sum, pi) => {
+                  const it = items.find(i => i.id === pi.itemId) || pi.item;
+                  return sum + (it?.price || 0) * pi.quantity;
+                }, 0);
+
+                return (
+                  <div
+                    key={pkg.id}
+                    className={`p-4 rounded-xl border transition ${
+                      pkg.isActive
+                        ? 'bg-slate-50/60 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                        : 'bg-slate-100/40 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800/60 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300">
+                            {pkg.code}
+                          </span>
+                          {!pkg.isActive && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                              Inactive
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-slate-900 dark:text-white mt-1.5 text-base">
+                          {pkg.name}
+                        </h4>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-sky-600 dark:text-sky-400 font-mono">
+                          {formatMoney(totalStandardPrice, activeProperty?.currencySymbol)}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          +tax & SC at checkout
+                        </div>
+                      </div>
+                    </div>
+
+                    {pkg.description && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 line-clamp-2">
+                        {pkg.description}
+                      </p>
+                    )}
+
+                    <div className="mt-3 pt-3 border-t border-slate-200/80 dark:border-slate-700/60 space-y-1.5 text-xs">
+                      <div className="text-slate-500 font-medium">Included services:</div>
+                      <ul className="space-y-1">
+                        {pkg.items.map((pi, idx) => {
+                          const it = items.find(i => i.id === pi.itemId) || pi.item;
+                          return (
+                            <li key={idx} className="flex justify-between items-center text-slate-700 dark:text-slate-300">
+                              <span>
+                                <span className="font-bold text-sky-600 dark:text-sky-400">{pi.quantity}×</span>{' '}
+                                {it?.name || 'Catalogue item'}
+                              </span>
+                              <span className="font-mono text-slate-400">
+                                {formatMoney((it?.price || 0) * pi.quantity, activeProperty?.currencySymbol)}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-500">Total of included items at current catalogue prices.</p>
+
+                    {canManageAccounts && (
+                      <div className="mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/40 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePackageActive(pkg)}
+                          className="px-2 py-1 text-xs font-semibold rounded text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                        >
+                          {pkg.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openPackageModal(pkg)}
+                          className="p-1.5 text-slate-500 hover:text-sky-600 rounded transition"
+                          title="Edit package"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletePackageTarget(pkg)}
+                          className="p-1.5 text-slate-500 hover:text-rose-600 rounded transition"
+                          title="Delete package"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL: DIVE PACKAGE BUILDER */}
+      {showPackageModal && activeProperty && (
+        <Modal
+          label={editingPackage ? `Edit package ${editingPackage.name}` : 'Dive Package Builder'}
+          busy={packageBusy}
+          onClose={() => { if (!packageBusy) { setShowPackageModal(false); setErrorMsg(null); } }}
+          error={errorMsg}
+        >
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center space-x-2">
+              <Package className="w-5 h-5 text-sky-500" />
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                {editingPackage ? 'Edit Dive Package' : 'Dive Package Builder'}
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Create a bundle by selecting activities from {activeProperty.name}&apos;s catalogue. Items in packages are pre-tax and pre-service charge; checkout automatically applies taxes and charges.
+            </p>
+
+            <form onSubmit={handleSavePackage} className="space-y-4 text-sm" aria-busy={packageBusy}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="package-name" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Package Name *
+                  </label>
+                  <input
+                    id="package-name"
+                    type="text"
+                    required
+                    placeholder="e.g. 5-Dive Explorer Package"
+                    value={packageForm.name}
+                    onChange={e => setPackageForm({ ...packageForm, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="package-code" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Package Code *
+                  </label>
+                  <input
+                    id="package-code"
+                    type="text"
+                    required
+                    disabled={Boolean(editingPackage)}
+                    placeholder="e.g. 5DIVE"
+                    value={packageForm.code}
+                    onChange={e => setPackageForm({ ...packageForm, code: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none font-mono uppercase"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="package-description" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Description (optional)
+                </label>
+                <textarea
+                  id="package-description"
+                  rows={2}
+                  placeholder="Includes 5 boat dives, tank & weights. Equipment rental extra."
+                  value={packageForm.description}
+                  onChange={e => setPackageForm({ ...packageForm, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none text-xs"
+                />
+              </div>
+
+              {/* Service Items Selector */}
+              <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700/60">
+                <label className="block font-semibold text-slate-700 dark:text-slate-200">
+                  Included Activities & Services *
+                </label>
+
+                <div className="flex gap-2">
+                  <select
+                    value={selectedAddItem}
+                    onChange={e => setSelectedAddItem(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none text-xs"
+                  >
+                    <option value="">Select an activity from catalogue…</option>
+                    {items.filter(i => i.isActive).map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} ({item.category?.name || 'General'}) — {formatMoney(item.price, activeProperty.currencySymbol)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!selectedAddItem}
+                    onClick={() => addItemToPackage(selectedAddItem)}
+                    className="px-3 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white font-semibold text-xs transition"
+                  >
+                    Add Service
+                  </button>
+                </div>
+
+                {packageForm.items.length === 0 ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 italic py-2">
+                    No services added yet. Pick from the catalogue above.
+                  </p>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
+                    {packageForm.items.map(pi => {
+                      const it = items.find(i => i.id === pi.itemId);
+                      const unitPrice = it?.price || 0;
+                      return (
+                        <div key={pi.itemId} className="p-2.5 flex items-center justify-between text-xs bg-slate-50/50 dark:bg-slate-800/50">
+                          <div className="flex-1 min-w-0 pr-2">
+                            <span className="font-semibold text-slate-800 dark:text-slate-200 block truncate">
+                              {it?.name || 'Selected item'}
+                            </span>
+                            <span className="text-slate-400">
+                              {formatMoney(unitPrice, activeProperty.currencySymbol)} / unit
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                              <button
+                                type="button"
+                                onClick={() => updatePackageItemQuantity(pi.itemId, -1)}
+                                className="px-2 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold"
+                              >
+                                -
+                              </button>
+                              <span className="px-2.5 py-1 font-mono font-bold text-slate-800 dark:text-slate-200">
+                                {pi.quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => updatePackageItemQuantity(pi.itemId, 1)}
+                                className="px-2 py-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold"
+                              >
+                                +
+                              </button>
+                            </div>
+                            <span className="font-mono font-medium text-slate-700 dark:text-slate-300 w-16 text-right">
+                              {formatMoney(unitPrice * pi.quantity, activeProperty.currencySymbol)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removePackageItem(pi.itemId)}
+                              className="p-1 text-slate-400 hover:text-rose-500 rounded"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Selected items total</span>
+                  <output aria-label="Selected items total" aria-live="polite" className="font-mono font-bold text-lg">
+                    {formatMoney(packageForm.items.reduce((sum, row) => sum + (items.find(item => item.id === row.itemId)?.price || 0) * row.quantity, 0), activeProperty.currencySymbol)}
+                  </output>
+                </div>
+                <p className="text-xs text-slate-500">Calculated from each selected item’s catalogue price × quantity. Service charge, tax and any automatic Photo lines are added when billing.</p>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  disabled={packageBusy}
+                  onClick={() => setShowPackageModal(false)}
+                  className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={packageBusy || packageForm.items.length === 0}
+                  className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition disabled:opacity-50"
+                >
+                  {packageBusy ? 'Saving…' : editingPackage ? 'Save Changes' : 'Create Package'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL: DELETE PACKAGE */}
+      {deletePackageTarget && (
+        <Modal
+          label={`Delete package ${deletePackageTarget.name}`}
+          busy={packageBusy}
+          onClose={() => { if (!packageBusy) setDeletePackageTarget(null); }}
+          error={errorMsg}
+        >
+          <div className="surface guard-dialog p-6 space-y-4">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              Delete {deletePackageTarget.name}?
+            </h2>
+            <p className="text-sm text-slate-500">
+              This package ({deletePackageTarget.code}) will be permanently removed. Previously created bills with this package will retain all their items and totals.
+            </p>
+            <div className="dialog-actions flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={packageBusy}
+                onClick={() => setDeletePackageTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={packageBusy}
+                onClick={handleDeletePackage}
+              >
+                {packageBusy ? 'Deleting…' : 'Delete Package'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {isGlobalAdmin && deletePropertyTarget && <Modal label={`Delete property ${deletePropertyTarget.name}`} onClose={closePropertyDelete} busy={propertyDeleting} error={errorMsg}>
@@ -1258,6 +1891,41 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                       onChange={(e) => setPropForm({ ...propForm, nextCheckNumber: parseInt(e.target.value, 10) || 1001 })}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
+                  <div>
+                    <label htmlFor="adminview-photo-price" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Photo Line Price ({propForm.currencySymbol || '$'})
+                    </label>
+                    <input
+                      id="adminview-photo-price"
+                      type="number"
+                      required
+                      min="0"
+                      step="0.001"
+                      value={propForm.autoPhotoPrice}
+                      onChange={(e) => setPropForm({ ...propForm, autoPhotoPrice: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">Pre-tax/SC rate (default: $41.975). Tax & SC applied at checkout.</p>
+                  </div>
+                  <div>
+                    <label htmlFor="adminview-photo-comm" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Photo Staff Commission ({propForm.currencySymbol || '$'})
+                    </label>
+                    <input
+                      id="adminview-photo-comm"
+                      type="number"
+                      required
+                      min="0"
+                      step="0.01"
+                      value={propForm.autoPhotoCommission}
+                      onChange={(e) => setPropForm({ ...propForm, autoPhotoCommission: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">Direct commission credited to the photographer (default: $4.50).</p>
                   </div>
                 </div>
 
@@ -1631,6 +2299,18 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         </Modal>
       )}
 
+      {activeTab === 'items' && bulkDeleteTarget && bulkDeleteTarget.propertyId === activeProperty?.id && <Modal label="Delete selected catalogue activities" busy={itemBusy} onClose={() => { if (!itemBusy) { setBulkDeleteTarget(null); setErrorMsg(null); } }} error={errorMsg}>
+        <div className="p-6 space-y-4">
+          <h3 className="text-lg font-bold">Delete {bulkDeleteTarget.items.length} selected activities?</h3>
+          <p>These activities will be removed from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore activities from the deleted activities list.</p>
+          <p className="text-sm text-slate-500">All selected activities are included, even those hidden by the current filters.</p>
+          <ul className="max-h-60 overflow-y-auto space-y-1" aria-label="Activities to delete">{bulkDeleteTarget.items.map(item => <li key={item.id}><strong>{item.code}</strong> · {item.name}</li>)}</ul>
+          <div className="dialog-actions">
+            <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setBulkDeleteTarget(null); setErrorMsg(null); }}>Cancel</button>
+            <button type="button" className="danger-button" disabled={itemBusy || !bulkDeleteTarget.items.length} onClick={handleBulkDeleteItems}>{itemBusy ? 'Deleting…' : `Delete ${bulkDeleteTarget.items.length} activities`}</button>
+          </div>
+        </div>
+      </Modal>}
       {deleteItemTarget && <Modal label="Delete activity" busy={itemBusy} onClose={() => { if (!itemBusy) { setDeleteItemTarget(null); setErrorMsg(null); } }} error={errorMsg}>
         <div className="p-6 space-y-4"><h3 className="text-lg font-bold">Delete {deleteItemTarget.name}?</h3><p>This removes the activity from new bills for {activeProperty?.name}. Existing bills and history are retained. You can restore it from the deleted activities list.</p><div className="flex gap-2"><button className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(null); setErrorMsg(null); }}>Cancel</button><button className="primary-button" disabled={itemBusy} onClick={handleDeleteItem}>{itemBusy ? 'Deleting…' : 'Delete activity'}</button></div></div>
       </Modal>}
@@ -1764,9 +2444,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
                 <label className="flex items-start gap-2"><input type="checkbox" checked={itemForm.includesComplimentaryMedia} onChange={event => setItemForm({ ...itemForm, includesComplimentaryMedia: event.target.checked })} />
-                  <span className="font-semibold">Include Photo ($57.50)</span>
+                  <span className="font-semibold">Include Photo ($41.975)</span>
                 </label>
-                <p className="text-xs text-slate-500">Adds a separate Photo line at $57.50 per unit on top of the activity price. Select one team member on that line to earn $4.50 per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
+                <p className="text-xs text-slate-500">Adds a separate Photo line at $41.975 per unit on top of the activity price. Select one team member on that line to earn $4.50 per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
               </div>
 
               <PersonalCommissionEditor value={commissionSelections} onChange={setCommissionSelections}

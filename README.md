@@ -39,9 +39,9 @@ A fresh database has no demo accounts. Build the backend and run `npm run bootst
 - The activity editor’s **Calculator preview** button opens a **Try a bill** calculator that previews quantity, discount, the course/dive percentage pool, and fixed employee payments separately. Its complimentary-service example keeps fixed payments while reducing the percentage pool to zero. Preview quantity/discount do not change the activity.
 - Catalogue search combines name/code, category, pool and photo/video filters. Select up to 200 active services to enable or disable automatic Photo lines; review the current and proposed settings before saving. Changes apply together, and a changed service requires a fresh review. Existing bills retain their saved payment rules.
 - In Reports → Staff commissions, **Why this amount?** traces each employee’s pool shares, fixed payments, tips and base-leader override to the originating bill and service. Calculations show eligible-recipient counts and any rounding adjustment needed to reconcile the displayed entries to payroll.
-- Choose **No commissions for this activity** for services that earn no pool or employee payments. This keeps the guest price and normal charges while saving No pool, no employee rates and no automatic Photo line. Protected billed pool rules still require a new activity. In spreadsheets, use `No pool`, leave all employee payment columns blank, and set Include Photo ($57.50) to `No`.
-- Activity employee payments use role checkboxes and labelled amounts per service unit, with a live payment preview. Managers can configure Seller, Guide / Divemaster, Instructor, Photographer and Videographer payments without entering role codes or JSON. The automatic Photo setting shows the added $57.50 charge and fixed $4.50 employee payment, and retains separate media settings for later use.
-- In Administration → Catalogue, managers and administrators can tick **Include Photo ($57.50)**. Selecting that activity on a new bill adds a linked **Photo** line at **$57.50 per unit on top of the activity price**. Select one team member on the Photo line to earn **$4.50 per unit**; leaving it unassigned pays no Photo commission. The parent activity retains other roles and contributes to its own pool, but pays no separate photo/video commission. Photo quantity follows the activity; removing the activity removes its Photo. The activity discount does not discount the Photo automatically; its discount can be adjusted separately. Normal property tax and service charge apply. Existing saved bills keep their original prices and bundled commission snapshots. Old drafts are converted and reviewed before saving. Apply the additive automatic-photo-lines migration before serving this version.
+- Choose **No commissions for this activity** for services that earn no pool or employee payments. This keeps the guest price and normal charges while saving No pool, no employee rates and no automatic Photo line. Protected billed pool rules still require a new activity. In spreadsheets, use `No pool`, leave all employee payment columns blank, and set Include Photo ($41.975) to `No`.
+- Activity employee payments use role checkboxes and labelled amounts per service unit, with a live payment preview. Managers can configure Seller, Guide / Divemaster, Instructor, Photographer and Videographer payments without entering role codes or JSON. The automatic Photo setting shows the added $41.975 charge and fixed $4.50 employee payment, and retains separate media settings for later use.
+- In Administration → Catalogue, managers and administrators can tick **Include Photo ($41.975)**. Selecting that activity on a new bill adds a linked **Photo** line at **$41.975 per unit on top of the activity price**. Select one team member on the Photo line to earn **$4.50 per unit**; leaving it unassigned pays no Photo commission. The parent activity retains other roles and contributes to its own pool, but pays no separate photo/video commission. Photo quantity follows the activity; removing the activity removes its Photo. The activity discount does not discount the Photo automatically; its discount can be adjusted separately. Normal property tax and service charge apply. Existing saved bills keep their original prices and bundled commission snapshots. Old drafts are converted and reviewed before saving. Apply the additive automatic-photo-lines migration before serving this version.
 - Global administrators create properties, edit their details through Administration → Properties → Edit property, and remove them from the workspace. Editing supports the name, unique code, location, currency, tax and service charge rates, next check number, active status and PMS resorts. Removal retains bills, staff, payroll and audit history, revokes assignments, and reserves the property code.
 - Property managers manage bill activities through Administration → Catalogue for their assigned properties. They can add activities, edit prices and details, delete activities from new bills and restore them. Each property's codes and prices are independent. Use a separate activity code for a promotional offer and delete it when it ends; promotions are managed manually. Saved bill prices remain unchanged. Pool rules on billed activities are fixed to preserve historical payroll, so create a new activity for different pool rules. Centre staff can read active activities but cannot manage the catalogue; global administrators retain access across properties.
 - Room lookup uses the server-only PMS key and each property's PMS resort mapping, which only global administrators can change. Users choose the correct guest when a room has multiple occupants before applying guest details.
@@ -50,9 +50,13 @@ Keep `AUTHENTICATOR_ENCRYPTION_KEY` stable and backed up with the database; repl
 
 Authenticator enrollment supports recovery and gates workspace access; normal sign-in does not require an OTP challenge. It is not enforced MFA on every login.
 
+Global administrators can open **Customize catalogue** or **Customize commission rules** on each card in Administration → Properties. The Commission rules screen lists that property’s activity pool rates and employee payments, with direct editing and a **New activity with these rules** option for changing protected pool rules. Use **Customize property** to switch centres, and **Configure staff pool sharing** to manage eligible staff. Existing saved bill commissions remain unchanged.
+
+Global administrators land on **All properties overview**, with a date range of up to 366 days, property search, currency filters and comparison sorting. Revenue is active-bill gross sales less discounts, before service charge, tax and tips; commissions reuse the property payroll calculation, including tips. Totals stay grouped by currency with no conversion. Missing attendance counts unrecorded entries for employed, active dive staff on past dates, including partial days, excluding today and future dates. Inactive properties remain visible; removed properties are excluded. Select a financial figure to open that property's bills or payroll for the selected period; discounts open discounted active bills, and missing attendance opens the first incomplete date. Select a property name for its daily overview. The cross-property API is restricted to global administrators; managers and centre staff retain their existing overview. No database migration is required.
+
 ## Verification
 
-Keyboard navigation uses Alt + Shift (Option + Shift on Mac) plus 1 for Overview, 2 for New bill, 3 for Bills, 4 for Attendance, 5 for Reports & payroll, 6 for Administration (managers/admins), and 7 for Water sports (when enabled). Alt + Shift + K or the keyboard button in the top bar opens the shortcut guide. Shortcuts pause in form fields, editable content, dialogs and mobile navigation. Page changes retain the existing unsaved-work warnings.
+Keyboard navigation uses Alt + Shift (Option + Shift on Mac) plus 1 for Overview, 2 for New bill, 3 for Bills, 4 for Attendance, 5 for Reports & payroll, 6 for Administration (managers/admins), and 7 for Dive centre (when enabled). Alt + Shift + K or the keyboard button in the top bar opens the shortcut guide. Shortcuts pause in form fields, editable content, dialogs and mobile navigation. Page changes retain the existing unsaved-work warnings.
 
 Start PostgreSQL before running backend tests. `TEST_DATABASE_URL` must point to a separate database with a name ending in `_test`. Each database integration suite creates and removes its own random schema; tests refuse the application database.
 
@@ -68,6 +72,8 @@ CI runs tests against PostgreSQL 18, builds both production images and exercises
 
 ## Production and existing data
 
+For the independent testing and production servers, follow the [testing-first CI/CD setup and operations guide](deploy/CI-CD.md). It covers GitHub Actions, GHCR, private deployment connectivity, server enrollment, testing releases and explicit production promotion.
+
 Use the [production runbook](deploy/PRODUCTION.md) for Docker Compose, HTTPS, secrets, backups and restores. Use the [SQLite migration guide](deploy/SQLITE-TO-POSTGRESQL.md) for an existing installation. PostgreSQL has its own migration history; SQLite migrations must not be replayed against it.
 
 For a trial alongside the current release at the same URL, use [parallel testing](deploy/PARALLEL-TESTING.md). It freezes the running live images and provides an isolated testing stack at `/?version=testing`, with separate sessions/data and a return-to-live banner.
@@ -75,7 +81,7 @@ For a trial alongside the current release at the same URL, use [parallel testing
 
 Private backups, reference materials and the previous SQLite schema are retained under ignored `backups/`. Local databases, credentials, reference PDFs, development dependencies and build outputs are excluded from production build contexts. Production uses compiled backend code with runtime dependencies and a static frontend served by Caddy.
 
-Catalogue managers can download Excel/CSV files or templates and review imports in Administration → Catalogue. Exports now use labelled columns: `Item Code`, `Service Name`, `Category`, `Price`, `Pool`, `Pool Rate (%)`, `Certifications Amount / Unit`, five employee payment columns (Seller, Guide, Instructor, Photographer, Videographer), `Include Photo ($57.50)`, and `Status`. Enter `10` for a 10% course/dive pool rate. Certifications use a fixed amount per unit; employee payments are fixed amounts per unit. Blank employee payment cells disable that role; explicit `0` retains a role with no payment. Photo `Yes` adds a separate $57.50 Photo line per unit to new bills and pays its selected team member $4.50 per unit; separate photographer/video rates are paused. `No` uses those separate rates; blank retains an existing checkbox setting. Excel templates include dropdowns, notes and an Instructions sheet. Existing six-column catalogue files and the previous 14-column photo/video header remain importable.
+Catalogue managers can download Excel/CSV files or templates and review imports in Administration → Catalogue. Exports now use labelled columns: `Item Code`, `Service Name`, `Category`, `Price`, `Pool`, `Pool Rate (%)`, `Certifications Amount / Unit`, five employee payment columns (Seller, Guide, Instructor, Photographer, Videographer), `Include Photo ($41.975)`, and `Status`. Enter `10` for a 10% course/dive pool rate. Certifications use a fixed amount per unit; employee payments are fixed amounts per unit. Blank employee payment cells disable that role; explicit `0` retains a role with no payment. Photo `Yes` adds a separate $41.975 Photo line per unit to new bills and pays its selected team member $4.50 per unit; separate photographer/video rates are paused. `No` uses those separate rates; blank retains an existing checkbox setting. Excel templates include dropdowns, notes and an Instructions sheet. Existing six-column catalogue files and the previous 14-column photo/video header remain importable.
 
 Imports validate every row before writing, then show new/update counts and readable pool/payment settings for review. Existing codes update this property's matching services; new codes are retained, and blank codes receive generated property-local codes such as `DIV-001`. Up to 2,000 activities / 3 MB are supported. Saved bill prices and protected pool rules remain unchanged.
 
@@ -98,24 +104,60 @@ issuance is disabled. See [proxy deployment](deploy/REVERSE-PROXY.md).
 If Nginx Proxy Manager is managed by someone else and already forwards the
 whole site to 8080, use [proxy relay mode](deploy/PROXY-RELAY.md).
 
-## Water sports forms and tablet signing
+## Dive centre guest forms
 
-Water Sports is disabled by default in production: its navigation, tablet
-signing entry point and API routes are unavailable. Existing database records
-and migrations are retained. Keep `ENABLE_WATER_SPORTS=false` in production.
-To enable it later with Docker Compose, set `ENABLE_WATER_SPORTS=true` and rebuild
-both backend and frontend. Local Vite/Node development keeps it available unless
-explicitly disabled (`VITE_ENABLE_WATER_SPORTS=false` and
-`ENABLE_WATER_SPORTS=false`, respectively).
+The Dive centre module replaces the Water sports navigation and includes a mobile
+three-step guest journey: confirm identity from PMS, read a published agreement in
+a selected language, and review/sign. Guardians sign for participants under 18.
+The page shows link expiry guidance, preserves a signature after a failed save,
+and confirms the signed record reference. Agreement languages are configurable;
+the surrounding interface currently remains English.
 
-Apply `npm run migrate:deploy --prefix backend` before serving the updated API. The additive water sports migration creates published disclaimers, temporary tablet sessions and signed records. It does not change existing bills or their check-number sequence.
+Employees can see today’s signed forms, total records and active guest links.
+A preparation checklist checks the villa, PMS property mapping, available
+agreement languages and required equipment details. Active links refresh every
+30 seconds and can be cancelled. Signed records remain searchable by villa and
+can be printed/saved as PDF. A pending list shows up to 20 recent active links.
 
-Open **Water sports → Prepare a form**, choose participation, snorkeling excursion, snorkeling gear rental or aid snorkeling gear, and enter the villa number. Staff enter Check No. and notes; rental/aid forms require mask and fins numbers, and rentals also require the duration and expected return date. Create a tablet link and open it on a separate guest tablet/browser without a staff login. Links expire after 20 minutes, cover one prepared room and one form, and can be cancelled from the preparation screen. Prepare a new link for each guest/form.
+Diving participation uses its own `DIVING` document category. A property manager
+or global administrator must publish the centre’s approved text in **Dive centre
+→ Disclaimer languages → Diving participation** before preparing diving forms.
+Legacy water sports wording is not substituted for a diving agreement. Existing
+snorkeling, gear rental and aid gear forms and their documents remain available.
+Signed records keep their original document snapshot, hash and signature.
 
-On the tablet, guests choose a disclaimer language, read and acknowledge it, then enter the prepared room number. The existing PMS integration retrieves all occupants across the property's configured PMS resorts. Guests select their own name and review their room, departure date and staff-entered fields before signing with a finger/stylus. The participant must declare whether they are under 18; a minor requires their parent/guardian's full name and signature on their behalf. The current PMS contract does not supply age or date of birth, so age is declared rather than inferred. If PMS is unavailable or the guest is missing, staff must resolve the lookup and prepare/retry the form; this flow does not invent guest details.
+The module remains off by default in production. Enable the backend with
+`ENABLE_DIVE_CENTRE=true` and the frontend build with
+`VITE_ENABLE_DIVE_CENTRE=true`. Existing `ENABLE_WATER_SPORTS` and
+`VITE_ENABLE_WATER_SPORTS` flags remain fallback aliases; the new flags take
+precedence. Both local development entry points enable the module unless explicitly
+disabled. The supplied CI/CD release variant currently builds this module disabled;
+coordinate a matching enabled build/runtime variant before deploying it.
 
-The form date is the server's current Maldives business date, not the arrival date. The PMS provides a reservation confirmation number but no check number; confirmation is retained separately and Check No. remains staff entry. A missing PMS departure date is explicitly shown as not supplied. Staff can find completed forms under **Signed records**, filter by villa, view signatures and print/save an individual record as PDF. Records retain the exact disclaimer text, language, document version and SHA-256 hash, guest details, guardian declaration, staff fields, server signing time and preparing staff account. Signed records have no edit/delete endpoint. The database assigns a globally unique, increasing running number across all four form types and properties, without monthly/yearly resets. PostgreSQL sequence numbers can have gaps; they are not bill check numbers. Retried or simultaneous submissions of the same tablet session create only one record.
+New links use `#dive-centre-tablet/<capability>` and API routes use `/api/dive-centre`.
+Old `#water-sports-tablet` links and `/api/water-sports` routes remain compatible
+when the module is enabled. No tables are renamed or records removed. The existing
+water sports migration provides storage; no new migration is required for this
+module update. Capabilities remain room-scoped, expire after 20 minutes and permit
+only one signed record. Guest lookup candidates are cleared after completion.
+Use HTTPS and a separate guest device/browser without a staff login.
 
-For Vilu Reef (property code or PMS mapping `VILU`), the initial disclaimers are transcribed from the provided five-page document, with spelling/grammar normalized, plus Russian, Simplified Chinese, French, Arabic, Italian and German translations. Review these translations against approved resort wording before guest use. Other properties require their own published wording. Property managers and global administrators can publish any additional language or revised text under **Disclaimer languages**, independently for participation (also used by both gear forms) and snorkeling. Use a language code such as `de`, `fr`, `ru` or `zh-CN`. Text is stored and displayed as plain text with Unicode and automatic writing direction. The disclaimer language changes; the surrounding form controls currently remain English. New wording applies to newly created links; existing links and signed records retain the version originally offered.
+## Dive package totals
 
-Tablet links carry a random, scoped capability in their URL fragment; only its hash is stored. Guest API requests do not use a staff token or reveal other rooms, booking numbers or saved records. Room lookup is capped per session and rate limited. Once signed, the session's temporary list of room occupants is cleared. Use HTTPS for tablets, as in the existing production deployment.
+The package builder calculates the total as the sum of each selected catalogue
+item’s current price multiplied by its quantity. Package prices cannot be entered
+manually. The API calculates totals on create/update and returns current catalogue
+totals when listing packages, including packages saved with an older custom price.
+Adding a package to a bill uses those catalogue item prices without an automatic
+package discount. Automatic Photo lines, service charges and tax are applied by
+the existing billing rules. Previously saved bills retain their recorded amounts.
+
+## Checkout discount
+
+Enter a percentage from 0 to 100 in **New bill → Enter discount (%)**. The
+percentage applies once to the remaining item and automatic Photo totals after
+line discounts, before service charge and tax; tips are excluded. The server
+allocates it across bill lines so saved discounts, percentage commission pools,
+reports and exports agree with checkout. Fixed staff payments still follow their
+catalogue rates. The percentage is kept in the browser draft, shown at review,
+and recorded in the bill creation audit entry. No new database migration is needed.

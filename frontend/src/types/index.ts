@@ -13,6 +13,8 @@ export interface Property {
   taxRate: number;
   serviceChargeRate: number;
   nextCheckNumber: number;
+  autoPhotoPrice?: number;
+  autoPhotoCommission?: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -263,4 +265,51 @@ export interface PmsGuest {
   checkoutDate: string | null;
   arrivalDate: string | null;
   confirmationNumber: string | null;
+}
+
+export interface GlobalDashboardProperty {
+  propertyId: string;
+  name: string;
+  code: string;
+  isActive: boolean;
+  currency: string;
+  currencySymbol: string;
+  revenue: number;
+  discounts: number;
+  commissions: number;
+  billCount: number;
+  missingAttendance: number;
+  missingDays: number;
+  firstMissingDate: string | null;
+}
+
+export interface GlobalDashboardReport {
+  period: { startDate: string; endDate: string; attendanceBefore: string };
+  properties: GlobalDashboardProperty[];
+  totals: {
+    propertyCount: number;
+    missingAttendance: number;
+    currencies: { currency: string; revenue: number; discounts: number; commissions: number; billCount: number }[];
+  };
+}
+
+export interface DivePackageItem {
+  id?: string;
+  packageId?: string;
+  itemId: string;
+  quantity: number;
+  item?: Item;
+}
+
+export interface DivePackage {
+  id: string;
+  propertyId: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  items: DivePackageItem[];
 }

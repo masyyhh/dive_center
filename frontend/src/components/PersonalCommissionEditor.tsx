@@ -47,8 +47,8 @@ export const PersonalCommissionEditor: React.FC<{
         </div>;
       })}
     </div>
-    {combinedMedia && <div className="commission-combined-note"><Camera size={19} aria-hidden="true" /><div><strong>Separate Photo added · $57.50 / unit <span>{formatMoney(4.5, currencySymbol)} / unit</span></strong>
-      <p>Selecting this activity adds a Photo line at $57.50 per unit on top of the activity price. Select one team member on that line to receive $4.50 per unit.</p></div></div>}
+    {combinedMedia && <div className="commission-combined-note"><Camera size={19} aria-hidden="true" /><div><strong>Separate Photo added · $41.975 / unit <span>{formatMoney(4.5, currencySymbol)} / unit</span></strong>
+      <p>Selecting this activity adds a Photo line at $41.975 per unit on top of the activity price. Select one team member on that line to receive $4.50 per unit.</p></div></div>}
     {showPreview && <div className="commission-preview" aria-live="polite" aria-atomic="true">
       <div className="commission-preview-heading"><Check size={16} aria-hidden="true" /><strong>Payment preview</strong><span>1 service unit</span></div>
       {payments.length > 0 && <dl>{payments.map(payment => <div key={payment.label}><dt>{payment.label}</dt><dd>{formatMoney(payment.amount, currencySymbol)}</dd></div>)}</dl>}

@@ -15,6 +15,7 @@ import { propertiesRouter } from './routes/properties.routes';
 import { usersRouter } from './routes/users.routes';
 import { staffRouter } from './routes/staff.routes';
 import { itemsRouter } from './routes/items.routes';
+import { packagesRouter } from './routes/packages.routes';
 import { billsRouter } from './routes/bills.routes';
 import { presenceRouter } from './routes/presence.routes';
 import { reportsRouter } from './routes/reports.routes';
@@ -60,10 +61,14 @@ app.use('/api/properties', propertiesRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/items', itemsRouter);
+app.use('/api/packages', packagesRouter);
 app.use('/api/guests', guestsRouter);
-const waterSportsEnabled = process.env.ENABLE_WATER_SPORTS === 'true' ||
-  (process.env.NODE_ENV !== 'production' && process.env.ENABLE_WATER_SPORTS !== 'false');
-if (waterSportsEnabled) app.use('/api/water-sports', waterSportsRouter);
+const diveCentreFlag = process.env.ENABLE_DIVE_CENTRE ?? process.env.ENABLE_WATER_SPORTS;
+const diveCentreEnabled = diveCentreFlag === 'true' || (process.env.NODE_ENV !== 'production' && diveCentreFlag !== 'false');
+if (diveCentreEnabled) {
+  app.use('/api/dive-centre', waterSportsRouter);
+  app.use('/api/water-sports', waterSportsRouter); // Preserve existing tablet links and integrations.
+}
 app.use('/api/bills', billsRouter);
 app.use('/api/presence', presenceRouter);
 app.use('/api/reports', reportsRouter);

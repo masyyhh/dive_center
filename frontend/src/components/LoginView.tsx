@@ -47,7 +47,7 @@ export const LoginView: React.FC = () => {
         <img className="signin-mark" src={`${import.meta.env.BASE_URL}logo.png`} alt="Dive Centre logo" width={297} height={170} />
         <p className="signin-brand">DIVE CENTRE MANAGER</p>
         <h1 id="signin-heading">Welcome back</h1>
-        <p className="signin-intro">Sign in with your unique username and password. Existing email-shaped sign-in IDs still work.</p>
+        <p className="signin-intro">Sign in with your unique username and password.</p>
 
         {message && <p className="signin-help" role="status">{message}</p>}
         {error && <p className="signin-error" role="alert">{error}</p>}
@@ -85,3 +85,4 @@ export const LoginView: React.FC = () => {
     </div>
   );
 };
+

@@ -75,7 +75,7 @@ test('new bills snapshot percentage pools after discounts and before tax/service
   assert.equal(result.staffResults[0].overrideCommission, 8.2);
 });
 test('complimentary course/dive units contribute zero while media payments remain fixed', async () => {
-  const saved = await save([line('course', 1, 100, 100), line('dive', 1, 0), { ...line('media', 2, 0), clientLineId: 'media' }, { itemName: 'Photo', categoryName: 'Photo & Video', autoPhotoFor: 'media', quantity: 2, unitPrice: 57.5, photoStaffId: 'leader' }]);
+  const saved = await save([line('course', 1, 100, 100), line('dive', 1, 0), { ...line('media', 2, 0), clientLineId: 'media' }, { itemName: 'Photo', categoryName: 'Photo & Video', autoPhotoFor: 'media', quantity: 2, unitPrice: 41.975, photoStaffId: 'leader' }]);
   assert.equal(saved.status, 201);
   assert.equal(saved.body.bill.items.find(item => item.itemId === 'course').poolContributionAmount, 0);
   assert.equal(saved.body.bill.items.find(item => item.itemId === 'dive').poolContributionAmount, 0);

@@ -29,7 +29,7 @@ test.before(async () => {
   const line = (id, quantity, unitPrice, discountPercent = 0) => ({ itemId: id, itemName: id, categoryName: 'Services', quantity, unitPrice, discountPercent });
   const result = await request(billsRouter, 'POST', '/', { user, body: { propertyId: 'a', checkNumber: 100, businessDate: date, guestName: 'Guest', roomNumber: '101', tipAmount: 12, tipStaffIds: ['leader', 'instructor'], items: [
     line('course', 2, 100, 25), line('dive', 1, 100), line('dive', 1, 10),
-    { ...line('media', 2, 0), clientLineId: 'media' }, { itemName: 'Photo', categoryName: 'Photo & Video', autoPhotoFor: 'media', quantity: 2, unitPrice: 57.5, photoStaffId: 'instructor' }, line('cert', 1, 100),
+    { ...line('media', 2, 0), clientLineId: 'media' }, { itemName: 'Photo', categoryName: 'Photo & Video', autoPhotoFor: 'media', quantity: 2, unitPrice: 41.975, photoStaffId: 'instructor' }, line('cert', 1, 100),
   ] } });
   assert.equal(result.status, 201);
 });

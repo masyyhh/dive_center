@@ -1,4 +1,4 @@
-// Keep unfinished Water Sports available locally, but off in production builds
-// unless it is explicitly enabled at build time.
-export const waterSportsEnabled = import.meta.env.VITE_ENABLE_WATER_SPORTS === 'true' ||
-  (import.meta.env.DEV && import.meta.env.VITE_ENABLE_WATER_SPORTS !== 'false');
+// The legacy flag remains supported for existing deployments.
+const diveCentreFlag = import.meta.env.VITE_ENABLE_DIVE_CENTRE ?? import.meta.env.VITE_ENABLE_WATER_SPORTS;
+export const diveCentreEnabled = diveCentreFlag === 'true' || (import.meta.env.DEV && diveCentreFlag !== 'false');
+export const waterSportsEnabled = diveCentreEnabled;
