@@ -717,7 +717,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       const activity = { ...itemForm, ...payments, ...(noCommissions ? { poolType: 'NONE', poolContribution: 0, includesComplimentaryMedia: false } : {}) };
       await apiFetch(editingItem ? `/items/${editingItem.id}` : '/items', {
         method: editingItem ? 'PUT' : 'POST',
-        body: JSON.stringify(editingItem ? activity : { ...activity, code: undefined, propertyId: activeProperty.id }),
+        body: JSON.stringify(editingItem ? activity : { ...activity, code: itemForm.code.trim() || undefined, propertyId: activeProperty.id }),
       });
       setShowItemModal(false); setEditingItem(null);
       showNotification(`Activity '${itemForm.name}' ${editingItem ? 'updated' : 'added'} for ${activeProperty.name}.`);
@@ -2322,20 +2322,22 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
               {editingItem ? 'Edit activity' : 'Add activity'} · {activeProperty?.name}
             </h3>
-            <p className="text-sm text-slate-500">Create a separate activity for a promotional offer. Its code is generated automatically; delete the activity when the offer ends.</p>
+            <p className="text-sm text-slate-500">Create a separate activity for a promotional offer. Enter an item code or leave it blank to generate one automatically; delete the activity when the offer ends.</p>
             <form onSubmit={handleSaveItem} className="space-y-3 text-sm">
               <fieldset disabled={itemBusy} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="activity-code" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    Item Code (system generated)
+                    Item Code {editingItem ? '(read only)' : '(optional)'}
                   </label>
                   <input
                     id="activity-code"
                     type="text"
-                    readOnly
-                    value={editingItem ? itemForm.code : ''}
-                    placeholder="Assigned on save, e.g. DIV-001"
+                    readOnly={Boolean(editingItem)}
+                    maxLength={50}
+                    value={itemForm.code}
+                    onChange={event => setItemForm(form => ({ ...form, code: event.target.value }))}
+                    placeholder="Leave blank to generate, e.g. DIV-001"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono focus:outline-none"
                   />
                 </div>

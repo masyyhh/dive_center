@@ -14,7 +14,7 @@ const { billsRouter } = loadTypeScript('src/routes/bills.routes.ts', stubs);
 const tokens = {};
 const call = (method, url, body = {}, role = 'manager', query = {}, router = itemsRouter) => request(router, method, url, { user: null, body, query, headers: tokens[role] ? { authorization: `Bearer ${tokens[role]}`, 'x-property-id': 'a' } : {} });
 const catalogue = (propertyId = 'a', role = 'manager', includeInactive) => call('GET', '/', {}, role, { propertyId, ...(includeInactive === undefined ? {} : { includeInactive }) });
-const activity = (propertyId = 'a') => ({ propertyId, categoryId: `cat-${propertyId}`, code: 'PROMO', name: 'Sunset dive promotion', price: 39.5, poolType: 'DIVE_POOL', poolContribution: 5, personalRoles: 'seller,guide', personalRatesJson: '{"seller":2,"guide":3}' });
+const activity = (propertyId = 'a') => ({ propertyId, categoryId: `cat-${propertyId}`, name: 'Sunset dive promotion', price: 39.5, poolType: 'DIVE_POOL', poolContribution: 5, personalRoles: 'seller,guide', personalRatesJson: '{"seller":2,"guide":3}' });
 
 test.beforeEach(async () => {
   await prisma.auditLog.deleteMany(); await prisma.billItem.deleteMany(); await prisma.bill.deleteMany();
@@ -94,6 +94,22 @@ test('global administrators retain activity management across properties', async
   assert.equal((await call('PUT', `/${created.body.item.id}`, { price: 55 }, 'admin')).status, 200);
   assert.equal((await call('DELETE', `/${created.body.item.id}`, {}, 'admin')).status, 200);
   assert.equal((await call('PUT', `/${created.body.item.id}`, { isActive: true }, 'admin')).status, 200);
+});
+
+test('creation preserves supplied codes and generates missing, empty or whitespace-only codes', async () => {
+  const custom = await call('POST', '/', { ...activity(), code: '  PROMO-2026  ' });
+  assert.equal(custom.status, 201);
+  assert.equal(custom.body.item.code, 'PROMO-2026');
+  assert.equal((await call('POST', '/', { ...activity(), code: 'PROMO-2026' })).status, 409);
+  await call('DELETE', `/${custom.body.item.id}`);
+  assert.equal((await call('POST', '/', { ...activity(), code: 'PROMO-2026' })).status, 409);
+  assert.equal((await call('POST', '/', { ...activity('b'), code: 'PROMO-2026' }, 'admin')).status, 201);
+  assert.equal((await call('POST', '/', { ...activity(), code: 'DIV-010' })).status, 201);
+  for (const [index, code] of [undefined, '', '   '].entries()) {
+    const created = await call('POST', '/', { ...activity(), code });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.item.code, `DIV-0${11 + index}`);
+  }
 });
 
 test('invalid prices, rates, flags and duplicate codes cannot corrupt the catalogue; free promotional activities are supported', async () => {
