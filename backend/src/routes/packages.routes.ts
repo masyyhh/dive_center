@@ -1,3 +1,4 @@
+import { positiveIntSchema } from '../utils/fields';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -10,22 +11,33 @@ export const packagesRouter = Router();
 
 const packageItemInputSchema = z.object({
   itemId: z.string().trim().min(1, 'Item ID is required.'),
-  quantity: z.number().int().positive('Quantity must be at least 1.').default(1),
+  quantity: positiveIntSchema.default(1),
 });
+
+const packageItemsSchema = z.array(packageItemInputSchema).min(1, 'At least one service item must be included in the package.').max(50)
+  .refine(items => {
+    const quantities = new Map<string, number>();
+    for (const item of items) {
+      const total = (quantities.get(item.itemId) ?? 0) + item.quantity;
+      if (total > 2147483647) return false;
+      quantities.set(item.itemId, total);
+    }
+    return true;
+  }, 'The combined quantity for each service cannot exceed 2147483647.');
 
 const createPackageSchema = z.object({
   propertyId: z.string().trim().min(1, 'Property ID is required.'),
   name: z.string().trim().min(2, 'Package name must have at least 2 characters.').max(200),
   code: z.string().trim().min(2, 'Package code must have at least 2 characters.').max(50).transform(val => val.toUpperCase()),
   description: z.string().trim().max(1000).optional().nullable(),
-  items: z.array(packageItemInputSchema).min(1, 'At least one service item must be included in the package.').max(50),
+  items: packageItemsSchema,
 });
 
 const updatePackageSchema = z.object({
   name: z.string().trim().min(2, 'Package name must have at least 2 characters.').max(200).optional(),
   description: z.string().trim().max(1000).optional().nullable(),
   isActive: z.boolean().optional(),
-  items: z.array(packageItemInputSchema).min(1, 'At least one service item must be included in the package.').max(50).optional(),
+  items: packageItemsSchema.optional(),
 });
 
 // GET /api/packages?propertyId=...

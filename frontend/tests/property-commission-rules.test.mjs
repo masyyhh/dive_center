@@ -12,7 +12,7 @@ const { outputText } = ts.transpileModule(source, { compilerOptions: { module: t
 const module = { exports: {} };
 new Function('require', 'module', 'exports', outputText)(name => {
   if (name === './PersonalCommissionEditor') return { PersonalCommissionSummary: ({ item }) => React.createElement('span', null, item.personalRatesJson) };
-  if (name === '../utils/format') return { formatMoney: (value, symbol) => `${symbol}${value.toFixed(2)}` };
+  if (name === '../utils/format') return { formatMoney: (value, symbol) => `${symbol}${value.toFixed(2)}`, formatUnitPrice: (value, symbol) => `${symbol}${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}` };
   return require(name);
 }, module, module.exports);
 const { CommissionRulesView } = module.exports;
@@ -24,7 +24,7 @@ test('property rules show percentage pools, fixed certifications and automatic P
   assert.match(html, /Commission rules · Centre A/);
   assert.match(html, /Dive pool · 12%/);
   assert.match(html, /Certifications · €20.00 \/ unit/);
-  assert.match(html, /Automatic Photo: \$41\.975 charge · \$4.50 employee payment per unit/);
+  assert.match(html, /Automatic Photo: €41\.975 charge · €4.50 employee payment per unit/);
   assert.match(html, /Edit commission rules for Boat dive/);
   assert.match(html, /New activity with these rules/);
 });
@@ -41,4 +41,10 @@ test('loading hides actions and busy operations disable editing', () => {
   assert.match(loading, /Loading commission rules/);
   assert.doesNotMatch(loading, /Edit rules/);
   assert.match(render({ busy: true }), /disabled=""[^>]*aria-label="Edit commission rules for Boat dive"/);
+});
+
+test('automatic Photo terms follow the selected property’s custom rates and currency', () => {
+  const html = render({ property: { id: 'a', name: 'Centre A', currencySymbol: '€', autoPhotoPrice: 55.125, autoPhotoCommission: 7 }, items: [{ ...item, includesComplimentaryMedia: true }] });
+  assert.match(html, /Automatic Photo: €55\.125 charge · €7\.00 employee payment per unit/);
+  assert.doesNotMatch(html, /41\.975|4\.50/);
 });

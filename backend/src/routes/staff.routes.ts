@@ -61,6 +61,9 @@ staffRouter.post('/role-titles', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPE
 staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, diveStaffOnly, activeOnDate, creditOnDate } = req.query;
+    if (typeof propertyId !== 'string' || !propertyId.trim()) return res.status(400).json({ error: 'Property ID is required.' });
+    if (diveStaffOnly !== undefined && diveStaffOnly !== 'true' && diveStaffOnly !== 'false') return res.status(400).json({ error: 'Choose true or false for diveStaffOnly.' });
+    if (activeOnDate !== undefined && !isBusinessDate(activeOnDate)) return res.status(400).json({ error: 'Enter a valid activeOnDate (YYYY-MM-DD).' });
 
     if (creditOnDate !== undefined && !isBusinessDate(creditOnDate)) {
       return res.status(400).json({ error: 'Valid creditOnDate (YYYY-MM-DD) is required.' });
@@ -103,7 +106,7 @@ staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
 
 const staffSchema = z.object({
   propertyId: z.string(),
-  name: z.string().min(2),
+  name: z.string().trim().min(2).max(200),
   email: z.string().email().optional().or(z.literal('')),
   roleTitle: roleTitleSchema,
   isDiveStaff: z.boolean().default(true),
@@ -114,6 +117,14 @@ const staffSchema = z.object({
   leavingDate: z.preprocess(value => value === '' ? null : value, z.string().refine(isBusinessDate, 'Enter a valid leaving date.').nullish()),
   loginAccess: z.object({ username: usernameSchema, password: passwordSchema }).optional(),
 });
+
+const staffUpdateSchema = staffSchema.omit({ propertyId: true, loginAccess: true }).partial()
+  .extend({
+    isActive: z.boolean().optional(), email: staffSchema.shape.email.nullable(),
+    isDiveStaff: z.boolean().optional(), isCoursePoolSharing: z.boolean().optional(),
+    isDivePoolSharing: z.boolean().optional(), isBaseLeaderOverride: z.boolean().optional(),
+  }).strict()
+  .refine(data => Object.keys(data).length > 0, 'Choose a staff field to update.');
 
 // POST /api/staff (GLOBAL_ADMIN or PROPERTY_MANAGER)
 staffRouter.post(
@@ -188,34 +199,18 @@ staffRouter.put(
 
       if (existing.property?.deletedAt) return res.status(410).json({ error: 'This property has been removed. Its records are read-only.' });
 
-      const parsedRoleTitle = roleTitleSchema.optional().safeParse(req.body.roleTitle);
-      if (!parsedRoleTitle.success) return res.status(400).json({ error: 'Enter a role title between 2 and 100 characters.' });
-
-      const {
-        name,
-        email,
-        isDiveStaff,
-        isCoursePoolSharing,
-        isDivePoolSharing,
-        isBaseLeaderOverride,
-        hireDate,
-        leavingDate,
-        isActive,
-      } = req.body;
+      const parsed = staffUpdateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'Check the staff details.', details: validationIssues(parsed.error) });
+      const data = parsed.data;
+      const hireDate = data.hireDate ?? existing.hireDate;
+      const leavingDate = data.leavingDate === undefined ? existing.leavingDate : data.leavingDate;
+      if (leavingDate && leavingDate < hireDate) return res.status(400).json({ error: 'Leaving date cannot be before the hire date.' });
 
       const updated = await prisma.staffMember.update({
         where: { id },
         data: {
-          name: name ?? undefined,
-          email: email !== undefined ? (email ? email : null) : undefined,
-          roleTitle: parsedRoleTitle.data,
-          isDiveStaff: isDiveStaff !== undefined ? Boolean(isDiveStaff) : undefined,
-          isCoursePoolSharing: isCoursePoolSharing !== undefined ? Boolean(isCoursePoolSharing) : undefined,
-          isDivePoolSharing: isDivePoolSharing !== undefined ? Boolean(isDivePoolSharing) : undefined,
-          isBaseLeaderOverride: isBaseLeaderOverride !== undefined ? Boolean(isBaseLeaderOverride) : undefined,
-          hireDate: hireDate ?? undefined,
-          leavingDate: leavingDate !== undefined ? (leavingDate ? leavingDate : null) : undefined,
-          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+          ...data,
+          email: data.email === '' ? null : data.email,
         },
       });
 

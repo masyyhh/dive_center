@@ -8,7 +8,7 @@ const { loadTypeScript } = require('./helpers/runtime.cjs');
 const audit = [];
 let categories = [];
 const prisma = {
-  property: { findUnique: async ({ where }) => ['male', 'ari'].includes(where.id) ? { id: where.id } : null },
+  property: { findUnique: async ({ where }) => ['male', 'ari'].includes(where.id) ? { id: where.id, isActive: true, deletedAt: null } : null },
   category: {
     aggregate: async ({ where }) => ({ _max: { sortOrder: Math.max(0, ...categories.filter(category => category.propertyId === where.propertyId).map(category => category.sortOrder)) } }),
     create: async ({ data }) => {

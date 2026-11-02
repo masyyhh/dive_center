@@ -1,7 +1,7 @@
 import React from 'react';
 import { Item, Property } from '../types';
 import { PersonalCommissionSummary } from './PersonalCommissionEditor';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 
 export const CommissionRulesView: React.FC<{
   property: Property | null;
@@ -29,7 +29,7 @@ export const CommissionRulesView: React.FC<{
       <tbody>{visible.map(item => <tr key={item.id} className="border-t border-slate-200 dark:border-slate-800">
         <td className="p-3"><strong>{item.name}</strong><div>{item.code} · {item.category?.name}</div></td>
         <td className="p-3">{item.poolType === 'NONE' ? 'No pool' : `${{ COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', CERTIFICATION_POOL: 'Certifications' }[item.poolType]} · ${item.poolType === 'CERTIFICATION_POOL' ? formatMoney(item.poolContribution, property?.currencySymbol || '$') + ' / unit' : item.poolContribution + '%'}`}</td>
-        <td className="p-3"><PersonalCommissionSummary item={item} currencySymbol={property?.currencySymbol || '$'} />{item.includesComplimentaryMedia && <p>Automatic Photo: $41.975 charge · $4.50 employee payment per unit</p>}</td>
+        <td className="p-3"><PersonalCommissionSummary autoPhotoCommission={property?.autoPhotoCommission} item={item} currencySymbol={property?.currencySymbol || '$'} />{item.includesComplimentaryMedia && <p>Automatic Photo: {formatUnitPrice(property?.autoPhotoPrice ?? 41.975, property?.currencySymbol || '$')} charge · {formatMoney(property?.autoPhotoCommission ?? 4.5, property?.currencySymbol || '$')} employee payment per unit</p>}</td>
         <td className="p-3"><div className="flex flex-wrap gap-2"><button type="button" className="secondary-button" disabled={busy} onClick={() => onEdit(item)} aria-label={`Edit commission rules for ${item.name}`}>Edit rules</button><button type="button" className="secondary-button" disabled={busy} onClick={() => onCopy(item)} aria-label={`Create new activity from ${item.name}`}>New activity with these rules</button></div></td>
       </tr>)}{!visible.length && <tr><td className="p-6 text-center" colSpan={4}>{!property ? 'Choose a property to customize commission rules.' : active.length ? 'No activities match your search.' : 'Add activities in Catalogue to configure commission rules.'}</td></tr>}</tbody>
     </table></div>}

@@ -85,6 +85,8 @@ Catalogue managers can download Excel/CSV files or templates and review imports 
 
 Imports validate every row before writing, then show new/update counts and readable pool/payment settings for review. Existing codes update this property's matching services; new codes are retained, and blank codes receive generated property-local codes such as `DIV-001`. Up to 2,000 activities / 3 MB are supported. Saved bill prices and protected pool rules remain unchanged.
 
+Room and villa identifiers must contain 1–32 digits. They remain strings so leading zeros such as `0012` are preserved in bills, PMS lookups and guest forms. Existing historical records are retained. Numeric API fields require JSON numbers, flags require JSON booleans, and database integer fields reject fractions and values above 2,147,483,647. Staff edits validate calendar dates and preserve omitted settings. Catalogue, commission rules and calculators display the selected property's Photo price and employee payment; unit prices retain up to three decimal places.
+
 Global administrators can assign multiple PMS resorts to a property. Room lookup searches every assigned resort and combines guest matches with their resort shown; a failure in any resort returns an error instead of an incomplete result. Existing single-resort mappings are retained by the database migration. Staff creation accepts an empty leaving date and optionally creates a linked centre-staff login, assigned only to that property, for either global administrators or property managers.
 
 

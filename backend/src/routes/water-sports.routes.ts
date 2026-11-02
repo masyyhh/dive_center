@@ -8,11 +8,12 @@ import { requirePropertyAccess, requireRole } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 import { lookupInhouseGuests, PmsLookupError, pmsPropertyCodeSchema, PmsGuest } from '../services/pmsService';
 import { businessToday } from '../utils/dates';
+import { roomNumberSchema } from '../utils/fields';
 import { documentKind, formTypeSchema, languageSchema, staffFieldsSchema, submissionSchema, defaultDisclaimerDocuments } from '../services/waterSportsForms';
 
 export const waterSportsRouter = Router();
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-const roomSchema = z.string().trim().min(1).max(32).regex(/^[^\x00-\x1f\x7f]+$/);
+const roomSchema = roomNumberSchema;
 const propertySchema = z.string().trim().min(1).max(100);
 type Document = { id: string; language: string; languageName: string; title: string; body: string };
 type Candidate = PmsGuest & { id: string };

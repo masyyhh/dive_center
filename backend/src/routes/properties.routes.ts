@@ -1,3 +1,4 @@
+import { positiveIntSchema } from '../utils/fields';
 import { boundedArray, validationIssues } from '../utils/validation';
 import { pmsPropertyCodeSchema } from '../services/pmsService';
 import { randomUUID } from 'node:crypto';
@@ -69,7 +70,7 @@ const propertySchema = z.object({
   currencySymbol: z.string().default('$'),
   taxRate: z.number().min(0).max(100).default(16.0),
   serviceChargeRate: z.number().min(0).max(100).default(10.0),
-  nextCheckNumber: z.number().int().positive().default(1001),
+  nextCheckNumber: positiveIntSchema.default(1001),
   autoPhotoPrice: z.number().min(0, 'Photo line price must be 0 or more.').default(41.975),
   autoPhotoCommission: z.number().min(0, 'Photo staff commission must be 0 or more.').default(4.5),
 });
@@ -80,7 +81,7 @@ const propertyUpdateSchema = propertySchema.omit({ code: true, currency: true, c
   currencySymbol: z.string().trim().min(1, 'Currency symbol is required.').optional(),
   taxRate: z.number().min(0).max(100).optional(),
   serviceChargeRate: z.number().min(0).max(100).optional(),
-  nextCheckNumber: z.number().int().positive().optional(),
+  nextCheckNumber: positiveIntSchema.optional(),
   autoPhotoPrice: z.number().min(0, 'Photo line price must be 0 or more.').optional(),
   autoPhotoCommission: z.number().min(0, 'Photo staff commission must be 0 or more.').optional(),
   isActive: z.boolean().optional(),

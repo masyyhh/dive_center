@@ -131,6 +131,8 @@ itemsRouter.post(
       const { propertyId, name } = result.data;
       const property = await prisma.property.findUnique({ where: { id: propertyId } });
       if (!property) return res.status(404).json({ error: 'Property not found.' });
+      if (property.deletedAt) return res.status(410).json({ error: 'This property has been removed. Its records are read-only.' });
+      if (!property.isActive) return res.status(400).json({ error: 'Select an active property.' });
       const last = await prisma.category.aggregate({ where: { propertyId }, _max: { sortOrder: true } });
       const category = await prisma.category.create({ data: { propertyId, name, sortOrder: (last._max.sortOrder ?? 0) + 1 } });
       await logAuditEvent({ req, propertyId, action: 'CATEGORY_CREATE', targetType: 'Category', targetId: category.id, details: { name } });

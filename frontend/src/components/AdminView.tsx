@@ -9,7 +9,7 @@ import { CatalogueTransferPanel } from './CatalogueTransferPanel';
 import { CatalogueImportReview, CatalogueImportPreview } from './CatalogueImportReview';
 import { pmsResortCodes } from '../utils/pmsGuests';
 import { passwordHelp, passwordPattern } from './PasswordRecoveryView';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 import { Modal } from './Modal';
 import { businessToday } from '../utils/dates';
 import React, { useState, useEffect } from 'react';
@@ -45,6 +45,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const canManageAccounts = isGlobalAdmin || user?.role === 'PROPERTY_MANAGER';
 
   const { requestNavigation } = useNavigation();
+  const photoSettings = { autoPhotoPrice: activeProperty?.autoPhotoPrice ?? 41.975, autoPhotoCommission: activeProperty?.autoPhotoCommission ?? 4.5 };
+  const photoPriceLabel = formatUnitPrice(photoSettings.autoPhotoPrice, activeProperty?.currencySymbol || '$');
+  const photoCommissionLabel = formatMoney(photoSettings.autoPhotoCommission, activeProperty?.currencySymbol || '$');
   type AdminTab = 'properties' | 'users' | 'staff' | 'items' | 'commissions' | 'packages' | 'audit';
   const [activeTab, setActiveTab] = useState<AdminTab>(section === 'items' || section === 'staff' || section === 'audit' || section === 'packages' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && (section === 'properties' || section === 'commissions'))) ? (section as AdminTab) : isGlobalAdmin ? 'properties' : 'staff');
 
@@ -1001,7 +1004,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   </div>
                   <div>
                     <span className="text-slate-400 block text-xs">Photo Line Price:</span>
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatMoney(p.autoPhotoPrice ?? 41.975, p.currencySymbol)} <span className="text-[10px] text-slate-400 font-normal block">+tax & SC</span></span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatUnitPrice(p.autoPhotoPrice ?? 41.975, p.currencySymbol)} <span className="text-[10px] text-slate-400 font-normal block">+tax & SC</span></span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-xs">Photo Commission:</span>
@@ -1250,7 +1253,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             </button>
           </div>
 
-          <CatalogueTransferPanel propertyName={activeProperty?.name} available={Boolean(activeProperty)} busy={transferBusy}
+          <CatalogueTransferPanel {...photoSettings} currencySymbol={activeProperty?.currencySymbol} propertyName={activeProperty?.name} available={Boolean(activeProperty)} busy={transferBusy}
             onExport={exportCatalogue} onImport={previewCatalogue} />
           {catalogueImport?.propertyId === activeProperty?.id && catalogueImport && <CatalogueImportReview data={catalogueImport}
             fileName={catalogueImport.fileName} propertyName={activeProperty?.name || ''} currencySymbol={activeProperty?.currencySymbol || '$'}
@@ -1260,12 +1263,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             <label>Search services<input type="search" placeholder="Name, code or category" value={catalogueFilters.query} onChange={event => setCatalogueFilters({ ...catalogueFilters, query: event.target.value })} /></label>
             <label>Category<select value={catalogueFilters.categoryId} onChange={event => setCatalogueFilters({ ...catalogueFilters, categoryId: event.target.value })}><option value="">All categories</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label>Pool<select value={catalogueFilters.poolType} onChange={event => setCatalogueFilters({ ...catalogueFilters, poolType: event.target.value })}><option value="">All pools</option><option value="COURSE_POOL">Course pool</option><option value="DIVE_POOL">Dive pool</option><option value="CERTIFICATION_POOL">Certifications</option><option value="NONE">No pool</option></select></label>
-            <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · $41.975</option><option value="excluded">Separate settings</option></select></label>
+            <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · {photoPriceLabel}</option><option value="excluded">Separate settings</option></select></label>
           </div>
           <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {items.filter(item => showArchivedItems || item.isActive).length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
           {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar">
             <div><strong>{selectedItemIds.length} selected</strong>{selectedItemIds.length > selectedVisibleCount && <span> · {selectedItemIds.length - selectedVisibleCount} hidden by filters</span>}<small>Review changes before saving. Up to 200 services per update.</small></div>
-            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : 'Add Photo · $41.975'}</button>
+            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : `Add Photo · ${photoPriceLabel}`}</button>
             <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
             <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty} onClick={() => {
               if (!activeProperty) return;
@@ -1290,7 +1293,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   <th className="py-3 px-4">Price</th>
                   <th className="py-3 px-4">Pool Contribution</th>
                   <th className="py-3 px-4">Employee Payments</th>
-                  <th className="py-3 px-4">Include Photo ($41.975)</th>
+                  <th className="py-3 px-4">Include Photo ({photoPriceLabel})</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Actions</th>
                 </tr>
@@ -1322,13 +1325,13 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <PersonalCommissionSummary item={it} currencySymbol={activeProperty?.currencySymbol || '$'} />
+                      <PersonalCommissionSummary autoPhotoCommission={photoSettings.autoPhotoCommission} item={it} currencySymbol={activeProperty?.currencySymbol || '$'} />
                     </td>
                     <td className="py-3 px-4"><label className="flex items-start gap-2">
                       <input type="checkbox" checked={it.includesComplimentaryMedia} disabled={itemBusy || bulkBusy || !it.isActive}
                         aria-label={`Automatic Photo for ${it.name}`}
                         onChange={event => toggleComplimentaryMedia(it, event.target.checked)} />
-                      <span className="text-xs">Adds $41.975 per unit · employee earns $4.50</span>
+                      <span className="text-xs">Adds {photoPriceLabel} per unit · employee earns {photoCommissionLabel}</span>
                     </label></td>
                     <td className="py-3 px-4">{it.isActive ? 'Active' : 'Deleted'}</td>
                     <td className="py-3 px-4"><div className="flex gap-2">
@@ -2446,15 +2449,15 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
                 <label className="flex items-start gap-2"><input type="checkbox" checked={itemForm.includesComplimentaryMedia} onChange={event => setItemForm({ ...itemForm, includesComplimentaryMedia: event.target.checked })} />
-                  <span className="font-semibold">Include Photo ($41.975)</span>
+                  <span className="font-semibold">Include Photo ({photoPriceLabel})</span>
                 </label>
-                <p className="text-xs text-slate-500">Adds a separate Photo line at $41.975 per unit on top of the activity price. Select one team member on that line to earn $4.50 per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
+                <p className="text-xs text-slate-500">Adds a separate Photo line at {photoPriceLabel} per unit on top of the activity price. Select one team member on that line to earn {photoCommissionLabel} per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
               </div>
 
-              <PersonalCommissionEditor value={commissionSelections} onChange={setCommissionSelections}
+              <PersonalCommissionEditor {...photoSettings} value={commissionSelections} onChange={setCommissionSelections}
                 combinedMedia={itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} showPreview={false} />
               </>}
-              <CommissionCalculatorPreview price={itemForm.price} poolType={noCommissions ? 'NONE' : itemForm.poolType} poolRate={noCommissions ? 0 : itemForm.poolContribution}
+              <CommissionCalculatorPreview {...photoSettings} price={itemForm.price} poolType={noCommissions ? 'NONE' : itemForm.poolType} poolRate={noCommissions ? 0 : itemForm.poolContribution}
                 selections={noCommissions ? commissionSelections.map(row => ({ ...row, enabled: false })) : commissionSelections}
                 combinedMedia={!noCommissions && itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} />
 
@@ -2480,7 +2483,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
           </div>
         </Modal>
       )}
-      {bulkReview && <BulkMediaReview review={bulkReview} busy={bulkBusy} error={bulkError}
+      {bulkReview && <BulkMediaReview {...photoSettings} currencySymbol={activeProperty?.currencySymbol} review={bulkReview} busy={bulkBusy} error={bulkError}
         onClose={() => { if (!bulkBusy) { setBulkReview(null); setBulkError(null); } }} onApply={applyBulkMedia}
         onRefresh={() => reviewBulkMedia(bulkReview.includesComplimentaryMedia, bulkReview.items.map(item => item.id))} />}
     </div>

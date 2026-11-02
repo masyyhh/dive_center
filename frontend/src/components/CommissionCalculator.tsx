@@ -5,7 +5,7 @@ import { calculateCommissionPreview } from '../utils/commissionCalculator';
 import { formatMoney } from '../utils/format';
 
 export const CommissionCalculator: React.FC<{
-  price: number; poolType: string; poolRate: number; selections: CommissionSelection[]; combinedMedia: boolean; currencySymbol: string;
+  price: number; poolType: string; poolRate: number; selections: CommissionSelection[]; combinedMedia: boolean; currencySymbol: string; autoPhotoPrice?: number; autoPhotoCommission?: number;
 }> = props => {
   const [quantity, setQuantity] = useState('1');
   const [discount, setDiscount] = useState('0');

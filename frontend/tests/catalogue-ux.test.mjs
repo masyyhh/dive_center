@@ -26,7 +26,7 @@ test('complimentary example has zero course/dive pool but retains the fixed phot
 test('certifications stay fixed per unit and invalid preview inputs do not display misleading totals', () => {
   assert.equal(calculateCommissionPreview({ ...fixture, poolType: 'CERTIFICATION_POOL', poolRate: 25 }).poolAmount, 50);
   assert.equal(calculateCommissionPreview({ ...fixture, poolType: 'NONE' }).poolAmount, 0);
-  for (const patch of [{ quantity: 0 }, { quantity: 1.5 }, { discount: -1 }, { discount: 101 }, { price: NaN }, { poolRate: 101 }, { selections: [{ role: 'seller', enabled: true, amount: '' }] }]) {
+  for (const patch of [{ quantity: 0 }, { quantity: 1.5 }, { quantity: 2147483648 }, { discount: -1 }, { discount: 101 }, { price: NaN }, { poolRate: 101 }, { selections: [{ role: 'seller', enabled: true, amount: '' }] }]) {
     assert.equal(calculateCommissionPreview({ ...fixture, ...patch }), null);
   }
 });
@@ -45,4 +45,13 @@ test('catalogue combines category, pool, media and case-insensitive code/name se
 test('deleted-service visibility remains independent of catalogue filters', () => {
   assert.equal(filterCatalogue(items, emptyCatalogueFilters, false).length, 2);
   assert.equal(filterCatalogue(items, emptyCatalogueFilters, true).length, 3);
+});
+
+test('calculator uses property Photo rates including explicit zero rates', () => {
+  const preview = calculateCommissionPreview({ ...fixture, autoPhotoPrice: 55.125, autoPhotoCommission: 7 });
+  assert.equal(preview.photoCharge, 110.25);
+  assert.equal(preview.payments.find(payment => payment.role === 'media').amount, 14);
+  const free = calculateCommissionPreview({ ...fixture, autoPhotoPrice: 0, autoPhotoCommission: 0 });
+  assert.equal(free.photoCharge, 0);
+  assert.equal(free.payments.find(payment => payment.role === 'media').amount, 0);
 });

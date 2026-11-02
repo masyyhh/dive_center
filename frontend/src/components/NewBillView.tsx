@@ -1,3 +1,4 @@
+import { isRoomNumber, isPositiveInt, roomNumberHelp } from '../utils/inputValidation';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
 import { nationalityCountries as countries } from '../utils/nationalities';
 import { addActivityWithPhoto, addPackageWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity } from '../utils/automaticPhotos';
@@ -196,7 +197,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   }, [roomNumber, activeProperty?.id, businessDate]);
 
   const lookupGuests = async () => {
-    if (!activeProperty || !roomNumber.trim() || saving || pmsBusy) return;
+    if (!activeProperty || !isRoomNumber(roomNumber) || saving || pmsBusy) return;
     cancelPmsLookup();
     const controller = new AbortController(); pmsController.current = controller;
     const generation = pmsGeneration.current;
@@ -316,8 +317,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before saving.'); return; }
     setErrorMsg(null);
 
-    if (!roomNumber.trim()) {
-      setErrorMsg('Please enter a room number.');
+    if (!isRoomNumber(roomNumber)) {
+      setErrorMsg(roomNumberHelp);
       return;
     }
     if (!guestName.trim()) {
@@ -363,10 +364,11 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   const reviewBill = () => {
     setAttemptedReview(true); setErrorMsg(null);
+    if (!isPositiveInt(checkNumber)) { setErrorMsg('Enter a whole check number between 1 and 2147483647.'); return; }
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); document.getElementById('checkout-discount')?.focus(); return; }
     if (!isBusinessDate(businessDate)) { document.getElementById('bill-business-date')?.focus(); return; }
-    if (!roomNumber.trim() || !guestName.trim()) {
-      document.getElementById(!roomNumber.trim() ? 'bill-room' : 'bill-guest')?.focus();
+    if (!isRoomNumber(roomNumber) || !guestName.trim()) {
+      document.getElementById(!isRoomNumber(roomNumber) ? 'bill-room' : 'bill-guest')?.focus();
       return;
     }
     if (billLines.length > 200) { setErrorMsg('A bill can contain up to 200 lines, including automatic Photos. Remove an activity before saving.'); return; }
@@ -401,9 +403,9 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
             </button>
             <input
               type="number"
-              aria-label="Check number"
+              aria-label="Check number" min={1} max={2147483647} step={1}
               value={checkNumber}
-              onChange={e => { setCheckEdited(true); setCheckNumber(Math.max(1, parseInt(e.target.value, 10) || 1)); }}
+              onChange={e => { setCheckEdited(true); setCheckNumber(e.target.value === '' ? 0 : Number(e.target.value)); }}
               className="w-20 text-center font-mono font-bold text-sm bg-transparent text-slate-900 dark:text-white focus:outline-none"
             />
             <button
@@ -609,7 +611,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                             </span>
                             {hasPersonalRoles && (
                               <span className="catalogue-tag px-1.5 py-0.2 rounded text-xs font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                                {item.includesComplimentaryMedia ? `Adds Photo ${formatMoney(photoRates.price ?? 41.975, currencySymbol)} · team ${formatMoney(photoRates.commission ?? 4.5, currencySymbol)}` : `Commission: ${item.personalRoles}`}
+                                {item.includesComplimentaryMedia ? `Adds Photo ${formatUnitPrice(photoRates.price ?? 41.975, currencySymbol)} · team ${formatMoney(photoRates.commission ?? 4.5, currencySymbol)}` : `Commission: ${item.personalRoles}`}
                               </span>
                             )}
                             {item.poolType !== 'NONE' && (
@@ -660,21 +662,22 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                 <div className="room-lookup-control">
                 <input
                   type="text"
-                  id="bill-room"
+                  id="bill-room" inputMode="numeric" pattern="[0-9]{1,32}" maxLength={32}
                   aria-label="Room number"
                   aria-required="true"
-                  aria-invalid={attemptedReview && !roomNumber.trim()}
-                  aria-describedby={attemptedReview && !roomNumber.trim() ? 'room-error' : undefined}
+                  aria-invalid={(attemptedReview || roomNumber.length > 0) && !isRoomNumber(roomNumber)}
+                  aria-describedby="room-help room-error"
                   value={roomNumber}
                   onChange={(e) => { cancelPmsLookup(); setRoomNumber(e.target.value); }}
                   placeholder="e.g. 304"
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
-                  <button type="button" className="secondary-button" onClick={lookupGuests} disabled={!roomNumber.trim() || pmsBusy || saving || businessDate !== businessToday()} aria-busy={pmsBusy} aria-label="Look up in-house guests for this room"><Search size={16} />{pmsBusy ? 'Looking up…' : 'Find guests'}</button>
+                  <button type="button" className="secondary-button" onClick={lookupGuests} disabled={!isRoomNumber(roomNumber) || pmsBusy || saving || businessDate !== businessToday()} aria-busy={pmsBusy} aria-label="Look up in-house guests for this room"><Search size={16} />{pmsBusy ? 'Looking up…' : 'Find guests'}</button>
                 </div>
                 {businessDate !== businessToday() && <p className="field-help">PMS lookup shows guests in-house today. Enter details manually for a different business date.</p>}
                 {pmsGuests.length > 0 && <button type="button" className="text-button" disabled={saving} onClick={() => { setSelectedPmsGuest(null); setGuestPickerOpen(true); }}>Choose a guest from this room ({pmsGuests.length})</button>}
-                {attemptedReview && !roomNumber.trim() && <p id="room-error" className="field-error">Enter a room number.</p>}
+                <p id="room-help" className="field-help">Digits only. Leading zeros are kept, e.g. 0012.</p>
+                {(attemptedReview || roomNumber.length > 0) && !isRoomNumber(roomNumber) && <p id="room-error" className="field-error" role="alert">{roomNumberHelp}</p>}
               </div>
 
               <div>
@@ -1036,7 +1039,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
               </div>
 
               <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-400 dark:text-slate-500 leading-normal">
-                ℹ️ All activities, packages, and automatic Photo lines ({formatMoney(photoRates.price ?? 41.975, currencySymbol)}/unit) are pre-tax and pre-service charge. Service charge ({scRate}%) and tax ({taxRate}%) are calculated at checkout.
+                ℹ️ All activities, packages, and automatic Photo lines ({formatUnitPrice(photoRates.price ?? 41.975, currencySymbol)}/unit) are pre-tax and pre-service charge. Service charge ({scRate}%) and tax ({taxRate}%) are calculated at checkout.
               </div>
             </div>
 

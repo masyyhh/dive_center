@@ -266,12 +266,13 @@ reportsRouter.post(
   async (req: Request, res: Response) => {
     try {
       const { propertyId, yearMonth, lock } = req.body;
+      if (lock !== undefined && typeof lock !== 'boolean') return res.status(400).json({ error: 'Lock must be true or false.' });
       if (!isYearMonth(yearMonth)) {
         return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
       }
 
       const result = await withPropertyPayrollTransaction(prisma, String(propertyId), async prisma => {
-        const shouldLock = lock !== undefined ? Boolean(lock) : true;
+        const shouldLock = lock ?? true;
 
         const record = await prisma.monthLock.upsert({
           where: {

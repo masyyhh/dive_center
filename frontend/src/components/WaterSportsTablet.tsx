@@ -1,3 +1,4 @@
+import { isRoomNumber, roomNumberHelp } from '../utils/inputValidation';
 import { API_BASE } from '../services/api';
 import React, { useEffect, useRef, useState } from 'react';
 import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './WaterSportsShared';
@@ -72,8 +73,8 @@ export const DiveCentreTablet = ({ token }: { token: string }) => {
             try { const result = await request<{ guests: Guest[] }>('/guests', { roomNumber: room.trim() }); setGuests(result.guests); if (result.guests.length === 1) setSelected(result.guests[0].id); if (!result.guests.length) setError('We couldn’t find an in-house guest for this room. Your dive centre team can help.'); }
             catch (e) { setError((e as Error).message); } finally { setBusy(false); }
           }}>
-            <label>Villa / room number<input value={room} maxLength={32} required autoComplete="off" disabled={busy} onChange={event => { setRoom(event.target.value); clearGuest(); }} /></label>
-            <button className="primary-button" disabled={busy || !room.trim()}>{busy ? 'Finding your name…' : 'Find my name'}</button>
+            <label>Villa / room number<input value={room} inputMode="numeric" pattern="[0-9]{1,32}" title={roomNumberHelp} maxLength={32} required autoComplete="off" disabled={busy} onChange={event => { setRoom(event.target.value); clearGuest(); }} /></label>
+            <button className="primary-button" disabled={busy || !isRoomNumber(room)}>{busy ? 'Finding your name…' : 'Find my name'}</button>
           </form>
           {!!guests.length && <fieldset disabled={busy}><legend>Who is this form for?</legend>{guests.map(item => <label key={item.id} className="ws-guest"><input type="radio" name="guest" checked={selected === item.id} onChange={() => { setSelected(item.id); setAge(''); setGuardian(''); setSignature([]); }} /><span><strong>{item.fullName}</strong><small>Villa {item.roomNumber} · Departure {item.checkoutDate || 'Please confirm with the team'}</small></span></label>)}</fieldset>}
           <button className="primary-button dc-next" disabled={busy || !guest} onClick={() => move(2)}>Continue to agreement</button>

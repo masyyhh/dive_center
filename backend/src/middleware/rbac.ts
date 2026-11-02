@@ -18,23 +18,19 @@ export const requireRole = (...allowedRoles: string[]) => {
 };
 
 // Check if user has permission to access the given propertyId
-export const requirePropertyAccess = (propertyIdSource: 'query' | 'body' | 'params' = 'query', fieldName = 'propertyId') => {
+export const requirePropertyAccess = (propertyIdSource: 'query' | 'body' | 'params' = 'query', fieldName = 'propertyId', allowAll = false) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
     }
 
-    // Global Admin has access to all properties
-    if (req.user.role === 'GLOBAL_ADMIN') {
-      return next();
-    }
-
     // Authorize the exact selector consumed by the handler, never a fallback header.
     const propertyId = req[propertyIdSource]?.[fieldName];
-
-    if (!propertyId || typeof propertyId !== 'string') {
+    if (req.user.role === 'GLOBAL_ADMIN' && allowAll && (propertyId === undefined || propertyId === 'all')) return next();
+    if (typeof propertyId !== 'string' || !propertyId.trim() || propertyId.length > 100) {
       return res.status(400).json({ error: 'Property ID is required for this operation.' });
     }
+    if (req.user.role === 'GLOBAL_ADMIN') return next();
 
     // Centre Staff and Property Managers can only access their assigned properties
     if (!req.user.assignedPropertyIds.includes(propertyId)) {

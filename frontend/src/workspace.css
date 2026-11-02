@@ -1,5 +1,8 @@
 /* Minimal workspace system. The reference-matched sign-in keeps its own styling. */
 :root {
+  --error: #b42318;
+  --error-soft: #fff4f2;
+  --error-border: #f0b4ac;
   --canvas: #fafafa;
   --surface: #ffffff;
   --ink: #24262b;
@@ -11,6 +14,9 @@
   --action-text: #ffffff;
 }
 :root.dark {
+  --error: #ffb4ab;
+  --error-soft: #382020;
+  --error-border: #80413a;
   --canvas: #141518;
   --surface: #1b1c20;
   --ink: #f1f2f4;
@@ -279,3 +285,37 @@
 .global-comparison-table thead { color: var(--muted); }
 .global-comparison-table small, .global-comparison-table th span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 6px; }
 .global-comparison-table .attendance-warning { color: var(--warning, #b45309); }
+
+/* Shared form states across billing, administration and guest services. */
+:is(.main-content, .modal-content) :where(input, select, textarea):not(:where([type=checkbox], [type=radio], [type=range], [type=file], [type=hidden], [type=button], [type=submit])) {
+  min-height: 40px;
+  max-width: 100%;
+  font-size: 14px;
+  color: var(--ink);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 11px;
+}
+:is(.app-shell, .modal-dialog, .ws-tablet) :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+:is(.main-content, .modal-content, .ws-tablet) [aria-invalid=true] { border-color: var(--error) !important; }
+:is(.main-content, .modal-content, .ws-tablet) :is(input, select, textarea):disabled { opacity: .65; cursor: not-allowed; }
+:is(.app-shell, .modal-dialog, .ws-tablet) button:disabled { opacity: .5; cursor: not-allowed; }
+:is(.main-content, .modal-content, .ws-tablet) input[readonly] { background: var(--soft); color: var(--muted); }
+:is(.main-content, .modal-content) .field-help { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+:is(.main-content, .modal-content) .field-error { margin-top: 6px; color: var(--error); font-size: 12px; line-height: 1.5; }
+:is(.notice-error, .ws-error) { background: var(--error-soft); color: var(--error); border: 1px solid var(--error-border); border-radius: 8px; }
+:is(.primary-button, .secondary-button, .danger-button) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.main-content :is(th, td) { vertical-align: middle; }
+.main-content :is(input[type=number], .font-mono) { font-variant-numeric: tabular-nums; }
+.catalogue-bulk-bar { flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .catalogue-bulk-bar > button { flex: 1 1 140px; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions > button { flex: 1 1 120px; }
+}
+:is(.main-content, .modal-content) input.pl-9 { padding-left: 36px !important; }
+:is(.app-shell, .modal-dialog, .ws-tablet) :is(button, a, input, select, textarea, summary):focus-visible { outline-color: var(--accent) !important; }
