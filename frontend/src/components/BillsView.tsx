@@ -1,4 +1,5 @@
-import { formatMoney } from '../utils/format';
+import { investigationPeriod } from '../utils/dashboardNavigation';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 import { Modal } from './Modal';
 import { businessToday, displayDate, isBusinessDate } from '../utils/dates';
 import React, { useState, useEffect, useRef } from 'react';
@@ -22,18 +23,25 @@ import {
   Printer,
 } from 'lucide-react';
 
-export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: () => void }> = ({ savedCheck, onDismissSaved }) => {
+export const BillsView: React.FC<{ section?: string; savedCheck: number | null; onDismissSaved: () => void }> = ({ section, savedCheck, onDismissSaved }) => {
   const { activeProperty } = useProperty();
 
+  const initialPeriod = investigationPeriod(section);
+  const [discountedOnly, setDiscountedOnly] = useState(initialPeriod?.discountedOnly || false);
   // Filters
   const [startDate, setStartDate] = useState<string>(
-    `${businessToday().slice(0, 7)}-01`
+    initialPeriod?.startDate || `${businessToday().slice(0, 7)}-01`
   );
   const [endDate, setEndDate] = useState<string>(
-    businessToday()
+    initialPeriod?.endDate || businessToday()
   );
   const [search, setSearch] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'REBATED' | 'DELETED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'REBATED' | 'DELETED'>(initialPeriod ? 'ACTIVE' : 'ALL');
+
+  useEffect(() => {
+    const period = investigationPeriod(section);
+    if (period) { setStartDate(period.startDate); setEndDate(period.endDate); setStatusFilter('ACTIVE'); setDiscountedOnly(period.discountedOnly); setSearch(''); }
+  }, [section]);
 
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -57,7 +65,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
 
   const requestVersion = useRef(0);
   const [resetVersion, setResetVersion] = useState(0);
-  const resetFilters = () => { setResetVersion(v => v + 1); setSearch(''); setStatusFilter('ALL'); setStartDate(`${businessToday().slice(0, 7)}-01`); setEndDate(businessToday()); };
+  const resetFilters = () => { setResetVersion(v => v + 1); setSearch(''); setStatusFilter('ALL'); setDiscountedOnly(false); setStartDate(`${businessToday().slice(0, 7)}-01`); setEndDate(businessToday()); };
   const fetchBills = async () => {
     if (!activeProperty) return;
     const request = ++requestVersion.current;
@@ -166,6 +174,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
   };
 
   const currencySymbol = activeProperty?.currencySymbol || '$';
+  const visibleBills = discountedOnly ? bills.filter(bill => bill.discountAmount > 0) : bills;
 
   return (
     <div className="space-y-6">
@@ -270,30 +279,35 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
       </div>
 
       {errorMsg && <div role="alert" className="notice notice-error"><AlertTriangle size={18} /><span>{errorMsg}</span><button onClick={fetchBills}>Try again</button></div>}
-      <div className="results-toolbar"><p role="status">{loading ? 'Finding bills…' : `${bills.length} ${bills.length === 1 ? 'bill' : 'bills'} found`}<span> · {startDate && endDate ? `${displayDate(startDate)} – ${displayDate(endDate)}` : 'Select dates'}</span></p><button className="secondary-button" onClick={resetFilters}>Reset filters</button></div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={discountedOnly} onChange={event => setDiscountedOnly(event.target.checked)} />Only bills with discounts</label>
+      <div className="results-toolbar"><p role="status">{loading ? 'Finding bills…' : `${visibleBills.length} ${visibleBills.length === 1 ? 'bill' : 'bills'} found`}<span> · {startDate && endDate ? `${displayDate(startDate)} – ${displayDate(endDate)}` : 'Select dates'}</span></p><button className="secondary-button" onClick={resetFilters}>Reset filters</button></div>
+      {!loading && !errorMsg && <p className="text-sm text-slate-500">Shown bills: revenue {formatMoney(visibleBills.reduce((sum, bill) => sum + bill.grossAmount - bill.discountAmount, 0), currencySymbol)} · discounts {formatMoney(visibleBills.reduce((sum, bill) => sum + bill.discountAmount, 0), currencySymbol)}. Revenue excludes service charge, tax and tips.</p>}
       {/* Bills Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <p className="table-scroll-hint">Scroll horizontally on smaller screens to see all amounts and bill status.</p>
         {loading ? (
           <div className="p-12 text-center text-sm text-slate-400">Loading bills...</div>
-        ) : bills.length === 0 ? (
+        ) : visibleBills.length === 0 ? (
           <div className="p-12 text-center text-sm text-slate-500 dark:text-slate-400">
             <Receipt className="mx-auto mb-4 text-sky-600" size={30} /><strong className="block text-base mb-2 text-slate-800 dark:text-slate-200">No bills match your filters</strong><p>Try another guest, room, check number, or date range.</p><button className="text-button mt-4" onClick={resetFilters}>Reset filters</button>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full text-left border-collapse text-sm bills-data-table">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Check #</th>
                   <th className="py-3 px-4">Date</th>
                   <th className="py-3 px-4">Room</th>
                   <th className="py-3 px-4">Guest Name</th>
-                  <th className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Net Total</th>
+                  <th className="py-3 px-4">Revenue</th>
+                  <th className="py-3 px-4">Discounts</th>
+                  <th className="py-3 px-4 font-semibold text-slate-900 dark:text-white text-right">Net Total</th>
                   <th className="py-3 px-4">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {bills.map((b) => (
+                {visibleBills.map((b) => (
                   <tr
                     key={b.id}
                     onClick={() => openBillDetails(b.id)}
@@ -311,6 +325,10 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
                     <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
                       {b.guestName}
                     </td>
+                    <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-white">
+                      {formatMoney(b.grossAmount - b.discountAmount, currencySymbol)}
+                    </td>
+                    <td className="py-3 px-4 font-mono">{formatMoney(b.discountAmount, currencySymbol)}</td>
                     <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-white">
                       {formatMoney(b.netAmount, currencySymbol)}
                     </td>
@@ -445,7 +463,7 @@ export const BillsView: React.FC<{ savedCheck: number | null; onDismissSaved: ()
                         </td>
                         <td className="py-2.5 px-3 font-mono">{line.quantity}</td>
                         <td className="py-2.5 px-3 font-mono">
-                          {formatMoney(line.unitPrice, currencySymbol)}
+                          {formatUnitPrice(line.unitPrice, currencySymbol)}
                         </td>
                         <td className="py-2.5 px-3 font-mono">{line.discountPercent}%</td>
                         <td className="py-2.5 px-3 font-mono font-bold text-right">

@@ -22,7 +22,7 @@ async function save(role, quantity, assigned, discountPercent = 0, unitPrice = 0
   return request(billsRouter, 'POST', '/', { user, body: {
     propertyId: 'a', checkNumber: checkNumber++, businessDate: '2026-10-30', guestName: 'Guest', roomNumber: '101',
     items: [{ clientLineId: 'activity', itemId: role, itemName: 'Untrusted label', categoryName: 'Services', quantity, unitPrice, discountPercent,
-      ...(!included && assigned ? { [`${role}StaffId`]: 'employee' } : {}), personalCommissionsJson: JSON.stringify({ [role]: 999 }), totalPersonalCommission: 999 }, ...(included ? [{ autoPhotoFor: 'activity', itemName: 'Photo', categoryName: 'Photo & Video', quantity, unitPrice: 57.5, discountPercent: 0, ...(assigned ? { photoStaffId: 'employee' } : {}) }] : [])],
+      ...(!included && assigned ? { [`${role}StaffId`]: 'employee' } : {}), personalCommissionsJson: JSON.stringify({ [role]: 999 }), totalPersonalCommission: 999 }, ...(included ? [{ autoPhotoFor: 'activity', itemName: 'Photo', categoryName: 'Photo & Video', quantity, unitPrice: 41.975, discountPercent: 0, ...(assigned ? { photoStaffId: 'employee' } : {}) }] : [])],
   } });
 }
 test('selected media employee earns the catalogue rate on a zero-price complimentary service', async () => {
@@ -70,9 +70,9 @@ test('checked services enforce one $4.50 payment per unit regardless of stored o
   assert.equal(parent.includesComplimentaryMedia, true);
   assert.equal(parent.totalPersonalCommission, 0);
   assert.equal(line.autoPhotoForLineId, parent.id);
-  assert.equal(line.unitPrice, 57.5);
+  assert.equal(line.unitPrice, 41.975);
   assert.equal(line.quantity, 2);
-  assert.equal(result.body.bill.grossAmount, 115);
+  assert.equal(result.body.bill.grossAmount, 83.95);
   assert.equal(line.totalPersonalCommission, 9);
   assert.deepEqual(JSON.parse(line.personalCommissionsJson), { photo: 4.5 });
   assert.equal(line.videoStaffId, null);
@@ -122,8 +122,8 @@ test('automatic Photo adds to the activity, receives normal charges and keeps em
   const result = await save('photo', 2, true, 25, 100);
   assert.equal(result.status, 201);
   const { bill } = result.body;
-  assert.equal(bill.grossAmount, 315); assert.equal(bill.discountAmount, 50);
-  assert.equal(bill.serviceChargeAmount, 26.5); assert.equal(bill.taxAmount, 46.64); assert.equal(bill.netAmount, 338.14);
+  assert.equal(bill.grossAmount, 283.95); assert.equal(bill.discountAmount, 50);
+  assert.equal(bill.serviceChargeAmount, 23.4); assert.equal(bill.taxAmount, 41.18); assert.equal(bill.netAmount, 298.52);
   assert.equal(bill.items[0].poolContributionAmount, 15);
   assert.equal(bill.items[0].totalPersonalCommission, 0);
   assert.equal(bill.items[1].poolContributionAmount, 0);
@@ -135,7 +135,7 @@ test('automatic Photo adds to the activity, receives normal charges and keeps em
 
 test('invalid Photo links, extra assignments and changed fees reject the entire bill', async () => {
   const parent = { clientLineId: 'parent', itemId: 'photo', itemName: 'Activity', categoryName: 'Services', quantity: 2, unitPrice: 100 };
-  const photo = { clientLineId: 'child', autoPhotoFor: 'parent', itemName: 'Photo', categoryName: 'Photo & Video', quantity: 2, unitPrice: 57.5, photoStaffId: 'employee' };
+  const photo = { clientLineId: 'child', autoPhotoFor: 'parent', itemName: 'Photo', categoryName: 'Photo & Video', quantity: 2, unitPrice: 41.975, photoStaffId: 'employee' };
   const count = await prisma.bill.count();
   for (const items of [ [parent], [photo], [parent, { ...photo, autoPhotoFor: 'unknown' }], [parent, { ...photo, quantity: 1 }], [parent, { ...photo, unitPrice: 0 }], [parent, photo, { ...photo, clientLineId: 'duplicate' }], [parent, { ...photo, videoStaffId: 'employee' }], [{ ...parent, photoStaffId: 'employee' }, photo], [parent, { ...photo, itemId: 'video' }], [parent, { ...photo, photoStaffId: 'foreign' }] ]) {
     const result = await request(billsRouter, 'POST', '/', { user, body: { propertyId: 'a', checkNumber: checkNumber++, businessDate: '2026-10-30', guestName: 'Guest', roomNumber: '101', items } });

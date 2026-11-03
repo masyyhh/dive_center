@@ -9,3 +9,5 @@ export function filterCatalogue(items: Item[], filters: CatalogueFilters, showAr
     (!filters.poolType || item.poolType === filters.poolType) &&
     (filters.media === 'all' || Boolean(item.includesComplimentaryMedia) === (filters.media === 'included')));
 }
+
+export const canPermanentlyDeleteItem = (item: Pick<Item, 'isActive' | 'hasBillHistory' | 'hasPackageUsage'>) => !item.isActive && item.hasBillHistory === false && item.hasPackageUsage === false;

@@ -42,3 +42,22 @@ test('the labelled format supports 2,000 fully populated catalogue rows within t
   const rows = Array.from({ length: 2000 }, (_, index) => catalogueSpreadsheetRow({ ...item, code: `DIVE-${index}`, name: `Service ${index}` }));
   for (const format of ['csv', 'xlsx']) assert.equal((await parseCatalogue(await file(rows, format), format)).length, 2000);
 });
+
+test('catalogues exported with the previous Photo header remain importable after the price update', async () => {
+  assert.equal(catalogueSpreadsheetHeaders[12], 'Include Photo ($41.975)');
+  for (const header of ['Include Photo ($57.50)', 'Complimentary Photo / Video']) {
+    for (const format of ['csv', 'xlsx']) {
+      const book = new ExcelJS.Workbook();
+      const sheet = book.addWorksheet('Catalogue');
+      const headers = [...catalogueSpreadsheetHeaders];
+      headers[12] = header;
+      sheet.addRow(headers);
+      sheet.addRow(catalogueSpreadsheetRow(item));
+      const content = Buffer.from(await (format === 'csv' ? book.csv.writeBuffer() : book.xlsx.writeBuffer())).toString('base64');
+      const [parsed] = await parseCatalogue(content, format);
+      assert.equal(parsed.code, item.code);
+      assert.equal(parsed.commission.includesComplimentaryMedia, true);
+      assert.deepEqual(parsed.commission.personalRates, { seller: 5, guide: 0, instructor: 12.5, photo: 20, video: 15 });
+    }
+  }
+});

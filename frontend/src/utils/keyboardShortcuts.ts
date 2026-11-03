@@ -10,7 +10,7 @@ export function workspaceShortcuts(canAdmin: boolean, waterSportsEnabled: boolea
     { code: 'Digit4', key: '4', label: 'Attendance', tab: 'presence' },
     { code: 'Digit5', key: '5', label: 'Reports & payroll', tab: 'reporting' },
     ...(canAdmin ? [{ code: 'Digit6', key: '6', label: 'Administration', tab: 'admin' as const }] : []),
-    ...(waterSportsEnabled ? [{ code: 'Digit7', key: '7', label: 'Water sports', tab: 'water-sports' as const }] : []),
+    ...(waterSportsEnabled ? [{ code: 'Digit7', key: '7', label: 'Disclaimer', tab: 'dive-centre' as const }] : []),
     { code: 'KeyK', key: 'K', label: 'Keyboard shortcuts' },
   ];
 }

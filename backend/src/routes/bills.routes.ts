@@ -1,3 +1,5 @@
+import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
+import { roomNumberSchema, positiveIntSchema, optionalDateSchema } from '../utils/fields';
 import { boundedArray, validationIssues } from '../utils/validation';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -59,13 +61,15 @@ billsRouter.get('/next-check', requireAuth, requirePropertyAccess('query', 'prop
 billsRouter.get('/room-lookup', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
     const { propertyId, roomNumber } = req.query;
-    if (!roomNumber) return res.json({ found: false });
+    if (roomNumber === undefined || roomNumber === '') return res.json({ found: false });
+    const parsedRoom = roomNumberSchema.safeParse(roomNumber);
+    if (!parsedRoom.success) return res.status(400).json({ error: 'Enter a room number using 1–32 digits only.' });
 
     const today = businessToday();
     const match = await prisma.bill.findFirst({
       where: {
         propertyId: String(propertyId),
-        roomNumber: String(roomNumber).trim(),
+        roomNumber: parsedRoom.data,
         businessDate: today,
         status: 'ACTIVE',
       },
@@ -195,7 +199,7 @@ const billItemSchema = z.object({
   itemId: z.string().optional().nullable(),
   itemName: z.string(),
   categoryName: z.string(),
-  quantity: z.number().int().positive(),
+  quantity: positiveIntSchema,
   unitPrice: z.number().min(0),
   discountPercent: z.number().min(0).max(100).default(0),
   sellerStaffId: z.string().optional().nullable(),
@@ -209,12 +213,13 @@ const billItemSchema = z.object({
 
 const createBillSchema = z.object({
   propertyId: z.string(),
-  checkNumber: z.number().int().positive(),
+  checkNumber: positiveIntSchema,
   businessDate: z.string().refine(isBusinessDate, 'Valid calendar date (YYYY-MM-DD) is required.'),
-  guestName: z.string().min(1, 'Guest name is required'),
-  roomNumber: z.string().min(1, 'Room number is required'),
-  departureDate: z.string().optional().nullable(),
+  guestName: z.string().trim().min(1, 'Guest name is required').max(300),
+  roomNumber: roomNumberSchema,
+  departureDate: optionalDateSchema,
   nationality: z.string().default('Other'),
+  checkoutDiscountPercent: z.number().min(0).max(100).default(0),
   tipAmount: z.number().min(0).default(0),
   tipStaffIds: boundedArray(z.string(), 1000).optional().default([]),
   items: boundedArray(billItemSchema, 200).refine(items => items.length > 0, 'At least one item is required on a bill'),
@@ -256,6 +261,11 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
 
       const property = await prisma.property.findUnique({ where: { id: data.propertyId } });
       if (!property) return payrollReply(404, { error: 'Property not found.' });
+      if (property.deletedAt) return payrollReply(410, { error: 'This property has been removed. Bill history is read-only.' });
+      if (!property.isActive) return payrollReply(400, { error: 'Select an active property before creating a bill.' });
+
+      const expectedPhotoPrice = property.autoPhotoPrice ?? 41.975;
+      const expectedPhotoCommission = property.autoPhotoCommission ?? 4.5;
 
       const roots = data.items.filter(line => !line.autoPhotoFor);
       const providedIds = data.items.map(line => line.clientLineId).filter((id): id is string => Boolean(id));
@@ -269,16 +279,25 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       for (const photo of data.items.filter(line => line.autoPhotoFor)) {
         const parent = rootMap.get(photo.autoPhotoFor!);
         if (!parent || !itemMap.get(parent.itemId!)?.includesComplimentaryMedia || photoLines.has(photo.autoPhotoFor!) || photo.itemId ||
-            photo.unitPrice !== 57.5 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
-          return payrollReply(400, { error: 'Photo lines must be linked once to an included activity, priced at $57.50 per unit, with matching quantity and one photographer.' });
+            Math.abs(photo.unitPrice - expectedPhotoPrice) > 0.001 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
+          return payrollReply(400, { error: `Photo lines must be linked once to an included activity, priced at $${expectedPhotoPrice.toFixed(2)} per unit, with matching quantity and one photographer.` });
         }
         photoLines.set(photo.autoPhotoFor!, photo);
       }
       for (const parent of roots) {
         if (itemMap.get(parent.itemId!)?.includesComplimentaryMedia && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || parent.photoStaffId || parent.videoStaffId)) {
-          return payrollReply(400, { error: 'This activity includes an automatic $57.50 Photo line. Refresh the bill and select the team member on that Photo line before saving.' });
+          return payrollReply(400, { error: `This activity includes an automatic $${expectedPhotoPrice.toFixed(2)} Photo line. Refresh the bill and select the team member on that Photo line before saving.` });
         }
       }
+      // Use canonical Photo prices when calculating the bill-wide allocation.
+      let checkout;
+      try {
+        checkout = applyCheckoutDiscount(data.items.map(line => line.autoPhotoFor ? { ...line, unitPrice: expectedPhotoPrice } : line), data.checkoutDiscountPercent);
+      } catch (error) {
+        return payrollReply(400, { error: error instanceof Error ? error.message : 'Invalid checkout discount.' });
+      }
+      const discountedRoots = checkout.lines.filter(line => !line.autoPhotoFor);
+      const discountedPhotos = new Map(checkout.lines.filter(line => line.autoPhotoFor).map(line => [line.autoPhotoFor!, line]));
       const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
       const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true, hireDate: { lte: data.businessDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: data.businessDate } }] }, select: { id: true } });
       if (creditedStaff.length !== creditedIds.length || new Set(data.tipStaffIds).size !== data.tipStaffIds.length) {
@@ -296,7 +315,7 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       let totalDiscount = 0;
 
       const lineItemsData: Prisma.BillItemUncheckedCreateWithoutBillInput[] = [];
-      for (const line of roots) {
+      for (const line of discountedRoots) {
         const item = itemMap.get(line.itemId!)!;
         let parsedRates: Record<string, unknown> = {};
         try { parsedRates = item.personalRatesJson ? JSON.parse(item.personalRatesJson) : {}; } catch { /* Invalid catalogue rates pay no commission. */ }
@@ -341,19 +360,19 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
           totalPersonalCommission,
         });
         if (item.includesComplimentaryMedia) {
-          const photo = photoLines.get(line.clientLineId!)!;
-          const photoGross = 57.5 * line.quantity;
+          const photo = discountedPhotos.get(line.clientLineId!)!;
+          const photoGross = expectedPhotoPrice * line.quantity;
           const photoDiscount = photoGross * photo.discountPercent / 100;
           grossAmount += photoGross;
           totalDiscount += photoDiscount;
           lineItemsData.push({
             id: randomUUID(), autoPhotoForLineId: parentId, linePosition: lineItemsData.length,
             itemId: null, itemName: 'Photo', categoryName: 'Photo & Video', quantity: line.quantity,
-            unitPrice: 57.5, discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
+            unitPrice: expectedPhotoPrice, discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
             poolTypeSnapshot: 'NONE', poolContributionAmount: 0,
             photoStaffId: photo.photoStaffId || null, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
-            includesComplimentaryMedia: false, personalCommissionsJson: '{"photo":4.5}',
-            totalPersonalCommission: photo.photoStaffId ? 4.5 * line.quantity : 0,
+            includesComplimentaryMedia: false, personalCommissionsJson: JSON.stringify({ photo: expectedPhotoCommission }),
+            totalPersonalCommission: photo.photoStaffId ? expectedPhotoCommission * line.quantity : 0,
           });
         }
       }
@@ -364,6 +383,9 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       const taxAmount = ((netBeforeCharges + serviceChargeAmount) * property.taxRate) / 100;
       const tipAmount = data.tipAmount || 0;
       const netAmount = netBeforeCharges + serviceChargeAmount + taxAmount + tipAmount;
+      const amounts = [grossAmount, totalDiscount, serviceChargeAmount, taxAmount, tipAmount, netAmount,
+        ...lineItemsData.flatMap(line => [line.lineTotal, line.poolContributionAmount, line.totalPersonalCommission])];
+      if (amounts.some(amount => typeof amount !== 'number' || !Number.isFinite(amount * 100))) return payrollReply(400, { error: 'The bill total or commission is too large. Check prices and quantities.' });
 
       const bill = await prisma.bill.create({
         data: {
@@ -408,7 +430,7 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
         action: 'BILL_CREATE',
         targetType: 'Bill',
         targetId: bill.id,
-        details: { checkNumber: bill.checkNumber, guest: bill.guestName, net: bill.netAmount },
+        details: { checkNumber: bill.checkNumber, guest: bill.guestName, net: bill.netAmount, ...(data.checkoutDiscountPercent > 0 ? { checkoutDiscountPercent: data.checkoutDiscountPercent, checkoutDiscountAmount: checkout.amount } : {}) },
       });
 
       return payrollReply(201, { bill });

@@ -23,7 +23,7 @@ export const decryptSecret = (userId: string, encrypted: string) => {
   cipher.setAAD(Buffer.from(userId)); cipher.setAuthTag(tag);
   return Buffer.concat([cipher.update(ciphertext), cipher.final()]).toString('utf8');
 };
-export const totp = (secret: string, label = '') => new OTPAuth.TOTP({ issuer: 'Dive Centre Manager', label, algorithm: 'SHA1', digits: 6, period: 30, secret: OTPAuth.Secret.fromBase32(secret) });
+export const totp = (secret: string, label = '') => new OTPAuth.TOTP({ issuer: process.env.AUTHENTICATOR_ISSUER === 'Dive Centre Manager Testing' ? 'Dive Centre Manager Testing' : 'Dive Centre Manager', label, algorithm: 'SHA1', digits: 6, period: 30, secret: OTPAuth.Secret.fromBase32(secret) });
 export const newAuthenticator = (label: string) => {
   const secret = new OTPAuth.Secret({ size: 20 }).base32;
   return { secret, uri: totp(secret, label).toString() };

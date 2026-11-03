@@ -1,13 +1,15 @@
 import React, { useId } from 'react';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 import { Download, Upload, FileSpreadsheet } from 'lucide-react';
 
 export const CatalogueTransferPanel: React.FC<{
   propertyName?: string;
+  autoPhotoPrice?: number; autoPhotoCommission?: number; currencySymbol?: string;
   busy: boolean;
   available: boolean;
   onExport: (format: 'csv' | 'xlsx', template?: boolean) => void;
   onImport: (file?: File) => void;
-}> = ({ propertyName, busy, available, onExport, onImport }) => {
+}> = ({ propertyName, busy, available, onExport, onImport, autoPhotoPrice = 41.975, autoPhotoCommission = 4.5, currencySymbol = '$' }) => {
   const id = useId();
   const disabled = busy || !available;
   return <section className="catalogue-transfer" aria-label="Catalogue import and export">
@@ -24,7 +26,7 @@ export const CatalogueTransferPanel: React.FC<{
       <input id={`${id}-file`} className="catalogue-file-input" type="file" accept=".csv,.xlsx" disabled={disabled} aria-describedby={`${id}-limits`} onChange={event => { onImport(event.target.files?.[0]); event.target.value = ''; }} />
       <small id={`${id}-limits`}>CSV or Excel (.xlsx) · Up to 3 MB · 2,000 activities</small>
     </div>
-    <details className="catalogue-import-help"><summary>How bulk imports work</summary><ol><li>Download a template or export your current catalogue. Keep the column names and order.</li><li>Keep an existing item code to update that service. New codes are kept; blank codes are generated automatically.</li><li>Enter 10 for a 10% pool rate. Employee payment columns use fixed amounts per unit; Yes under Include Photo ($57.50) adds a separate $57.50 Photo line per unit to new bills; its selected employee earns $4.50 per unit.</li><li>For an activity with no commissions, choose No pool, leave employee payments blank, and set Include Photo ($57.50) to No.</li><li>Upload the file and review the proposed changes before saving.</li></ol><p>Changes affect this property only. Saved bill prices and protected pool rules are retained. Older catalogue exports are still accepted.</p></details>
+    <details className="catalogue-import-help"><summary>How bulk imports work</summary><ol><li>Download a template or export your current catalogue. Keep the column names and order.</li><li>Keep an existing item code to update that service. New codes are kept; blank codes are generated automatically.</li><li>Enter 10 for a 10% pool rate. Employee payment columns use fixed amounts per unit; Yes under Include Photo ($41.975) adds a separate {formatUnitPrice(autoPhotoPrice, currencySymbol)} Photo line per unit to new bills; its selected employee earns {formatMoney(autoPhotoCommission, currencySymbol)} per unit. The template column name is retained for compatibility; the selected property’s Photo rates apply.</li><li>For an activity with no commissions, choose No pool, leave employee payments blank, and set Include Photo ($41.975) to No.</li><li>Upload the file and review the proposed changes before saving.</li></ol><p>Changes affect this property only. Saved bill prices and protected pool rules are retained. Older catalogue exports are still accepted.</p></details>
     {busy && <p role="status" className="catalogue-transfer-status">Processing your catalogue file…</p>}
   </section>;
 };

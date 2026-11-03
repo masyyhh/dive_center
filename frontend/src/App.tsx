@@ -8,9 +8,10 @@ import { useProperty } from './context/PropertyContext';
 import { Navbar } from './components/Navbar';
 import { SubNav, NavTab, navLabels } from './components/SubNav';
 import { waterSportsEnabled } from './features';
-const WaterSportsView = waterSportsEnabled
-  ? lazy(() => import('./components/WaterSportsView').then(module => ({ default: module.WaterSportsView })))
+const DiveCentreView = waterSportsEnabled
+  ? lazy(() => import('./components/WaterSportsView').then(module => ({ default: module.DiveCentreView })))
   : () => null;
+const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(module => ({ default: module.GlobalDashboard })));
 const HomeDashboard = lazy(() => import('./components/HomeDashboard').then(module => ({ default: module.HomeDashboard })));
 const NewBillView = lazy(() => import('./components/NewBillView').then(module => ({ default: module.NewBillView })));
 const BillsView = lazy(() => import('./components/BillsView').then(module => ({ default: module.BillsView })));
@@ -22,8 +23,8 @@ import { LoginView } from './components/LoginView';
 import { useNavigation } from './context/NavigationContext';
 import { Waves } from 'lucide-react';
 
-const validTabs = Object.keys(navLabels).filter(tab => tab !== 'water-sports' || waterSportsEnabled);
-const readTab = (): NavTab => validTabs.includes(location.hash.slice(1).split('/')[0]) ? location.hash.slice(1).split('/')[0] as NavTab : 'home';
+const validTabs = Object.keys(navLabels).filter(tab => tab !== 'dive-centre' || waterSportsEnabled);
+const readTab = (): NavTab => { const tab = location.hash.slice(1).split('/')[0]; const normalized = tab === 'water-sports' ? 'dive-centre' : tab; return validTabs.includes(normalized) ? normalized as NavTab : 'home'; };
 const readSection = () => location.hash.slice(1).split('/')[1] || '';
 export const AppContent: React.FC = () => {
   const { user, loading, refreshUser } = useAuth();
@@ -117,11 +118,11 @@ export const AppContent: React.FC = () => {
     <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} onShortcuts={() => setShortcutsOpen(true)} />
     <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => { if (import.meta.env.VITE_DEPLOYMENT_MODE === 'testing') window.location.assign('/'); else setSecurityOpen(true); })} onShortcuts={() => setShortcutsOpen(true)} />
       <main id="main-content" className={`main-content view-${currentTab}`} ref={mainRef} tabIndex={-1}>
-        {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
-          {waterSportsEnabled && currentTab === 'water-sports' && <WaterSportsView />}
-          {currentTab === 'home' && <HomeDashboard onNavigate={navigate} />}
+        {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' && !(currentTab === 'home' && user.role === 'GLOBAL_ADMIN') ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
+          {waterSportsEnabled && currentTab === 'dive-centre' && <DiveCentreView />}
+          {currentTab === 'home' && (user.role === 'GLOBAL_ADMIN' && section !== 'property' ? <GlobalDashboard onNavigate={navigate} /> : <HomeDashboard onNavigate={navigate} />)}
           {currentTab === 'new-bill' && <><div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1><p>Add activities, assign your guest, and review the total before saving.</p></div><NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
-          {currentTab === 'bills' && <BillsView savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
+          {currentTab === 'bills' && <BillsView section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
           {currentTab === 'presence' && <PresenceView initialDate={section} onSetup={() => navigate('admin', 'staff')} onPayroll={() => navigate('reporting', 'exports')} />}
           {currentTab === 'reporting' && <ReportingView section={section} onSectionChange={value => navigate('reporting', value)} />}
           {currentTab === 'admin' && (canAdmin ? <AdminView section={section} onSectionChange={value => navigate('admin', value)} /> : <div className="empty-state"><h1>Administrator access required</h1><p>Contact your property manager for help with workspace settings.</p></div>)}

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
@@ -10,17 +11,22 @@ auditRouter.get(
   '/',
   requireAuth,
   requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'),
-  requirePropertyAccess('query', 'propertyId'),
+  requirePropertyAccess('query', 'propertyId', true),
   async (req: Request, res: Response) => {
     try {
       const { propertyId, limit = '100', cursor } = req.query;
+      const parsed = z.object({
+        limit: z.string().regex(/^[0-9]{1,3}$/).transform(Number).pipe(z.number().int().min(1).max(500)),
+        cursor: z.string().min(1).max(100).optional(),
+      }).safeParse({ limit, cursor });
+      if (!parsed.success) return res.status(400).json({ error: 'Choose a whole-number limit from 1 to 500 and a valid cursor.' });
 
       const where: any = {};
       if (propertyId && propertyId !== 'all') {
         where.propertyId = String(propertyId);
       }
 
-      const pageSize = Math.min(500, Math.max(1, parseInt(String(limit), 10) || 100));
+      const pageSize = parsed.data.limit;
       const logs = await prisma.auditLog.findMany({
         where,
         take: pageSize + 1,

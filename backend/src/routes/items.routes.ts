@@ -4,6 +4,7 @@ import { withPropertyPayrollTransaction } from '../utils/payrollTransaction';
 import { catalogueSpreadsheetHeaders, catalogueSpreadsheetRow, CatalogueError, parseCatalogue, nextItemCode, itemCodeAllocator, safeSpreadsheetText } from '../services/catalogueTransfer';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
@@ -11,6 +12,73 @@ import { logAuditEvent } from '../services/auditService';
 import { isPercentagePool, validPoolRate } from '../utils/poolRates';
 
 export const itemsRouter = Router();
+
+const bulkDeleteSchema = z.object({
+  propertyId: z.string().min(1),
+  itemIds: z.array(z.string().min(1)).min(1).max(200).refine(ids => new Set(ids).size === ids.length),
+}).strict();
+
+itemsRouter.post('/bulk-delete', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req, res) => {
+  const parsed = bulkDeleteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Choose 1–200 different catalogue activities.' });
+  const { propertyId, itemIds } = parsed.data;
+  try {
+    const deletedCount = await withPropertyPayrollTransaction(prisma, propertyId, async tx => {
+      const property = await tx.property.findUnique({ where: { id: propertyId } });
+      if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
+      const items = await tx.item.findMany({ where: { propertyId, id: { in: itemIds }, isActive: true } });
+      if (items.length !== itemIds.length) throw new CatalogueError('Some selected activities are unavailable. Refresh the catalogue and select again.');
+      const result = await tx.item.updateMany({ where: { propertyId, id: { in: itemIds }, isActive: true }, data: { isActive: false } });
+      if (result.count !== items.length) throw new CatalogueError('The selection changed. Refresh the catalogue and select again.');
+      for (const item of items) {
+        await logAuditEvent({ client: tx, req, propertyId, action: 'ITEM_DELETE', targetType: 'Item', targetId: item.id,
+          details: { code: item.code, name: item.name, historyRetained: true, source: 'catalogue-bulk-delete' } });
+      }
+      return result.count;
+    });
+    return res.json({ deletedCount });
+  } catch (error) {
+    if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
+    console.error('Bulk catalogue delete failed.');
+    return res.status(500).json({ error: 'Could not delete the selected activities. Please try again.' });
+  }
+});
+
+class PermanentDeleteConflict extends Error {}
+const permanentDeleteSchema = bulkDeleteSchema.extend({ confirmation: z.literal('DELETE PERMANENTLY') });
+
+itemsRouter.post('/bulk-permanent-delete', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), async (req, res) => {
+  const parsed = permanentDeleteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Select 1–200 different activities and type DELETE PERMANENTLY to confirm.' });
+  const { propertyId, itemIds } = parsed.data;
+  try {
+    const deletedCount = await withPropertyPayrollTransaction(prisma, propertyId, async tx => {
+      const property = await tx.property.findUnique({ where: { id: propertyId } });
+      if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
+      // FK inserts take key-share locks. Hold these rows until deletion and auditing
+      // commit so a concurrent package save cannot silently lose a service.
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Item" WHERE "propertyId" = ${propertyId} AND "id" IN (${Prisma.join(itemIds)}) ORDER BY "id" FOR UPDATE`);
+      const items = await tx.item.findMany({ where: { propertyId, id: { in: itemIds } }, include: { _count: { select: { billItems: true, packageItems: true } } } });
+      if (items.length !== itemIds.length) throw new PermanentDeleteConflict('Some selected activities are unavailable. Refresh the catalogue and select again.');
+      if (items.some(item => item.isActive)) throw new PermanentDeleteConflict('Delete activities normally first, then permanently delete them from Show deleted activities.');
+      if (items.some(item => item._count.billItems || item._count.packageItems)) throw new PermanentDeleteConflict('Activities used on saved bills or in packages cannot be permanently deleted. Remove package references first; billed activities must stay in history. No activities were deleted.');
+      const result = await tx.item.deleteMany({ where: { propertyId, id: { in: itemIds }, isActive: false } });
+      if (result.count !== items.length) throw new PermanentDeleteConflict('The selection changed. Refresh the catalogue and select again.');
+      for (const item of items) {
+        // Permanent deletion must roll back if its audit record cannot be saved.
+        await tx.auditLog.create({ data: { propertyId, userId: req.user!.id, action: 'ITEM_PERMANENT_DELETE', targetType: 'Item', targetId: item.id,
+          details: JSON.stringify({ code: item.code, name: item.name, permanent: true }), ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1' } });
+      }
+      return result.count;
+    });
+    return res.json({ deletedCount });
+  } catch (error) {
+    if (error instanceof PermanentDeleteConflict) return res.status(409).json({ error: error.message });
+    if (error instanceof CatalogueError) return res.status(400).json({ error: error.message });
+    console.error('Permanent catalogue deletion failed.');
+    return res.status(500).json({ error: 'Could not permanently delete the selected activities. No activities were deleted.' });
+  }
+});
 
 class BulkMediaConflict extends Error {}
 const bulkMediaSchema = z.object({
@@ -75,12 +143,12 @@ itemsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       }),
       prisma.item.findMany({
         where: { propertyId, ...(includeInactive ? {} : { isActive: true }) },
-        include: { category: true, _count: { select: { billItems: true } } },
+        include: { category: true, _count: { select: { billItems: true, packageItems: true } } },
         orderBy: [{ categoryId: 'asc' }, { name: 'asc' }],
       }),
     ]);
 
-    return res.json({ categories, items: items.filter(item => item.category.propertyId === propertyId).map(({ _count, ...item }) => ({ ...item, hasBillHistory: _count.billItems > 0 })) });
+    return res.json({ categories, items: items.filter(item => item.category.propertyId === propertyId).map(({ _count, ...item }) => ({ ...item, hasBillHistory: _count.billItems > 0, hasPackageUsage: _count.packageItems > 0 })) });
   } catch (error) {
     console.error('Fetch items error:', error);
     return res.status(500).json({ error: 'Failed to fetch items catalogue.' });
@@ -100,6 +168,8 @@ itemsRouter.post(
       const { propertyId, name } = result.data;
       const property = await prisma.property.findUnique({ where: { id: propertyId } });
       if (!property) return res.status(404).json({ error: 'Property not found.' });
+      if (property.deletedAt) return res.status(410).json({ error: 'This property has been removed. Its records are read-only.' });
+      if (!property.isActive) return res.status(400).json({ error: 'Select an active property.' });
       const last = await prisma.category.aggregate({ where: { propertyId }, _max: { sortOrder: true } });
       const category = await prisma.category.create({ data: { propertyId, name, sortOrder: (last._max.sortOrder ?? 0) + 1 } });
       await logAuditEvent({ req, propertyId, action: 'CATEGORY_CREATE', targetType: 'Category', targetId: category.id, details: { name } });
@@ -160,7 +230,7 @@ itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MA
     for (const index of [4, 7, 8, 9, 10, 11, 12]) sheet.getColumn(index).numFmt = '0.00';
     sheet.getCell('F1').note = 'Enter 10 for a 10% course/dive pool contribution after discounts, before tax and service charge.';
     sheet.getCell('G1').note = 'Fixed amount per unit for Certifications. No staff pool share or base-leader override is paid from Certifications.';
-    sheet.getCell('M1').note = 'Yes adds a separate Photo line at $57.50 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
+    sheet.getCell('M1').note = 'Yes adds a separate Photo line at $41.975 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
     for (let row = 2; row <= sheet.rowCount; row++) {
       sheet.getCell(`E${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Course pool,Dive pool,Certifications,No pool"'], showErrorMessage: true, error: 'Choose one of the listed pools.' };
       sheet.getCell(`M${row}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'], showErrorMessage: true, error: 'Choose Yes or No.' };
@@ -177,9 +247,9 @@ itemsRouter.get('/export', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MA
         'Pool Rate (%): enter 10 for 10% on course/dive services after discounts, before tax and service charge. Leave blank for other pools.',
         'Certifications Amount / Unit: fixed amount per service unit. Leave blank for other pools. Certifications pay no staff pool commission.',
         'Employee payment columns: fixed amounts per unit. Blank means the role has no payment; 0 explicitly enables the role with a zero payment.',
-        'Include Photo ($57.50): Yes adds a separate $57.50 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
-        'Include Photo ($57.50) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
-        'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($57.50).',
+        'Include Photo ($41.975): Yes adds a separate $41.975 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
+        'Include Photo ($41.975) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
+        'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($41.975).',
         'Status: Active or Inactive. Existing bill prices and saved commissions are retained.',
         'Upload CSV or Excel (.xlsx), up to 3 MB and 2,000 activities. Review the import before applying it.',
       ];
@@ -270,7 +340,7 @@ itemsRouter.post(
         if (!category) throw new CatalogueError('Choose a category from this property.');
         const property = await tx.property.findUnique({ where: { id: data.propertyId } });
         if (!property?.isActive || property.deletedAt) throw new CatalogueError('Select an active property.');
-        const code = await nextItemCode(tx, data.propertyId, category.name);
+        const code = data.code || await nextItemCode(tx, data.propertyId, category.name);
         return tx.item.create({ data: { ...data, code }, include: { category: true } });
       });
 
@@ -318,7 +388,7 @@ itemsRouter.put(
         return res.status(400).json({ error: `Invalid ${issue.path.join('.') || 'activity'}: ${issue.message}`, details: validationIssues(parsed.error) });
       }
       const data = parsed.data;
-      if (data.code !== undefined && data.code !== existing.code) return res.status(400).json({ error: 'Item codes are generated by the system and cannot be changed.' });
+      if (data.code !== undefined && data.code !== existing.code) return res.status(400).json({ error: 'Item codes cannot be changed after creation.' });
 
       const effectiveCategoryId = data.categoryId ?? existing.categoryId;
       const category = typeof effectiveCategoryId === 'string' && await prisma.category.findFirst({ where: { id: effectiveCategoryId, propertyId: existing.propertyId } });

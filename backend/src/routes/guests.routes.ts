@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
+import { roomNumberSchema } from '../utils/fields';
 import { pmsLookupLimiter } from '../middleware/security';
 import { lookupInhouseGuests, PmsLookupError, pmsPropertyCodeSchema } from '../services/pmsService';
 
@@ -11,7 +12,7 @@ export const guestsRouter = Router();
 // Resolve resort permissions and mappings on the server, never from a client-supplied PMS code.
 guestsRouter.get('/inhouse', requireAuth, requirePropertyAccess('query', 'propertyId'), pmsLookupLimiter, async (req: Request, res: Response) => {
   res.setHeader?.('Cache-Control', 'no-store');
-  const parsed = z.object({ propertyId: z.string().trim().min(1).max(100), roomNumber: z.string().trim().min(1).max(32).regex(/^[^\x00-\x1f\x7f]+$/) }).safeParse(req.query);
+  const parsed = z.object({ propertyId: z.string().trim().min(1).max(100), roomNumber: roomNumberSchema }).safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: 'Enter a valid room number and select a property.' });
   try {
     const property = await prisma.property.findUnique({ where: { id: parsed.data.propertyId }, select: { code: true, pmsPropertyCode: true, pmsPropertyCodes: true, isActive: true } });

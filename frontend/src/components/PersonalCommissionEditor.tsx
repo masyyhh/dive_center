@@ -1,12 +1,12 @@
 import React, { useId } from 'react';
 import { Camera, Check } from 'lucide-react';
 import { commissionRoles, CommissionSelection } from '../utils/commissionEditor';
-import { formatMoney } from '../utils/format';
+import { formatMoney, formatUnitPrice } from '../utils/format';
 import { billPersonalRates } from '../utils/personalRates';
 
-export const PersonalCommissionSummary: React.FC<{ item: { personalRatesJson?: string | null; includesComplimentaryMedia: boolean }; currencySymbol: string }> = ({ item, currencySymbol }) => {
+export const PersonalCommissionSummary: React.FC<{ item: { personalRatesJson?: string | null; includesComplimentaryMedia: boolean }; currencySymbol: string; autoPhotoCommission?: number }> = ({ item, currencySymbol, autoPhotoCommission = 4.5 }) => {
   const payments = Object.entries(JSON.parse(billPersonalRates(item)) as Record<string, number>);
-  if (item.includesComplimentaryMedia) payments.push(['automaticPhoto', 4.5]);
+  if (item.includesComplimentaryMedia) payments.push(['automaticPhoto', autoPhotoCommission]);
   return payments.length ? <div className="space-y-1">{payments.map(([role, amount]) => <div key={role} className="text-xs">
     <span className="font-semibold">{role === 'automaticPhoto' ? 'Added Photo employee' : commissionRoles.find(option => option.id === role)?.label}</span>
     <span className="text-slate-500"> · {formatMoney(amount, currencySymbol)} / unit</span>
@@ -19,12 +19,13 @@ export const PersonalCommissionEditor: React.FC<{
   combinedMedia: boolean;
   currencySymbol: string;
   showPreview?: boolean;
-}> = ({ value, onChange, combinedMedia, currencySymbol, showPreview = true }) => {
+  autoPhotoPrice?: number; autoPhotoCommission?: number;
+}> = ({ value, onChange, combinedMedia, currencySymbol, showPreview = true, autoPhotoPrice = 41.975, autoPhotoCommission = 4.5 }) => {
   const id = useId();
   const visible = value.filter(row => !combinedMedia || !['photo', 'video'].includes(row.role));
   const payments: { label: string; amount: number }[] = visible.filter(row => row.enabled && row.amount.trim() !== '' && Number.isFinite(Number(row.amount)) && Number(row.amount) >= 0)
     .map(row => ({ label: commissionRoles.find(role => role.id === row.role)!.label, amount: Number(row.amount) }));
-  if (combinedMedia) payments.push({ label: 'Photo line employee', amount: 4.5 });
+  if (combinedMedia) payments.push({ label: 'Photo line employee', amount: autoPhotoCommission });
   const incomplete = visible.some(row => row.enabled && (row.amount.trim() === '' || !Number.isFinite(Number(row.amount)) || Number(row.amount) < 0));
   const total = payments.reduce((sum, payment) => sum + payment.amount, 0);
   const update = (role: CommissionSelection['role'], patch: Partial<CommissionSelection>) => onChange(value.map(row => row.role === role ? { ...row, ...patch } : row));
@@ -47,8 +48,8 @@ export const PersonalCommissionEditor: React.FC<{
         </div>;
       })}
     </div>
-    {combinedMedia && <div className="commission-combined-note"><Camera size={19} aria-hidden="true" /><div><strong>Separate Photo added · $57.50 / unit <span>{formatMoney(4.5, currencySymbol)} / unit</span></strong>
-      <p>Selecting this activity adds a Photo line at $57.50 per unit on top of the activity price. Select one team member on that line to receive $4.50 per unit.</p></div></div>}
+    {combinedMedia && <div className="commission-combined-note"><Camera size={19} aria-hidden="true" /><div><strong>Separate Photo added · {formatUnitPrice(autoPhotoPrice, currencySymbol)} / unit <span>{formatMoney(autoPhotoCommission, currencySymbol)} / unit</span></strong>
+      <p>Selecting this activity adds a Photo line at {formatUnitPrice(autoPhotoPrice, currencySymbol)} per unit on top of the activity price. Select one team member on that line to receive {formatMoney(autoPhotoCommission, currencySymbol)} per unit.</p></div></div>}
     {showPreview && <div className="commission-preview" aria-live="polite" aria-atomic="true">
       <div className="commission-preview-heading"><Check size={16} aria-hidden="true" /><strong>Payment preview</strong><span>1 service unit</span></div>
       {payments.length > 0 && <dl>{payments.map(payment => <div key={payment.label}><dt>{payment.label}</dt><dd>{formatMoney(payment.amount, currencySymbol)}</dd></div>)}</dl>}

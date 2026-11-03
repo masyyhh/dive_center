@@ -32,6 +32,8 @@ jobs:
       - run: npm ci --prefix frontend
       - run: npm audit --prefix backend --audit-level=high
       - run: npm audit --prefix frontend --audit-level=high
+      - name: Validate deployment tooling
+        run: python3 -m unittest discover -s scripts/cd -p 'test_*.py' -v
       - run: node --test tests/*.test.cjs
       - run: npm test --prefix backend
       - run: npm test --prefix frontend

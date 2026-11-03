@@ -1,3 +1,4 @@
+import { positiveIntSchema } from '../utils/fields';
 import { boundedArray, validationIssues } from '../utils/validation';
 import { pmsPropertyCodeSchema } from '../services/pmsService';
 import { randomUUID } from 'node:crypto';
@@ -69,16 +70,20 @@ const propertySchema = z.object({
   currencySymbol: z.string().default('$'),
   taxRate: z.number().min(0).max(100).default(16.0),
   serviceChargeRate: z.number().min(0).max(100).default(10.0),
-  nextCheckNumber: z.number().int().positive().default(1001),
+  nextCheckNumber: positiveIntSchema.default(1001),
+  autoPhotoPrice: z.number().min(0, 'Photo line price must be 0 or more.').default(41.975),
+  autoPhotoCommission: z.number().min(0, 'Photo staff commission must be 0 or more.').default(4.5),
 });
 
-const propertyUpdateSchema = propertySchema.omit({ code: true, currency: true, currencySymbol: true, taxRate: true, serviceChargeRate: true, nextCheckNumber: true }).partial().extend({
+const propertyUpdateSchema = propertySchema.omit({ code: true, currency: true, currencySymbol: true, taxRate: true, serviceChargeRate: true, nextCheckNumber: true, autoPhotoPrice: true, autoPhotoCommission: true }).partial().extend({
   code: z.string().trim().min(2, 'Property code must contain at least 2 characters.').max(10, 'Property code cannot exceed 10 characters.').transform(value => value.toUpperCase()).optional(),
   currency: z.string().trim().min(1, 'Currency is required.').optional(),
   currencySymbol: z.string().trim().min(1, 'Currency symbol is required.').optional(),
   taxRate: z.number().min(0).max(100).optional(),
   serviceChargeRate: z.number().min(0).max(100).optional(),
-  nextCheckNumber: z.number().int().positive().optional(),
+  nextCheckNumber: positiveIntSchema.optional(),
+  autoPhotoPrice: z.number().min(0, 'Photo line price must be 0 or more.').optional(),
+  autoPhotoCommission: z.number().min(0, 'Photo staff commission must be 0 or more.').optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -90,7 +95,7 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
       return res.status(400).json({ error: validationIssues(parseResult.error)[0].message, details: validationIssues(parseResult.error) });
     }
 
-    const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber } =
+    const { name, code, pmsPropertyCode, pmsPropertyCodes, location, currency, currencySymbol, taxRate, serviceChargeRate, nextCheckNumber, autoPhotoPrice, autoPhotoCommission } =
       parseResult.data;
 
     const baseCode = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 10).replace(/-$/, '');
@@ -112,6 +117,8 @@ propertiesRouter.post('/', requireAuth, requireRole('GLOBAL_ADMIN'), async (req:
         taxRate,
         serviceChargeRate,
         nextCheckNumber,
+        autoPhotoPrice,
+        autoPhotoCommission,
         categories: {
           create: [
             { name: 'Dives', sortOrder: 1 },

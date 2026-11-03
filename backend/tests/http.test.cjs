@@ -43,8 +43,8 @@ test('only the configured frontend origin receives CORS permission', async () =>
   assert.equal(denied.headers.get('access-control-allow-origin'), null);
 });
 
-test('production disables Water Sports API routes by default, including tablet links', async () => {
-  for (const [method, path] of [['GET', '/api/water-sports/records'], ['POST', '/api/water-sports/sessions'], ['GET', '/api/water-sports/tablet'], ['POST', '/api/water-sports/tablet/guests'], ['POST', '/api/water-sports/tablet/sign']]) {
+test('production disables Dive Centre and legacy guest routes by default', async () => {
+  for (const [method, path] of [['GET', '/api/dive-centre/overview'], ['GET', '/api/dive-centre/records'], ['POST', '/api/dive-centre/sessions'], ['GET', '/api/dive-centre/tablet'], ['GET', '/api/water-sports/records'], ['POST', '/api/water-sports/sessions'], ['GET', '/api/water-sports/tablet'], ['POST', '/api/water-sports/tablet/guests'], ['POST', '/api/water-sports/tablet/sign']]) {
     const response = await fetch(`${origin}${path}`, { method });
     assert.equal(response.status, 404);
   }

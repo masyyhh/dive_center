@@ -1,0 +1,111 @@
+name: Promote tested release to production
+on:
+  workflow_dispatch:
+    inputs:
+      release_run:
+        description: Successful Release to testing run ID (from its URL / summary)
+        type: string
+        required: true
+      confirmation:
+        description: Type DEPLOY PRODUCTION after testing and reviewing migrations
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dive-production-release
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: vars.PRODUCTION_CD_ENABLED == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.validate.outputs.json }}
+    steps:
+      - name: Require a completed, successful testing deployment
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN" =~ ^[0-9]{1,20}$ ]]
+          test "$CONFIRMATION" = 'DEPLOY PRODUCTION'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN" > "$RUNNER_TEMP/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN/artifacts" > "$RUNNER_TEMP/artifacts.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          run=json.loads((root/'run.json').read_text())
+          if run['path']!='.github/workflows/release.yml' or run['event']!='workflow_run' or run['head_branch']!='main' or run['conclusion']!='success' or run['repository']['full_name']!=os.environ['GITHUB_REPOSITORY']:
+              raise SystemExit('This is not a successful testing release workflow.')
+          artifacts=[a for a in json.loads((root/'artifacts.json').read_text())['artifacts'] if a['name']=='release-manifest' and not a['expired']]
+          if len(artifacts)!=1: raise SystemExit('Exactly one unexpired release manifest is required.')
+          (root/'artifact-id').write_text(str(artifacts[0]['id']))
+          PY
+          artifact_id=$(cat "$RUNNER_TEMP/artifact-id")
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$RUNNER_TEMP/release.zip"
+          python3 - <<'PY'
+          import json, os, re, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile(Path(os.environ['RUNNER_TEMP'])/'release.zip') as archive:
+              if archive.namelist()!=['release.json']: raise SystemExit('Unexpected manifest archive')
+              value=json.loads(archive.read('release.json'))
+          if set(value)!={'release','run_id','backend','web'} or str(value['run_id'])!=os.environ['RELEASE_RUN'] or not re.fullmatch('[a-f0-9]{40}',value['release']): raise SystemExit('Invalid release manifest')
+          for service in ['backend','web']:
+              if not re.fullmatch('ghcr.io/masyyhh/dive_center-'+service+'@sha256:[a-f0-9]{64}',value[service]): raise SystemExit('Invalid image digest')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as stream: stream.write('json='+json.dumps(value)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream: stream.write('### Selected production release\n\n```json\n'+json.dumps(value,indent=2)+'\n```\n')
+          PY
+  production:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://diving.ssrsys.com
+    timeout-minutes: 60
+    steps:
+      - name: Connect privately to production
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.PROD_TS_CLIENT_ID }}
+          oauth-secret: ${{ secrets.PROD_TS_CLIENT_SECRET }}
+          tags: tag:dive-ci-production
+          ping: ${{ vars.PROD_TAILSCALE_IP }}
+      - name: Deploy selected tested images
+        env:
+          MANIFEST: ${{ needs.validate.outputs.manifest }}
+          DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.PROD_TAILSCALE_IP }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          key="$RUNNER_TEMP/production-key"
+          hosts="$RUNNER_TEMP/production-known-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts"
+          printf '%s\n' "$MANIFEST" | ssh -T -i "$key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$hosts" -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+            "dive-deploy@$DEPLOY_HOST"
+      - name: Verify production through HTTPS proxy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 10 --max-time 30 \
+            https://diving.ssrsys.com/api/ready | tee "$RUNNER_TEMP/ready.json"
+          python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"]=="ready"' "$RUNNER_TEMP/ready.json"
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+            https://diving.ssrsys.com/environment.js | grep -F '"production"'
+      - name: Record production result
+        env:
+          MANIFEST: ${{ needs.validate.outputs.manifest }}
+        run: |
+          printf '### Production deployment complete\n\n```json\n%s\n```\n' "$MANIFEST" >> "$GITHUB_STEP_SUMMARY"

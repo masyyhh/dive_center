@@ -76,7 +76,7 @@ test('only global administrators can assign multiple validated PMS resorts', asy
   for (const codes of [['OLHU', 'OLHU'], ['INVALID']]) assert.equal((await call(propertiesRouter, 'PUT', '/a', { pmsPropertyCodes: codes }, admin)).status, 400);
 });
 test('item creation generates stable category codes, including concurrent and archived allocations', async () => {
-  const data = { propertyId: 'a', categoryId: 'diving', name: 'Boat dive', code: 'CLIENT-CODE', price: 75 };
+  const data = { propertyId: 'a', categoryId: 'diving', name: 'Boat dive', price: 75 };
   const created = await Promise.all(Array.from({ length: 4 }, () => call(itemsRouter, 'POST', '/', data)));
   assert(created.every(result => result.status === 201));
   assert.deepEqual(created.map(result => result.body.item.code).sort(), ['DIV-001', 'DIV-002', 'DIV-003', 'DIV-004']);

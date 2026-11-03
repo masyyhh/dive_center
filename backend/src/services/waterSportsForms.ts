@@ -3,8 +3,8 @@ import { additionalDisclaimerTranslations } from './waterSportsTranslations';
 import { boundedArray } from '../utils/validation';
 import { isBusinessDate } from '../utils/dates';
 
-export const formTypeSchema = z.enum(['PARTICIPATION', 'SNORKELING', 'GEAR_RENTAL', 'AID_GEAR']);
-export const documentKind = (type: string) => type === 'SNORKELING' ? 'SNORKELING' : 'PARTICIPATION';
+export const formTypeSchema = z.enum(['DIVE_PARTICIPATION', 'PARTICIPATION', 'SNORKELING', 'GEAR_RENTAL', 'AID_GEAR']);
+export const documentKind = (type: string) => type === 'DIVE_PARTICIPATION' ? 'DIVING' : type === 'SNORKELING' ? 'SNORKELING' : 'PARTICIPATION';
 export const languageSchema = z.string().trim().min(2).max(35).regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/);
 export const dateSchema = z.string().refine(isBusinessDate, 'Use a valid calendar date.');
 export const staffFieldsSchema = z.object({
@@ -176,7 +176,8 @@ J'ai lu et compris ce formulaire de décharge. Par ma signature, j'accepte les c
 
 Pour les participants de moins de 18 ans, un parent ou représentant légal doit signer.`;
 
-export const defaultDisclaimerDocuments = (kind: string) => [
+// Diving requires property-approved wording; legacy water-sports text must never be reused.
+export const defaultDisclaimerDocuments = (kind: string) => kind === 'DIVING' ? [] : [
   { language: 'en', languageName: 'English', title: kind === 'SNORKELING' ? 'Snorkeling excursion disclaimer' : 'Water sports conditions of participation', body: kind === 'SNORKELING' ? snorkelingText : participationText },
   { language: 'de', languageName: 'Deutsch', title: kind === 'SNORKELING' ? 'Haftungsausschluss für Schnorchelausflüge' : 'Teilnahmebedingungen für Wassersport', body: kind === 'SNORKELING' ? snorkelingGerman : participationGerman },
   { language: 'fr', languageName: 'Français', title: kind === 'SNORKELING' ? 'Décharge pour les excursions de snorkeling' : 'Conditions de participation aux sports nautiques', body: kind === 'SNORKELING' ? snorkelingFrench : participationFrench },
