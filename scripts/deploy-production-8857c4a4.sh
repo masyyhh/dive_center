@@ -188,8 +188,9 @@ web_attempted=1
 compose up -d --no-deps --no-build --pull never --force-recreate web
 ready=0
 for attempt in $(seq 1 30); do
-  if curl --fail --silent --show-error --max-time 5 http://192.168.135.39:18080/api/ready > "$work/readiness.json" 2>/dev/null && \
-     curl --fail --silent --show-error --max-time 5 http://192.168.135.39:18080/ > /dev/null 2>&1; then
+  # The web container deliberately rejects direct connections outside the trusted proxy.
+  if curl --noproxy '*' --fail --silent --show-error --max-time 5 https://diving.ssrsys.com/api/ready > "$work/readiness.json" 2>/dev/null && \
+     curl --noproxy '*' --fail --silent --show-error --max-time 5 https://diving.ssrsys.com/ > /dev/null 2>&1; then
     ready=1
     break
   fi
