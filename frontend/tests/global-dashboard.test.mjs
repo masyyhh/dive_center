@@ -88,7 +88,10 @@ test('discount investigation opens active bills in the exact period and shows on
   ];
   let hook = 0;
   const { BillsView } = load('../src/components/BillsView.tsx', {
-    react: { ...React, useState: initial => { const index = hook++; return [index === 5 ? fixtureBills : index === 6 ? false : initial, () => {}]; }, useEffect() {}, useRef: value => ({ current: value }) },
+    react: { ...React, useState: initial => { const index = hook++; return [index === 7 ? fixtureBills : index === 8 ? false : initial, () => {}]; }, useEffect() {}, useRef: value => ({ current: value }) },
+    './NewBillView': { NewBillView: () => null },
+    '../context/AuthContext': { useAuth: () => ({ user: { role: 'PROPERTY_MANAGER' } }) },
+    '../hooks/useMonthLock': { useMonthLock: () => ({ locked: false, error: '', retry() {} }) },
     './Modal': { Modal: () => null },
     '../context/PropertyContext': { useProperty: () => ({ activeProperty: { id: 'a', currencySymbol: '$' } }) },
     '../services/api': { apiFetch() { throw Error('Effects must not run during render'); } },

@@ -201,6 +201,8 @@ model Bill {
   nationality         String     @default("Other")
   
   grossAmount         Float      @default(0.0)
+  serviceChargeRateSnapshot Float?
+  taxRateSnapshot     Float?
   discountAmount      Float      @default(0.0)
   serviceChargeAmount Float      @default(0.0)
   taxAmount           Float      @default(0.0)
@@ -238,6 +240,7 @@ model BillItem {
   unitPrice               Float
   discountPercent         Float        @default(0.0)
   lineTotal               Float        // (unitPrice * quantity) - discount
+  poolRateSnapshot        Float?
   poolTypeSnapshot        String?
   poolContributionAmount  Float?       // Saved currency amount, after discounts and before service charge/tax.
   linePosition            Int          @default(0)
@@ -248,6 +251,7 @@ model BillItem {
   // Personal commission assignments
   sellerStaffId           String?
   guideStaffId            String?
+  commissionDiscountFactor Float       @default(1.0)
   instructorStaffId       String?
   photoStaffId            String?
   videoStaffId            String?

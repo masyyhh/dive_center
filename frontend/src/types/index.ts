@@ -80,6 +80,7 @@ export interface Item {
 }
 
 export interface BillItem {
+  sourceLineId?: string;
   clientLineId?: string;
   autoPhotoFor?: string | null;
   autoPhotoForLineId?: string | null;
@@ -92,6 +93,8 @@ export interface BillItem {
   unitPrice: number;
   discountPercent: number;
   lineTotal: number;
+  commissionDiscountFactor?: number;
+  poolRateSnapshot?: number | null;
   poolTypeSnapshot?: Item['poolType'] | null;
   poolContributionAmount?: number | null;
   sellerStaffId?: string | null;
@@ -118,6 +121,8 @@ export interface Bill {
   roomNumber: string;
   departureDate?: string | null;
   nationality: string;
+  serviceChargeRateSnapshot?: number | null;
+  taxRateSnapshot?: number | null;
   grossAmount: number;
   discountAmount: number;
   serviceChargeAmount: number;

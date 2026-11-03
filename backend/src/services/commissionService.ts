@@ -209,12 +209,13 @@ export const calculateCommissionForPeriod = async (
         if (line.personalCommissionsJson) {
           try {
             const rates = JSON.parse(line.personalCommissionsJson);
+            const discountFactor = line.commissionDiscountFactor ?? 1;
             // Seller
             if (line.sellerStaffId && canReceiveCredit(line.sellerStaffId) && typeof rates.seller === 'number' && Number.isFinite(rates.seller) && rates.seller > 0) {
-              const amt = Number(rates.seller) * line.quantity;
+              const amt = Number(rates.seller) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.sellerStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.sellerStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Seller fixed payment per service unit × quantity', 1, 1, Number(rates.seller));
+              addDetail(line.sellerStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Seller fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.seller));
               const sObj = staffMap.get(line.sellerStaffId);
               personalDetails.push({
                 id: `${line.id}-seller`,
@@ -231,10 +232,10 @@ export const calculateCommissionForPeriod = async (
             }
             // Guide
             if (line.guideStaffId && canReceiveCredit(line.guideStaffId) && typeof rates.guide === 'number' && Number.isFinite(rates.guide) && rates.guide > 0) {
-              const amt = Number(rates.guide) * line.quantity;
+              const amt = Number(rates.guide) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.guideStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.guideStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Guide fixed payment per service unit × quantity', 1, 1, Number(rates.guide));
+              addDetail(line.guideStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Guide fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.guide));
               const sObj = staffMap.get(line.guideStaffId);
               personalDetails.push({
                 id: `${line.id}-guide`,
@@ -251,10 +252,10 @@ export const calculateCommissionForPeriod = async (
             }
             // Instructor
             if (line.instructorStaffId && canReceiveCredit(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
-              const amt = Number(rates.instructor) * line.quantity;
+              const amt = Number(rates.instructor) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.instructorStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.instructorStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Instructor fixed payment per service unit × quantity', 1, 1, Number(rates.instructor));
+              addDetail(line.instructorStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Instructor fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.instructor));
               const sObj = staffMap.get(line.instructorStaffId);
               personalDetails.push({
                 id: `${line.id}-instructor`,
@@ -271,10 +272,10 @@ export const calculateCommissionForPeriod = async (
             }
             // Photo
             if (line.photoStaffId && canReceiveCredit(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
-              const amt = Number(rates.photo) * line.quantity;
+              const amt = Number(rates.photo) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.photoStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.photoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', `${line.includesComplimentaryMedia ? 'Photo / Video' : 'Photographer'} fixed payment per service unit × quantity`, 1, 1, Number(rates.photo));
+              addDetail(line.photoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', `${line.includesComplimentaryMedia ? 'Photo / Video' : 'Photographer'} fixed payment per service unit × quantity × saved after-discount factor`, 1, 1, Number(rates.photo));
               const sObj = staffMap.get(line.photoStaffId);
               personalDetails.push({
                 id: `${line.id}-photo`,
@@ -291,10 +292,10 @@ export const calculateCommissionForPeriod = async (
             }
             // Video
             if (line.videoStaffId && canReceiveCredit(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {
-              const amt = Number(rates.video) * line.quantity;
+              const amt = Number(rates.video) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.videoStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.videoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Video fixed payment per service unit × quantity', 1, 1, Number(rates.video));
+              addDetail(line.videoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Video fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.video));
               const sObj = staffMap.get(line.videoStaffId);
               personalDetails.push({
                 id: `${line.id}-video`,

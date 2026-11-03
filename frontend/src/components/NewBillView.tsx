@@ -1,7 +1,8 @@
+import { billToEditDraft } from '../utils/billEditing';
 import { isRoomNumber, isPositiveInt, roomNumberHelp } from '../utils/inputValidation';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
 import { nationalityCountries as countries } from '../utils/nationalities';
-import { addActivityWithPhoto, addPackageWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity } from '../utils/automaticPhotos';
+import { addActivityWithPhoto, addPackageWithPhoto, normalizeAutomaticPhotos, removeActivityWithPhoto, updateLinkedQuantity, discountSelectedQuantity } from '../utils/automaticPhotos';
 import { guestBillFields } from '../utils/pmsGuests';
 import { useMonthLock } from '../hooks/useMonthLock';
 import { formatMoney, formatUnitPrice } from '../utils/format';
@@ -13,7 +14,7 @@ import { businessToday, displayDate, isBusinessDate } from '../utils/dates';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { apiFetch, ApiError } from '../services/api';
-import { Item, Category, StaffMember, BillItem, PmsGuest, DivePackage } from '../types';
+import { Item, Category, StaffMember, Bill, BillItem, PmsGuest, DivePackage } from '../types';
 import {
   Search,
   Plus,
@@ -32,14 +33,18 @@ import {
 interface NewBillViewProps {
   onBillSaved: (checkNumber: number) => void;
   onSetup: () => void;
+  editingBill?: Bill;
+  onCancel?: () => void;
 }
 
-export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }) => {
+export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, editingBill, onCancel }) => {
   const { activeProperty } = useProperty();
   const { user } = useAuth();
   const canManage = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
-  const draftKey = billDraftKey(user?.id || '', activeProperty?.id || '');
-  const restoredDraft = useMemo(() => loadBillDraft(draftKey), [draftKey]);
+  const draftKey = billDraftKey(user?.id || '', activeProperty?.id || '') + (editingBill ? `:edit:${editingBill.id}` : '');
+  const restoredDraft = useMemo(() => { const saved = loadBillDraft(draftKey); return editingBill ? saved?.expectedUpdatedAt === editingBill.updatedAt ? saved : billToEditDraft(editingBill) : saved; }, [draftKey, editingBill?.updatedAt]);
+  const [editReason, setEditReason] = useState(restoredDraft?.editReason || '');
+  const [partialDiscount, setPartialDiscount] = useState<{ lineId: string; quantity: string; percent: string } | null>(null);
   const [restored, setRestored] = useState(Boolean(restoredDraft));
   const [draftError, setDraftError] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -104,13 +109,14 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   useEffect(() => {
     try {
       if (dirty) {
-        const draft: BillDraft = { version: 1, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountPercent: checkoutDiscountValue };
+        const draft: BillDraft = { version: 1, ...(editingBill ? { expectedUpdatedAt: editingBill.updatedAt, editReason } : {}), checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountPercent: checkoutDiscountValue };
         sessionStorage.setItem(draftKey, JSON.stringify(draft));
       } else { sessionStorage.removeItem(draftKey); setRestored(false); }
       setDraftError(false);
     } catch { setDraftError(true); }
-  }, [draftKey, dirty, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountValue]);
+  }, [draftKey, dirty, checkNumber, businessDate, roomNumber, guestName, departureDate, nationality, tipAmount, tipStaffIds, billLines, notes, checkEdited, checkoutDiscountValue, editReason]);
   const discardDraft = () => {
+    if (editingBill) { try { sessionStorage.removeItem(draftKey); } catch {} releaseGuard(); onCancel?.(); return; }
     setBillLines([]); setRoomNumber(''); setGuestName(''); setDepartureDate(''); setNationality('Other');
     setCheckoutDiscountValue(''); setTipAmount(0); setTipStaffIds([]); setNotes(''); setBusinessDate(businessToday()); setCheckNumber(nextCheck);
     setCheckEdited(false); setRestored(false); setAttemptedReview(false); setErrorMsg(null); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); cancelPmsLookup(); setDiscardOpen(false);
@@ -240,7 +246,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   const updateDiscount = (index: number, discountPercent: number) => {
     const updated = [...billLines];
-    const line = updated[index];
+    const line = { ...updated[index] };
+    updated[index] = line;
     const pct = Math.max(0, Math.min(100, discountPercent));
     const lineGross = line.quantity * line.unitPrice;
     const discount = (lineGross * pct) / 100;
@@ -268,8 +275,9 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   // Calculations per PDF Page 3 & 4:
   // Gross -> - Discount -> + Service charge -> + Tax -> + Tip -> Net
-  const scRate = activeProperty?.serviceChargeRate ?? 10.0;
-  const taxRate = activeProperty?.taxRate ?? 16.0;
+  const originalBase = editingBill ? editingBill.grossAmount - editingBill.discountAmount : 0;
+  const scRate = editingBill?.serviceChargeRateSnapshot ?? (editingBill && originalBase > 0 ? editingBill.serviceChargeAmount / originalBase * 100 : activeProperty?.serviceChargeRate ?? 10);
+  const taxRate = editingBill?.taxRateSnapshot ?? (editingBill && originalBase + editingBill.serviceChargeAmount > 0 ? editingBill.taxAmount / (originalBase + editingBill.serviceChargeAmount) * 100 : activeProperty?.taxRate ?? 16);
 
   const checkoutDiscountPercent = checkoutDiscountValue === '' ? 0 : Number(checkoutDiscountValue);
   const checkoutPreview = useMemo(() => {
@@ -332,10 +340,11 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
     try {
       setSaving(true);
-      await apiFetch('/bills', {
-        method: 'POST',
+      await apiFetch(editingBill ? `/bills/${editingBill.id}` : '/bills', {
+        method: editingBill ? 'PUT' : 'POST',
         body: JSON.stringify({
           propertyId: activeProperty.id,
+          ...(editingBill ? { expectedUpdatedAt: editingBill.updatedAt, editReason: editReason.trim() } : {}),
           checkNumber: Number(checkNumber),
           businessDate,
           guestName: guestName.trim(),
@@ -363,6 +372,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
 
   const reviewBill = () => {
+    if (partialDiscount) { setErrorMsg('Apply or cancel the selected-unit discount before reviewing the bill.'); return; }
+    if (editingBill && editReason.trim().length < 5) { setErrorMsg('Enter a reason for editing this posted bill (at least 5 characters).'); document.getElementById('bill-edit-reason')?.focus(); return; }
     setAttemptedReview(true); setErrorMsg(null);
     if (!isPositiveInt(checkNumber)) { setErrorMsg('Enter a whole check number between 1 and 2147483647.'); document.getElementById('bill-check-number')?.focus(); return; }
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); document.getElementById('checkout-discount')?.focus(); return; }
@@ -379,6 +390,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
   };
   return (
     <div className="space-y-6" aria-busy={saving}>
+      {editingBill && <section className="surface p-4 space-y-3"><div className="flex flex-wrap justify-between gap-3"><h2 className="font-semibold">Edit posted bill #{editingBill.checkNumber}</h2><button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscardOpen(true)}>Cancel editing</button></div><p>Changes and the original bill are recorded in the audit log. Existing discounts are already included in each saved line. Personal commissions will be recalculated after discounts. Locked payroll months cannot be edited.</p><label htmlFor="bill-edit-reason">Reason for correction <span aria-hidden="true">*</span><input id="bill-edit-reason" required minLength={5} maxLength={1000} disabled={saving} value={editReason} onChange={event => setEditReason(event.target.value)} className="w-full" /></label></section>}
       <section className="billing-toolbar" aria-label="Bill setup and total">
         <div className="billing-toolbar-top">
           <nav className="billing-shortcuts" aria-label="Bill workflow">
@@ -787,7 +799,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
                         {/* Discount (%) */}
                         <div className="flex items-center space-x-1">
-                          <span className="text-slate-400 text-xs">Disc%:</span>
+                          <span className="text-slate-400 text-xs">Discount % · all {line.quantity} units:</span>
                           <input
                             type="number"
                             min="0"
@@ -804,6 +816,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                         </div>
                       </div>
 
+                      {line.quantity > 1 && <button type="button" className="text-button" disabled={saving} onClick={() => setPartialDiscount({ lineId: line.clientLineId!, quantity: '1', percent: String(line.discountPercent) })}>Discount only some units</button>}
+                      {partialDiscount && partialDiscount.lineId === line.clientLineId && <div className="surface p-3 space-y-2" role="group" aria-label={`Discount selected units of ${line.itemName}`}><div className="flex flex-wrap items-end gap-3"><label>Units to discount<input type="number" min={1} max={line.quantity} step={1} value={partialDiscount.quantity} onChange={event => setPartialDiscount({ ...partialDiscount, quantity: event.target.value })} /></label><label>Discount (%)<input type="number" min={0} max={100} step="0.01" value={partialDiscount.percent} onChange={event => setPartialDiscount({ ...partialDiscount, percent: event.target.value })} /></label><button type="button" className="secondary-button" disabled={saving} onClick={() => { try { if (partialDiscount.quantity === '' || partialDiscount.percent === '') throw new Error('Enter a quantity and discount percentage.'); setBillLines(discountSelectedQuantity(billLines, billLines.findIndex(value => value.clientLineId === partialDiscount.lineId), Number(partialDiscount.quantity), Number(partialDiscount.percent))); setPartialDiscount(null); setErrorMsg(null); } catch (error) { setErrorMsg((error as Error).message); } }}>Apply to selected units</button><button type="button" className="text-button" onClick={() => setPartialDiscount(null)}>Cancel</button></div><p className="text-xs text-slate-500">Discounted units and remaining units appear as separate bill lines. Personal commission reduces by the same discount percentage.</p></div>}
                       {/* Personal Commission on a Line (PDF Page 3 & 4) */}
                       {personalRoles.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/80 bg-purple-500/5 -mx-3 -mb-3 p-3 rounded-b-xl space-y-1.5">
@@ -811,6 +825,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                             <Info className="w-3 h-3" />
                             <span>Credit Staff for Line Commission:</span>
                           </span>
+                          <p className="text-xs text-slate-500">Personal commission is reduced by {(checkoutPreview.lines[idx]?.discountPercent ?? line.discountPercent).toLocaleString('en-US', { maximumFractionDigits: 4 })}% including any checkout discount.</p>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {personalRoles.includes('seller') && (
@@ -1027,7 +1042,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
           <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setGuestPickerOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={selectedPmsGuest === null} onClick={applyPmsGuest}>Use selected guest</button></div>
         </div>
       </Modal>}
-      {discardOpen && <Modal label="Discard bill draft?" onClose={() => setDiscardOpen(false)}><div className="surface guard-dialog"><h2>Discard this draft?</h2><p>The guest details and selected activities will be removed from this tab.</p><div className="dialog-actions"><button className="secondary-button" onClick={() => setDiscardOpen(false)}>Keep draft</button><button className="danger-button" onClick={discardDraft}>Discard draft</button></div></div></Modal>}
+      {discardOpen && <Modal label="Discard bill draft?" onClose={() => setDiscardOpen(false)}><div className="surface guard-dialog"><h2>Discard this draft?</h2><p>{editingBill ? 'Your unsaved corrections will be discarded. The posted bill will remain unchanged.' : 'The guest details and selected activities will be removed from this tab.'}</p><div className="dialog-actions"><button className="secondary-button" onClick={() => setDiscardOpen(false)}>Keep draft</button><button className="danger-button" onClick={discardDraft}>Discard draft</button></div></div></Modal>}
       {/* Confirmation Modal */}
       {showConfirmModal && (
         <Modal label="Review bill" onClose={() => { if (!saving) { setShowConfirmModal(false); setErrorMsg(null); } } } busy={saving} error={errorMsg}>

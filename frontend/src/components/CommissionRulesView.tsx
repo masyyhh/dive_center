@@ -20,7 +20,7 @@ export const CommissionRulesView: React.FC<{
     <p>Customize each activity’s pool contribution and fixed employee payments for this property. Changes apply to new bills; saved bills retain their commission settings.</p>
     <div className="flex flex-wrap gap-3">
       <button type="button" className="secondary-button" disabled={!property || loading || busy} onClick={onStaff}>Configure staff pool sharing</button>
-      <span className="text-sm text-slate-500">Course and dive pools use percentages. Certifications and employee payments use fixed amounts per unit.</span>
+      <span className="text-sm text-slate-500">Course and dive pools use percentages. Certifications and employee payments use fixed amounts per unit. Personal employee commissions are then reduced by the discount on their bill line.</span>
     </div>
     <p className="text-sm text-slate-500">The base-leader override adds 10% of course and dive pools. Set eligibility under Staff &amp; Pools. For an activity already used on bills, choose New activity with these rules to set a different pool rule.</p>
     <label className="block">Search commission rules<input className="w-full" type="search" value={search} placeholder="Name, code or category" onChange={event => setSearch(event.target.value)} /></label>

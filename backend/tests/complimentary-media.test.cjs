@@ -38,16 +38,16 @@ test('selected media employee earns the catalogue rate on a zero-price complimen
   assert.equal(payroll.staffResults[0].personalCommission, 18);
   assert.equal(payroll.personalDetails.filter(detail => detail.amount === 9).length, 2);
 });
-test('a fully discounted service still pays the fixed rate and an unassigned service pays nothing', async () => {
+test('a fully discounted service pays zero commission and an unassigned service pays nothing', async () => {
   const discounted = await save('photo', 1, true, 100, 100);
   assert.equal(discounted.status, 201);
   assert.equal(discounted.body.bill.items[0].lineTotal, 0);
-  assert.equal(discounted.body.bill.items[0].totalPersonalCommission, 4.5);
+  assert.equal(discounted.body.bill.items[0].totalPersonalCommission, 0);
   const unassigned = await save('video', 1, false);
   assert.equal(unassigned.status, 201);
   assert.equal(unassigned.body.bill.items[0].totalPersonalCommission, 0);
   const payroll = await calculateCommissionForPeriod('a', '2026-10-30', '2026-10-30');
-  assert.equal(payroll.grandTotal, 22.5);
+  assert.equal(payroll.grandTotal, 18);
 });
 
 const { itemsRouter } = loadTypeScript('src/routes/items.routes.ts', stubs);

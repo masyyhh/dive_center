@@ -9,7 +9,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
-import { requirePropertyAccess } from '../middleware/rbac';
+import { requireRole, requirePropertyAccess } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 import { poolContributionAmount } from '../utils/poolRates';
 
@@ -195,6 +195,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
 
 const billItemSchema = z.object({
   clientLineId: z.string().min(1).max(80).optional(),
+  sourceLineId: z.string().min(1).max(100).optional(),
   autoPhotoFor: z.string().min(1).max(80).nullish(),
   itemId: z.string().optional().nullable(),
   itemName: z.string(),
@@ -213,6 +214,8 @@ const billItemSchema = z.object({
 
 const createBillSchema = z.object({
   propertyId: z.string(),
+  expectedUpdatedAt: z.iso.datetime().optional(),
+  editReason: z.string().trim().min(5).max(1000).optional(),
   checkNumber: positiveIntSchema,
   businessDate: z.string().refine(isBusinessDate, 'Valid calendar date (YYYY-MM-DD) is required.'),
   guestName: z.string().trim().min(1, 'Guest name is required').max(300),
@@ -227,7 +230,8 @@ const createBillSchema = z.object({
 });
 
 // POST /api/bills (Create new bill)
-billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), async (req: Request, res: Response) => {
+const saveBill = async (req: Request, res: Response) => {
+  const editingId = req.method === 'PUT' ? String(req.params.id) : null;
   try {
     const parseResult = createBillSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -235,8 +239,16 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
     }
 
     const data = parseResult.data;
+    if (editingId && (!data.expectedUpdatedAt || !data.editReason)) return res.status(400).json({ error: 'An edit reason and the bill version are required.' });
     const result = await withPropertyPayrollTransaction(prisma, data.propertyId, async prisma => {
 
+      const previous = editingId ? await prisma.bill.findFirst({ where: { id: editingId, propertyId: data.propertyId }, include: { items: { orderBy: { linePosition: 'asc' } } } }) : null;
+      if (editingId && !previous) return payrollReply(404, { error: 'Bill not found in this property.' });
+      if (previous) {
+        if (previous.status !== 'ACTIVE') return payrollReply(409, { error: 'Only active posted bills can be edited.' });
+        if (previous.updatedAt.toISOString() !== data.expectedUpdatedAt) return payrollReply(409, { error: 'This bill changed since you opened it. Reload the bill before editing.' });
+        if (await isMonthLocked(prisma, previous.propertyId, previous.businessDate)) return payrollReply(423, { error: 'Cannot edit: Original month is locked for payroll.' });
+      }
       // Check if month is locked
       if (await isMonthLocked(prisma, data.propertyId, data.businessDate)) {
         return payrollReply(423, {
@@ -248,6 +260,7 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       const existingCheck = await prisma.bill.findFirst({
         where: {
           propertyId: data.propertyId,
+          ...(editingId ? { id: { not: editingId } } : {}),
           checkNumber: data.checkNumber,
           status: { in: ['ACTIVE', 'REBATED'] }, // Only active or rebated hold the check number; soft deleted release it
         },
@@ -266,33 +279,44 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
 
       const expectedPhotoPrice = property.autoPhotoPrice ?? 41.975;
       const expectedPhotoCommission = property.autoPhotoCommission ?? 4.5;
+      const sourceFor = (line: typeof data.items[number]) => previous?.items.find(saved => saved.id === line.sourceLineId);
+      for (const line of data.items) {
+        if (line.sourceLineId && (!sourceFor(line) || (sourceFor(line)!.itemId || null) !== (line.itemId || null))) return payrollReply(400, { error: 'An edited line must refer to an original line from this bill and the same item.' });
+      }
+      const includedFor = (line: typeof data.items[number], item: { includesComplimentaryMedia: boolean }) => sourceFor(line)?.includesComplimentaryMedia ?? item.includesComplimentaryMedia;
+      const photoPriceFor = (line: typeof data.items[number]) => sourceFor(line)?.unitPrice ?? expectedPhotoPrice;
+      const photoCommissionFor = (line: typeof data.items[number]) => {
+        const saved = sourceFor(line);
+        if (saved) { try { return JSON.parse(saved.personalCommissionsJson || '{}').photo ?? 0; } catch { return 0; } }
+        return expectedPhotoCommission;
+      };
 
       const roots = data.items.filter(line => !line.autoPhotoFor);
       const providedIds = data.items.map(line => line.clientLineId).filter((id): id is string => Boolean(id));
       if (!roots.length || new Set(providedIds).size !== providedIds.length) return payrollReply(400, { error: 'Each activity must have a unique bill-line identifier.' });
       const itemIds = [...new Set(roots.map(line => line.itemId).filter((id): id is string => Boolean(id)))];
-      const catalogue = await prisma.item.findMany({ where: { id: { in: itemIds }, propertyId: data.propertyId, isActive: true }, include: { category: true } });
+      const catalogue = await prisma.item.findMany({ where: { id: { in: itemIds }, propertyId: data.propertyId }, include: { category: true } });
       const itemMap = new Map(catalogue.filter(item => item.category.propertyId === data.propertyId).map(item => [item.id, item]));
-      if (roots.some(line => !line.itemId || !itemMap.has(line.itemId))) return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
+      if (roots.some(line => !line.itemId || !itemMap.has(line.itemId) || (!itemMap.get(line.itemId)!.isActive && !sourceFor(line)))) return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
       const rootMap = new Map(roots.filter(line => line.clientLineId).map(line => [line.clientLineId!, line]));
       const photoLines = new Map<string, typeof data.items[number]>();
       for (const photo of data.items.filter(line => line.autoPhotoFor)) {
         const parent = rootMap.get(photo.autoPhotoFor!);
-        if (!parent || !itemMap.get(parent.itemId!)?.includesComplimentaryMedia || photoLines.has(photo.autoPhotoFor!) || photo.itemId ||
-            Math.abs(photo.unitPrice - expectedPhotoPrice) > 0.001 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
+        if (!parent || !includedFor(parent, itemMap.get(parent.itemId!)!) || photoLines.has(photo.autoPhotoFor!) || photo.itemId ||
+            Math.abs(photo.unitPrice - photoPriceFor(photo)) > 0.001 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
           return payrollReply(400, { error: `Photo lines must be linked once to an included activity, priced at $${expectedPhotoPrice.toFixed(2)} per unit, with matching quantity and one photographer.` });
         }
         photoLines.set(photo.autoPhotoFor!, photo);
       }
       for (const parent of roots) {
-        if (itemMap.get(parent.itemId!)?.includesComplimentaryMedia && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || parent.photoStaffId || parent.videoStaffId)) {
+        if (includedFor(parent, itemMap.get(parent.itemId!)!) && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || parent.photoStaffId || parent.videoStaffId)) {
           return payrollReply(400, { error: `This activity includes an automatic $${expectedPhotoPrice.toFixed(2)} Photo line. Refresh the bill and select the team member on that Photo line before saving.` });
         }
       }
       // Use canonical Photo prices when calculating the bill-wide allocation.
       let checkout;
       try {
-        checkout = applyCheckoutDiscount(data.items.map(line => line.autoPhotoFor ? { ...line, unitPrice: expectedPhotoPrice } : line), data.checkoutDiscountPercent);
+        checkout = applyCheckoutDiscount(data.items.map(line => line.autoPhotoFor ? { ...line, unitPrice: photoPriceFor(line) } : line), data.checkoutDiscountPercent);
       } catch (error) {
         return payrollReply(400, { error: error instanceof Error ? error.message : 'Invalid checkout discount.' });
       }
@@ -317,19 +341,22 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
       const lineItemsData: Prisma.BillItemUncheckedCreateWithoutBillInput[] = [];
       for (const line of discountedRoots) {
         const item = itemMap.get(line.itemId!)!;
+        const savedLine = sourceFor(line);
+        const included = includedFor(line, item);
         let parsedRates: Record<string, unknown> = {};
-        try { parsedRates = item.personalRatesJson ? JSON.parse(item.personalRatesJson) : {}; } catch { /* Invalid catalogue rates pay no commission. */ }
+        try { parsedRates = JSON.parse((savedLine ? savedLine.personalCommissionsJson : item.personalRatesJson) || '{}'); } catch { /* Invalid catalogue rates pay no commission. */ }
         const rates: Record<string, number> = {};
         for (const role of ['seller', 'guide', 'instructor', 'photo', 'video'] as const) {
           const amount = parsedRates && parsedRates[role];
           if (typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) rates[role] = amount;
         }
-        if (item.includesComplimentaryMedia) {
+        if (included) {
           // Included photos are billed and credited once on the linked Photo line.
           delete rates.photo;
           delete rates.video;
         }
-        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + ((line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0);
+        const commissionDiscountFactor = 1 - line.discountPercent / 100;
+        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + ((line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
         const lineGross = line.unitPrice * line.quantity;
         const discount = (lineGross * line.discountPercent) / 100;
         const lineTotal = lineGross - discount;
@@ -342,53 +369,63 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
           id: parentId,
           linePosition: lineItemsData.length,
           itemId: line.itemId || null,
-          itemName: item.name,
-          categoryName: item.category.name,
+          itemName: savedLine?.itemName ?? item.name,
+          categoryName: savedLine?.categoryName ?? item.category.name,
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           discountPercent: line.discountPercent,
           lineTotal,
-          poolTypeSnapshot: item.poolType,
-          poolContributionAmount: poolContributionAmount(item.poolType, item.poolContribution, line.quantity, lineTotal),
+          poolTypeSnapshot: savedLine?.poolTypeSnapshot ?? item.poolType,
+          poolRateSnapshot: savedLine?.poolRateSnapshot ?? (savedLine && savedLine.poolContributionAmount != null
+            ? ['COURSE_POOL', 'DIVE_POOL'].includes(savedLine.poolTypeSnapshot || '') && savedLine.lineTotal > 0 ? savedLine.poolContributionAmount / savedLine.lineTotal * 100
+              : savedLine.poolTypeSnapshot === 'CERTIFICATION_POOL' ? savedLine.poolContributionAmount / savedLine.quantity : item.poolContribution
+            : item.poolContribution),
+          poolContributionAmount: 0,
           sellerStaffId: line.sellerStaffId || null,
           guideStaffId: line.guideStaffId || null,
           instructorStaffId: line.instructorStaffId || null,
-          photoStaffId: item.includesComplimentaryMedia ? null : line.photoStaffId || null,
-          videoStaffId: item.includesComplimentaryMedia ? null : line.videoStaffId || null,
-          includesComplimentaryMedia: item.includesComplimentaryMedia,
+          commissionDiscountFactor,
+          photoStaffId: included ? null : line.photoStaffId || null,
+          videoStaffId: included ? null : line.videoStaffId || null,
+          includesComplimentaryMedia: included,
           personalCommissionsJson: JSON.stringify(rates),
           totalPersonalCommission,
         });
-        if (item.includesComplimentaryMedia) {
+        const savedData = lineItemsData[lineItemsData.length - 1];
+        savedData.poolContributionAmount = poolContributionAmount(savedData.poolTypeSnapshot!, savedData.poolRateSnapshot!, line.quantity, lineTotal);
+        if (included) {
           const photo = discountedPhotos.get(line.clientLineId!)!;
-          const photoGross = expectedPhotoPrice * line.quantity;
+          const photoGross = photoPriceFor(photo) * line.quantity;
           const photoDiscount = photoGross * photo.discountPercent / 100;
           grossAmount += photoGross;
           totalDiscount += photoDiscount;
           lineItemsData.push({
             id: randomUUID(), autoPhotoForLineId: parentId, linePosition: lineItemsData.length,
             itemId: null, itemName: 'Photo', categoryName: 'Photo & Video', quantity: line.quantity,
-            unitPrice: expectedPhotoPrice, discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
+            unitPrice: photoPriceFor(photo), discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
             poolTypeSnapshot: 'NONE', poolContributionAmount: 0,
             photoStaffId: photo.photoStaffId || null, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
-            includesComplimentaryMedia: false, personalCommissionsJson: JSON.stringify({ photo: expectedPhotoCommission }),
-            totalPersonalCommission: photo.photoStaffId ? expectedPhotoCommission * line.quantity : 0,
+            includesComplimentaryMedia: false, personalCommissionsJson: JSON.stringify({ photo: photoCommissionFor(photo) }),
+            commissionDiscountFactor: 1 - photo.discountPercent / 100,
+            totalPersonalCommission: photo.photoStaffId ? photoCommissionFor(photo) * line.quantity * (1 - photo.discountPercent / 100) : 0,
           });
         }
       }
 
 
       const netBeforeCharges = grossAmount - totalDiscount;
-      const serviceChargeAmount = (netBeforeCharges * property.serviceChargeRate) / 100;
-      const taxAmount = ((netBeforeCharges + serviceChargeAmount) * property.taxRate) / 100;
+      const oldBase = previous ? previous.grossAmount - previous.discountAmount : 0;
+      const serviceChargeRate = previous?.serviceChargeRateSnapshot ?? (previous && oldBase > 0 ? previous.serviceChargeAmount / oldBase * 100 : property.serviceChargeRate);
+      const taxRate = previous?.taxRateSnapshot ?? (previous && oldBase + previous.serviceChargeAmount > 0 ? previous.taxAmount / (oldBase + previous.serviceChargeAmount) * 100 : property.taxRate);
+      const serviceChargeAmount = (netBeforeCharges * serviceChargeRate) / 100;
+      const taxAmount = ((netBeforeCharges + serviceChargeAmount) * taxRate) / 100;
       const tipAmount = data.tipAmount || 0;
       const netAmount = netBeforeCharges + serviceChargeAmount + taxAmount + tipAmount;
       const amounts = [grossAmount, totalDiscount, serviceChargeAmount, taxAmount, tipAmount, netAmount,
         ...lineItemsData.flatMap(line => [line.lineTotal, line.poolContributionAmount, line.totalPersonalCommission])];
       if (amounts.some(amount => typeof amount !== 'number' || !Number.isFinite(amount * 100))) return payrollReply(400, { error: 'The bill total or commission is too large. Check prices and quantities.' });
 
-      const bill = await prisma.bill.create({
-        data: {
+      const billData = {
           propertyId: data.propertyId,
           checkNumber: data.checkNumber,
           businessDate: data.businessDate,
@@ -398,22 +435,19 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
           nationality: data.nationality,
           grossAmount: Math.round(grossAmount * 100) / 100,
           discountAmount: Math.round(totalDiscount * 100) / 100,
+          serviceChargeRateSnapshot: serviceChargeRate,
+          taxRateSnapshot: taxRate,
           serviceChargeAmount: Math.round(serviceChargeAmount * 100) / 100,
           taxAmount: Math.round(taxAmount * 100) / 100,
           tipAmount: Math.round(tipAmount * 100) / 100,
           netAmount: Math.round(netAmount * 100) / 100,
           tipStaffIdsJson: data.tipStaffIds.length > 0 ? JSON.stringify(data.tipStaffIds) : null,
-          status: 'ACTIVE',
+          status: 'ACTIVE' as const,
           notes: data.notes || null,
-          createdById: req.user!.id,
-          items: {
-            create: lineItemsData,
-          },
-        },
-        include: {
-          items: { orderBy: { linePosition: 'asc' } },
-        },
-      });
+      };
+      const bill = previous
+        ? await prisma.bill.update({ where: { id: previous.id }, data: { ...billData, updatedAt: new Date(Math.max(Date.now(), previous.updatedAt.getTime() + 1)), items: { deleteMany: {}, create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' } } } })
+        : await prisma.bill.create({ data: { ...billData, createdById: req.user!.id, items: { create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' } } } });
 
       // Update next check number on property if this check is higher
       if (data.checkNumber >= property.nextCheckNumber) {
@@ -423,17 +457,17 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
         });
       }
 
-      await logAuditEvent({
-        client: prisma,
-        req,
-        propertyId: bill.propertyId,
-        action: 'BILL_CREATE',
-        targetType: 'Bill',
-        targetId: bill.id,
-        details: { checkNumber: bill.checkNumber, guest: bill.guestName, net: bill.netAmount, ...(data.checkoutDiscountPercent > 0 ? { checkoutDiscountPercent: data.checkoutDiscountPercent, checkoutDiscountAmount: checkout.amount } : {}) },
-      });
+      const auditDetails = { ...(previous ? { reason: data.editReason, before: previous, after: bill } : {}), checkNumber: bill.checkNumber, guest: bill.guestName, net: bill.netAmount,
+        ...(data.checkoutDiscountPercent > 0 ? { checkoutDiscountPercent: data.checkoutDiscountPercent, checkoutDiscountAmount: checkout.amount } : {}) };
+      if (previous) {
+        // A posted correction must never commit without its before/after audit record.
+        await prisma.auditLog.create({ data: { propertyId: bill.propertyId, userId: req.user!.id, action: 'BILL_EDIT', targetType: 'Bill', targetId: bill.id,
+          details: JSON.stringify(auditDetails), ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1' } });
+      } else {
+        await logAuditEvent({ client: prisma, req, propertyId: bill.propertyId, action: 'BILL_CREATE', targetType: 'Bill', targetId: bill.id, details: auditDetails });
+      }
 
-      return payrollReply(201, { bill });
+      return payrollReply(previous ? 200 : 201, { bill });
     });
     return res.status(result.status).json(result.body);
   } catch (error) {
@@ -441,7 +475,9 @@ billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), 
     console.error('Create bill error:', error);
     return res.status(500).json({ error: 'Failed to save bill.' });
   }
-});
+};
+billsRouter.post('/', requireAuth, requirePropertyAccess('body', 'propertyId'), saveBill);
+billsRouter.put('/:id', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body', 'propertyId'), saveBill);
 
 // POST /api/bills/:id/re-date
 // PDF Page 4: "Re-date: Move a bill to a different business date (the number stays the same)."

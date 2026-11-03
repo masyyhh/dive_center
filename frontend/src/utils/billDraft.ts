@@ -1,6 +1,8 @@
 import { BillItem } from '../types';
 export interface BillDraft {
   version: 1;
+  expectedUpdatedAt?: string;
+  editReason?: string;
   checkoutDiscountPercent?: string;
   checkNumber: number;
   businessDate: string;
@@ -18,7 +20,7 @@ export const billDraftKey = (userId: string, propertyId: string) => `${import.me
 export const isBillDraft = (value: unknown): value is BillDraft => {
   if (!value || typeof value !== 'object') return false;
   const d = value as BillDraft;
-  return (d.checkoutDiscountPercent === undefined || typeof d.checkoutDiscountPercent === 'string') && d.version === 1 && Number.isInteger(d.checkNumber) && d.checkNumber > 0 &&
+  return (d.editReason === undefined || typeof d.editReason === 'string') && (d.expectedUpdatedAt === undefined || typeof d.expectedUpdatedAt === 'string') && (d.checkoutDiscountPercent === undefined || typeof d.checkoutDiscountPercent === 'string') && d.version === 1 && Number.isInteger(d.checkNumber) && d.checkNumber > 0 &&
     typeof d.businessDate === 'string' && (d.businessDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(d.businessDate)) &&
     ['roomNumber', 'guestName', 'departureDate', 'nationality', 'notes'].every(key => typeof d[key as keyof BillDraft] === 'string') &&
     typeof d.checkEdited === 'boolean' && Number.isFinite(d.tipAmount) && d.tipAmount >= 0 &&

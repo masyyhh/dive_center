@@ -10,17 +10,17 @@ async function load(path) {
 const { calculateCommissionPreview } = await load('../src/utils/commissionCalculator.ts');
 const { filterCatalogue, emptyCatalogueFilters, canPermanentlyDeleteItem } = await load('../src/utils/catalogueFilters.ts');
 const fixture = { price: 200, quantity: 2, discount: 25, poolType: 'COURSE_POOL', poolRate: 10, selections: [{ role: 'seller', enabled: true, amount: '5' }, { role: 'photo', enabled: true, amount: '99' }, { role: 'video', enabled: true, amount: '99' }], combinedMedia: true };
-test('calculator distinguishes discounted percentage pools from fixed combined employee payments', () => {
+test('calculator reduces activity commissions by its discount and keeps separately undiscounted Photo commissions', () => {
   const result = calculateCommissionPreview(fixture);
   assert.equal(result.gross, 400); assert.equal(result.discountAmount, 100); assert.equal(result.serviceTotal, 300);
   assert.equal(result.poolAmount, 30); assert.equal(result.photoCharge, 83.95); assert.equal(result.billSubtotal, 383.95);
-  assert.deepEqual(result.payments, [{ role: 'seller', unitRate: 5, amount: 10 }, { role: 'media', unitRate: 4.5, amount: 9 }]);
-  assert.equal(result.employeeTotal, 19);
+  assert.deepEqual(result.payments, [{ role: 'seller', unitRate: 5, amount: 7.5 }, { role: 'media', unitRate: 4.5, amount: 9 }]);
+  assert.equal(result.employeeTotal, 16.5);
 });
-test('complimentary example has zero course/dive pool but retains the fixed photo/video payment', () => {
+test('complimentary activity has zero pool and activity commission but retains the separately undiscounted Photo payment', () => {
   for (const poolType of ['COURSE_POOL', 'DIVE_POOL']) {
     const result = calculateCommissionPreview({ ...fixture, poolType, discount: 100 });
-    assert.equal(result.photoCharge, 83.95); assert.equal(result.billSubtotal, 83.95); assert.equal(result.serviceTotal, 0); assert.equal(result.poolAmount, 0); assert.equal(result.payments.find(payment => payment.role === 'media').amount, 9);
+    assert.equal(result.payments.find(payment => payment.role === 'seller').amount, 0); assert.equal(result.photoCharge, 83.95); assert.equal(result.billSubtotal, 83.95); assert.equal(result.serviceTotal, 0); assert.equal(result.poolAmount, 0); assert.equal(result.payments.find(payment => payment.role === 'media').amount, 9);
   }
 });
 test('certifications stay fixed per unit and invalid preview inputs do not display misleading totals', () => {

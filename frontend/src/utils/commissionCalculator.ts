@@ -19,7 +19,7 @@ export function calculateCommissionPreview(input: {
   const photoCharge = combinedMedia ? photoPrice * quantity : 0;
   const billSubtotal = serviceTotal + photoCharge;
   const poolAmount = percentage ? serviceTotal * poolRate / 100 : poolType === 'CERTIFICATION_POOL' ? poolRate * quantity : 0;
-  const payments = selected.map(row => ({ role: row.role as string, unitRate: Number(row.amount), amount: Number(row.amount) * quantity }));
+  const payments = selected.map(row => ({ role: row.role as string, unitRate: Number(row.amount), amount: Number(row.amount) * quantity * (1 - discount / 100) }));
   if (combinedMedia) payments.push({ role: 'media', unitRate: photoCommission, amount: photoCommission * quantity });
   const employeeTotal = payments.reduce((sum, payment) => sum + payment.amount, 0);
   if (![gross, discountAmount, serviceTotal, photoCharge, billSubtotal, poolAmount, employeeTotal, ...payments.map(payment => payment.amount)].every(Number.isFinite)) return null;

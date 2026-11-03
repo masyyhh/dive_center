@@ -1,3 +1,6 @@
+import { NewBillView } from './NewBillView';
+import { useAuth } from '../context/AuthContext';
+import { useMonthLock } from '../hooks/useMonthLock';
 import { investigationPeriod } from '../utils/dashboardNavigation';
 import { formatMoney, formatUnitPrice } from '../utils/format';
 import { Modal } from './Modal';
@@ -25,6 +28,11 @@ import {
 
 export const BillsView: React.FC<{ section?: string; savedCheck: number | null; onDismissSaved: () => void }> = ({ section, savedCheck, onDismissSaved }) => {
   const { activeProperty } = useProperty();
+  const { user } = useAuth();
+  const canEdit = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
+  const [editingBill, setEditingBill] = useState<Bill | null>(null);
+  const [editSuccess, setEditSuccess] = useState('');
+  useEffect(() => { setEditingBill(null); setSelectedBill(null); }, [activeProperty?.id]);
 
   const initialPeriod = investigationPeriod(section);
   const [discountedOnly, setDiscountedOnly] = useState(initialPeriod?.discountedOnly || false);
@@ -49,6 +57,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
 
   // Selected bill for detailed modal
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
+  const editMonth = useMonthLock(activeProperty?.id, selectedBill?.businessDate.slice(0, 7) || '');
   const detailRequest = useRef(0);
   const closeBillDetails = () => { detailRequest.current++; setSelectedBill(null); };
   useEffect(() => () => { detailRequest.current++; }, []);
@@ -176,8 +185,10 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
   const currencySymbol = activeProperty?.currencySymbol || '$';
   const visibleBills = discountedOnly ? bills.filter(bill => bill.discountAmount > 0) : bills;
 
+  if (editingBill) return <NewBillView key={`${editingBill.id}:${editingBill.updatedAt}`} editingBill={editingBill} onCancel={() => setEditingBill(null)} onSetup={() => {}} onBillSaved={check => { setEditingBill(null); closeBillDetails(); setEditSuccess(`Bill #${check} updated. The correction was recorded in the audit log.`); void fetchBills(); }} />;
   return (
     <div className="space-y-6">
+      {editSuccess && <div className="notice notice-success" role="status"><span>{editSuccess}</span><button onClick={() => setEditSuccess('')}>Dismiss</button></div>}
       {savedCheck !== null && <div className="notice notice-success" role="status"><CheckCircle2 size={18} /><span>Bill #{savedCheck} saved successfully. Find it by its business date below.</span><button onClick={onDismissSaved}>Dismiss</button></div>}
       {/* Top Filter Card */}
       <div className="feature-controls bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
@@ -511,6 +522,8 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
               <div className="flex space-x-2">
                 {selectedBill.status === 'ACTIVE' && (
                   <>
+                    {canEdit && <button type="button" className="secondary-button" disabled={editMonth.locked !== false} title={editMonth.locked ? 'This payroll month is locked.' : editMonth.error || 'Edit this posted bill'} onClick={() => setEditingBill(selectedBill)}>Edit bill</button>}
+                    {canEdit && editMonth.error && <button type="button" className="text-button" onClick={editMonth.retry}>Retry payroll check</button>}
                     {/* Re-date button */}
                     <button
                       onClick={() => {

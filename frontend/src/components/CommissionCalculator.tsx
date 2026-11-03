@@ -13,7 +13,7 @@ export const CommissionCalculator: React.FC<{
   const money = (value: number) => formatMoney(value, props.currencySymbol);
   return <section className="commission-calculator" aria-label="Commission calculator preview">
     <div className="commission-preview-heading"><Calculator size={18} /><h3>Try a bill</h3><span>Preview only</span></div>
-    <p>See how discounts affect the pool and how fixed employee payments stay separate.</p>
+    <p>See how discounts reduce the shared pool and personal employee commissions.</p>
     <div className="calculator-controls">
       <div><span>Service price</span><strong>{money(props.price)} / unit</strong></div>
       <label>Quantity<input aria-label="Preview quantity" type="text" inputMode="numeric" value={quantity} onChange={event => setQuantity(event.target.value)} /></label>
@@ -27,9 +27,9 @@ export const CommissionCalculator: React.FC<{
         <strong>{money(result.poolAmount)}</strong><p>{props.poolType === 'NONE' ? 'This service does not contribute to a pool.' : result.percentage ? `${props.poolRate}% × ${money(result.serviceTotal)} after discounts` : `${money(props.poolRate)} × ${quantity} service unit(s)`}</p>
         {result.percentage && <small>The pool is shared among eligible employees. This is not a payment to one employee.</small>}
       </div>
-      <div className="calculator-allocation"><h4>Fixed employee payments</h4><strong>{money(result.employeeTotal)}</strong>
-        {result.payments.length ? <dl>{result.payments.map(payment => <div key={payment.role}><dt>{payment.role === 'media' ? 'Employee on the Photo line' : commissionRoles.find(role => role.id === payment.role)?.label}<small>{money(payment.unitRate)} × {quantity} unit(s)</small></dt><dd>{money(payment.amount)}</dd></div>)}</dl> : <p>No employee payments configured.</p>}
-        <small>Assumes every configured role is assigned on the bill. Fixed payments apply even when the service is complimentary.</small>
+      <div className="calculator-allocation"><h4>Employee commissions after discounts</h4><strong>{money(result.employeeTotal)}</strong>
+        {result.payments.length ? <dl>{result.payments.map(payment => <div key={payment.role}><dt>{payment.role === 'media' ? 'Employee on the Photo line' : commissionRoles.find(role => role.id === payment.role)?.label}<small>{money(payment.unitRate)} × {quantity} unit(s){payment.role !== 'media' ? ` × ${100 - Number(discount)}%` : ' · no Photo discount'}</small></dt><dd>{money(payment.amount)}</dd></div>)}</dl> : <p>No employee payments configured.</p>}
+        <small>Assumes every configured role is assigned. A 100% line discount pays no personal commission on that line. Added Photo lines have their own discount.</small>
       </div>
     </div> : <p role="status">Enter a whole-number quantity of 1 or more, a discount from 0–100%, and valid employee payment amounts.</p>}
     <p className="commission-preview-help">The discount preview applies to the activity. Added Photos start without a discount. Preview changes do not change the saved activity.</p>
