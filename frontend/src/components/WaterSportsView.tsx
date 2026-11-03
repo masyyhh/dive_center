@@ -9,7 +9,7 @@ import './water-sports.css';
 
 type Summary = { id: string; runningNumber: number; formType: string; businessDate: string; guestName: string; roomNumber: string; departureDate: string | null; isMinor: boolean; signedAt: string };
 type RecordDetail = Summary & { staffFields: Record<string, string>; documentSnapshot: Disclaimer; documentHash: string; signature: Signature; guardianName: string | null; confirmationNumber: string | null };
-type Overview = { businessDate: string; pendingCount: number; signedToday: number; totalSigned: number; pending: { id: string; formType: string; roomNumber: string; createdAt: string; expiresAt: string; lookupCount: number }[]; readiness: { pmsPropertyConfigured: boolean; documents: Record<string, number> } };
+type Overview = { testingGuests?: boolean; businessDate: string; pendingCount: number; signedToday: number; totalSigned: number; pending: { id: string; formType: string; roomNumber: string; createdAt: string; expiresAt: string; lookupCount: number }[]; readiness: { pmsPropertyConfigured: boolean; documents: Record<string, number> } };
 const blankFields = { checkNumber: '', maskNumber: '', finsNumber: '', rentalDuration: '', returnDate: '', notes: '' };
 export const DiveCentreView = () => {
   const { activeProperty } = useProperty(); const { user } = useAuth();
@@ -31,6 +31,7 @@ export const DiveCentreView = () => {
   useEffect(() => { if (tab === 'records') void perform(() => loadRecords()); if (tab === 'languages') void perform(loadDocuments); }, [tab, kind]);
   const link = handoff ? `${location.origin}${import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? '/__testing/' : location.pathname}#dive-centre-tablet/${handoff.token}` : '';
   return <section className="ws-workspace"><div className="page-heading"><span className="eyebrow">GUEST SERVICES</span><h1>Dive centre</h1><p>A smooth arrival for your guests. A clear handover for your team.</p></div>
+    {overview?.testingGuests && <div className="ws-success" role="status"><strong>Testing only · Fictional guests</strong><p>Use room 0012 for two sample guests, or 0013 to test a parent / guardian signing. Other rooms return no guests. Use a practice signature; completed forms are saved in the testing database.</p></div>}
     <div className="dc-summary" aria-label="Guest form activity">
       <div><span>Signed today</span><strong>{overview?.signedToday ?? '—'}</strong><small>Maldives business date</small></div>
       <div><span>Awaiting signature</span><strong>{overview?.pendingCount ?? '—'}</strong><small>Active guest links</small></div>
@@ -46,7 +47,7 @@ export const DiveCentreView = () => {
         {(type === 'GEAR_RENTAL' || type === 'AID_GEAR') && <>{['maskNumber', 'finsNumber', ...(type === 'GEAR_RENTAL' ? ['rentalDuration', 'returnDate'] : [])].map(key => <label key={key}>{fieldNames[key]}<input required type={key === 'returnDate' ? 'date' : 'text'} maxLength={key === 'rentalDuration' ? 200 : 100} value={fields[key as keyof typeof fields]} onChange={e => setFields({ ...fields, [key]: e.target.value })} /></label>)}</>}
       </div><aside className="dc-readiness" aria-label="Preparation checklist"><h3>Ready for your guest?</h3><ul>
         <li data-ready={!!room.trim()}>{room.trim() ? '✓' : '○'} Villa / room entered</li>
-        <li data-ready={!!overview?.readiness.pmsPropertyConfigured}>{overview?.readiness.pmsPropertyConfigured ? '✓' : '○'} PMS property mapping configured</li>
+        <li data-ready={!!(overview?.testingGuests || overview?.readiness.pmsPropertyConfigured)}>{overview?.testingGuests || overview?.readiness.pmsPropertyConfigured ? '✓' : '○'} {overview?.testingGuests ? 'Fictional guest lookup ready' : 'PMS property mapping configured'}</li>
         <li data-ready={!!overview?.readiness.documents[type]}>{overview?.readiness.documents[type] ? '✓' : '○'} Approved document available{overview?.readiness.documents[type] ? ` · ${overview.readiness.documents[type]} language(s)` : ''}</li>
         {['GEAR_RENTAL', 'AID_GEAR'].includes(type) && <li data-ready={!!fields.maskNumber.trim() && !!fields.finsNumber.trim()}>{fields.maskNumber.trim() && fields.finsNumber.trim() ? '✓' : '○'} Mask and fins identified</li>}
         {type === 'GEAR_RENTAL' && <li data-ready={!!fields.rentalDuration.trim() && !!fields.returnDate}>{fields.rentalDuration.trim() && fields.returnDate ? '✓' : '○'} Rental duration and return date entered</li>}

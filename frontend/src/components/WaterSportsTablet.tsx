@@ -6,7 +6,7 @@ import { signatureHasInk, remainingMinutes } from '../utils/diveCentreJourney';
 import './water-sports.css';
 
 type Guest = { id: string; fullName: string; roomNumber: string; checkoutDate: string | null; propertyCode: string };
-type Session = { completed?: boolean; runningNumber?: number; propertyName?: string; formType: string; staffFields: Record<string, string>; documents: Disclaimer[]; businessDate: string; expiresAt: string };
+type Session = { testingGuests?: boolean; completed?: boolean; runningNumber?: number; propertyName?: string; formType: string; staffFields: Record<string, string>; documents: Disclaimer[]; businessDate: string; expiresAt: string };
 // The private guest capability stays in the fragment and is never used as a staff credential.
 export const DiveCentreTablet = ({ token }: { token: string }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -52,6 +52,7 @@ export const DiveCentreTablet = ({ token }: { token: string }) => {
   const steps = ['Your details', 'Read & understand', 'Review & sign'];
 
   return <main className="ws-tablet"><div className="ws-tablet-card">
+    {session?.testingGuests && <div className="ws-success" role="status"><strong>Testing only · Fictional guests</strong><p>This is a practice form. Use a practice signature. It will be saved in the testing database.</p></div>}
     <header className="dc-guest-header"><span className="eyebrow">WELCOME TO YOUR DIVE CENTRE</span>
       <h1>{session?.propertyName || 'Guest check-in'}</h1>
       {session && !session.completed && <><p>{formNames[session.formType] || 'Guest participation form'}</p>

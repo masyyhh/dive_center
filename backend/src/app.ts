@@ -1,3 +1,4 @@
+import { disclaimerTestGuestsEnabled } from './services/disclaimerTesting';
 import { requestInputBudget } from './utils/validation';
 import { auditApiActivity } from './middleware/audit';
 import express, { Request, Response, NextFunction } from 'express';
@@ -21,6 +22,8 @@ import { presenceRouter } from './routes/presence.routes';
 import { reportsRouter } from './routes/reports.routes';
 import { auditRouter } from './routes/audit.routes';
 
+// Fail before listening if fictional guest mode targets a live datasource.
+disclaimerTestGuestsEnabled();
 const app = express();
 
 // Setup Security, Helmet, CORS
