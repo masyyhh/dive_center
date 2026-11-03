@@ -26,7 +26,7 @@ import {
   Printer,
 } from 'lucide-react';
 
-export const BillsView: React.FC<{ section?: string; savedCheck: number | null; onDismissSaved: () => void }> = ({ section, savedCheck, onDismissSaved }) => {
+export const BillsView: React.FC<{ section?: string; savedCheck: number | null; onDismissSaved: () => void; onSetup: () => void }> = ({ section, savedCheck, onDismissSaved, onSetup }) => {
   const { activeProperty } = useProperty();
   const { user } = useAuth();
   const canEdit = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
@@ -185,7 +185,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
   const currencySymbol = activeProperty?.currencySymbol || '$';
   const visibleBills = discountedOnly ? bills.filter(bill => bill.discountAmount > 0) : bills;
 
-  if (editingBill) return <NewBillView key={`${editingBill.id}:${editingBill.updatedAt}`} editingBill={editingBill} onCancel={() => setEditingBill(null)} onSetup={() => {}} onBillSaved={check => { setEditingBill(null); closeBillDetails(); setEditSuccess(`Bill #${check} updated. The correction was recorded in the audit log.`); void fetchBills(); }} />;
+  if (editingBill) return <NewBillView key={`${editingBill.id}:${editingBill.updatedAt}`} editingBill={editingBill} onCancel={() => setEditingBill(null)} onSetup={onSetup} onBillSaved={check => { setEditingBill(null); closeBillDetails(); setEditSuccess(`Bill #${check} updated. The correction was recorded in the audit log.`); void fetchBills(); }} />;
   return (
     <div className="space-y-6">
       {editSuccess && <div className="notice notice-success" role="status"><span>{editSuccess}</span><button onClick={() => setEditSuccess('')}>Dismiss</button></div>}

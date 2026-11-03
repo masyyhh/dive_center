@@ -122,7 +122,7 @@ export const AppContent: React.FC = () => {
           {waterSportsEnabled && currentTab === 'dive-centre' && <DiveCentreView />}
           {currentTab === 'home' && (user.role === 'GLOBAL_ADMIN' && section !== 'property' ? <GlobalDashboard onNavigate={navigate} /> : <HomeDashboard onNavigate={navigate} />)}
           {currentTab === 'new-bill' && <><div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1><p>Add activities, assign your guest, and review the total before saving.</p></div><NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
-          {currentTab === 'bills' && <BillsView section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
+          {currentTab === 'bills' && <BillsView onSetup={() => navigate('admin', 'items')} section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
           {currentTab === 'presence' && <PresenceView initialDate={section} onSetup={() => navigate('admin', 'staff')} onPayroll={() => navigate('reporting', 'exports')} />}
           {currentTab === 'reporting' && <ReportingView section={section} onSectionChange={value => navigate('reporting', value)} />}
           {currentTab === 'admin' && (canAdmin ? <AdminView section={section} onSectionChange={value => navigate('admin', value)} /> : <div className="empty-state"><h1>Administrator access required</h1><p>Contact your property manager for help with workspace settings.</p></div>)}
