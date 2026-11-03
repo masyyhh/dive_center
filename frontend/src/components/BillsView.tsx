@@ -284,6 +284,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
       {!loading && !errorMsg && <p className="text-sm text-slate-500">Shown bills: revenue {formatMoney(visibleBills.reduce((sum, bill) => sum + bill.grossAmount - bill.discountAmount, 0), currencySymbol)} · discounts {formatMoney(visibleBills.reduce((sum, bill) => sum + bill.discountAmount, 0), currencySymbol)}. Revenue excludes service charge, tax and tips.</p>}
       {/* Bills Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <p className="table-scroll-hint">Scroll horizontally on smaller screens to see all amounts and bill status.</p>
         {loading ? (
           <div className="p-12 text-center text-sm text-slate-400">Loading bills...</div>
         ) : visibleBills.length === 0 ? (
@@ -292,7 +293,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full text-left border-collapse text-sm bills-data-table">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4">Check #</th>
@@ -301,7 +302,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
                   <th className="py-3 px-4">Guest Name</th>
                   <th className="py-3 px-4">Revenue</th>
                   <th className="py-3 px-4">Discounts</th>
-                  <th className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Net Total</th>
+                  <th className="py-3 px-4 font-semibold text-slate-900 dark:text-white text-right">Net Total</th>
                   <th className="py-3 px-4">Status</th>
                 </tr>
               </thead>

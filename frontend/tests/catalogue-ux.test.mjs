@@ -8,7 +8,7 @@ async function load(path) {
   return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 }
 const { calculateCommissionPreview } = await load('../src/utils/commissionCalculator.ts');
-const { filterCatalogue, emptyCatalogueFilters } = await load('../src/utils/catalogueFilters.ts');
+const { filterCatalogue, emptyCatalogueFilters, canPermanentlyDeleteItem } = await load('../src/utils/catalogueFilters.ts');
 const fixture = { price: 200, quantity: 2, discount: 25, poolType: 'COURSE_POOL', poolRate: 10, selections: [{ role: 'seller', enabled: true, amount: '5' }, { role: 'photo', enabled: true, amount: '99' }, { role: 'video', enabled: true, amount: '99' }], combinedMedia: true };
 test('calculator distinguishes discounted percentage pools from fixed combined employee payments', () => {
   const result = calculateCommissionPreview(fixture);
@@ -54,4 +54,12 @@ test('calculator uses property Photo rates including explicit zero rates', () =>
   const free = calculateCommissionPreview({ ...fixture, autoPhotoPrice: 0, autoPhotoCommission: 0 });
   assert.equal(free.photoCharge, 0);
   assert.equal(free.payments.find(payment => payment.role === 'media').amount, 0);
+});
+
+test('bulk permanent selection excludes active, linked, and unverified activities', () => {
+  const unused = { isActive: false, hasBillHistory: false, hasPackageUsage: false };
+  assert.equal(canPermanentlyDeleteItem(unused), true);
+  for (const change of [{ isActive: true }, { hasBillHistory: true }, { hasPackageUsage: true }, { hasBillHistory: undefined }, { hasPackageUsage: undefined }]) {
+    assert.equal(canPermanentlyDeleteItem({ ...unused, ...change }), false);
+  }
 });

@@ -4,7 +4,7 @@ import { PersonalCommissionEditor, PersonalCommissionSummary } from './PersonalC
 import { CommissionSelection, hasNoCommissions, readCommissionSelections, serializeCommissionSelections } from '../utils/commissionEditor';
 import { CommissionCalculatorPreview } from './CommissionCalculator';
 import { BulkMediaReview, BulkMediaReviewData } from './BulkMediaReview';
-import { CatalogueFilters, emptyCatalogueFilters, filterCatalogue } from '../utils/catalogueFilters';
+import { CatalogueFilters, emptyCatalogueFilters, filterCatalogue, canPermanentlyDeleteItem } from '../utils/catalogueFilters';
 import { CatalogueTransferPanel } from './CatalogueTransferPanel';
 import { CatalogueImportReview, CatalogueImportPreview } from './CatalogueImportReview';
 import { pmsResortCodes } from '../utils/pmsGuests';
@@ -147,14 +147,16 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [showArchivedItems, setShowArchivedItems] = useState(false);
-  const visibleItems = filterCatalogue(items, catalogueFilters, showArchivedItems);
+  const viewItems = items.filter(item => item.isActive !== showArchivedItems);
+  const visibleItems = filterCatalogue(viewItems, catalogueFilters, true);
   const selectableItems = visibleItems;
+  const eligibleVisibleItems = visibleItems.filter(canPermanentlyDeleteItem);
   const selectedItems = items.filter(item => selectedItemIds.includes(item.id));
   const selectedAreActive = selectedItems.length > 0 && selectedItems.every(item => item.isActive);
-  const canPermanentlyDeleteSelected = selectedItems.length > 0 && selectedItems.every(item => !item.isActive && !item.hasBillHistory && !item.hasPackageUsage);
+  const canPermanentlyDeleteSelected = selectedItems.length > 0 && selectedItems.every(canPermanentlyDeleteItem);
   const selectedVisibleCount = selectableItems.filter(item => selectedItemIds.includes(item.id)).length;
   useEffect(() => { setCatalogueFilters(emptyCatalogueFilters); setSelectedItemIds([]); setBulkReview(null); setBulkError(null); setCatalogueImport(null); setBulkDeleteTarget(null); }, [activeProperty?.id]);
-  useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && (item.isActive || showArchivedItems)))); }, [items, showArchivedItems]);
+  useEffect(() => { setSelectedItemIds(ids => ids.filter(id => items.some(item => item.id === id && (item.isActive !== showArchivedItems)))); }, [items, showArchivedItems]);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<Item | null>(null);
   const [itemBusy, setItemBusy] = useState(false);
@@ -920,9 +922,13 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         </div>
       </div>
 
+      <section className="admin-section-context" aria-label="Settings section description">
+        <span>{({ properties: 'Property setup', users: 'People & access', staff: 'Team & eligibility', items: 'Activities & pricing', commissions: 'Commission configuration', packages: 'Activity bundles', audit: 'History & accountability' })[activeTab]}</span>
+        <p>{({ properties: 'Manage property details, taxes, charges, and default rates.', users: 'Manage sign-in accounts, permissions, and property assignments.', staff: 'Manage staff records, employment dates, and pool-sharing eligibility.', items: 'Set up activities, prices, Photo settings, and catalogue imports.', commissions: 'Review pool contributions and employee payments by activity.', packages: 'Group catalogue activities into packages for billing.', audit: 'Review recorded changes and the accounts that made them.' })[activeTab]}</p>
+      </section>
       {errorMsg && <div role="alert" className="notice notice-error"><AlertCircle size={18} /><span>{errorMsg}</span><button onClick={() => setErrorMsg(null)}>Dismiss</button></div>}
       {successMsg && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm flex items-center space-x-2">
+        <div role="status" className="notice notice-success p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm flex items-center space-x-2">
           <CheckCircle className="w-4 h-4 text-emerald-500" />
           <span>{successMsg}</span>
         </div>
@@ -1266,33 +1272,45 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             fileName={catalogueImport.fileName} propertyName={activeProperty?.name || ''} currencySymbol={activeProperty?.currencySymbol || '$'}
             busy={transferBusy} onApply={commitCatalogue} onCancel={() => setCatalogueImport(null)} />}
 
+          <div className="catalogue-view-header">
+            <div className="catalogue-view-switch" role="group" aria-label="Catalogue view">
+              <button type="button" aria-pressed={!showArchivedItems} disabled={itemBusy || bulkBusy} onClick={() => setShowArchivedItems(false)}>Active <span>{items.filter(item => item.isActive).length}</span></button>
+              <button type="button" aria-pressed={showArchivedItems} disabled={itemBusy || bulkBusy} onClick={() => setShowArchivedItems(true)}>Deleted <span>{items.filter(item => !item.isActive).length}</span></button>
+            </div>
+            <p>{showArchivedItems ? 'Restore activities or permanently remove eligible unused records.' : 'Activities available for new bills. Select rows to make changes together.'}</p>
+          </div>
           <div className="catalogue-filters">
             <label>Search services<input type="search" placeholder="Name, code or category" value={catalogueFilters.query} onChange={event => setCatalogueFilters({ ...catalogueFilters, query: event.target.value })} /></label>
             <label>Category<select value={catalogueFilters.categoryId} onChange={event => setCatalogueFilters({ ...catalogueFilters, categoryId: event.target.value })}><option value="">All categories</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label>Pool<select value={catalogueFilters.poolType} onChange={event => setCatalogueFilters({ ...catalogueFilters, poolType: event.target.value })}><option value="">All pools</option><option value="COURSE_POOL">Course pool</option><option value="DIVE_POOL">Dive pool</option><option value="CERTIFICATION_POOL">Certifications</option><option value="NONE">No pool</option></select></label>
             <label>Photo / video<select value={catalogueFilters.media} onChange={event => setCatalogueFilters({ ...catalogueFilters, media: event.target.value as CatalogueFilters['media'] })}><option value="all">All services</option><option value="included">Photo added · {photoPriceLabel}</option><option value="excluded">Separate settings</option></select></label>
           </div>
-          <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {items.filter(item => showArchivedItems || item.isActive).length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
-          {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar">
+          <div className="flex flex-wrap gap-3 items-center text-sm"><span role="status">Showing {visibleItems.length} of {viewItems.length} services</span><button type="button" className="text-button" onClick={() => setCatalogueFilters(emptyCatalogueFilters)}>Clear filters</button></div>
+          {showArchivedItems && <section className="catalogue-permanent-tools" aria-label="Bulk permanent deletion">
+            <div><h4>Bulk permanent deletion</h4><p>{eligibleVisibleItems.length} eligible activities match your filters. Activities with bill or package links are excluded. Up to 200 can be selected at once.</p></div>
+            <button type="button" className="secondary-button" disabled={itemBusy || bulkBusy || loading || !eligibleVisibleItems.length} onClick={() => setSelectedItemIds(eligibleVisibleItems.slice(0, 200).map(item => item.id))}>Select eligible activities ({Math.min(eligibleVisibleItems.length, 200)})</button>
+          </section>}
+          {selectedItemIds.length > 0 && <div className="catalogue-bulk-bar" aria-label="Selected activity actions">
             <div><strong>{selectedItemIds.length} selected</strong>{selectedItemIds.length > selectedVisibleCount && <span> · {selectedItemIds.length - selectedVisibleCount} hidden by filters</span>}<small>Review changes before saving. Up to 200 services per update.</small></div>
-            <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy || !selectedAreActive} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : `Add Photo · ${photoPriceLabel}`}</button>
+            {!showArchivedItems && <><button type="button" className="secondary-button" disabled={bulkBusy || itemBusy || !selectedAreActive} onClick={() => reviewBulkMedia(true)}>{bulkBusy ? 'Preparing review…' : `Add Photo · ${photoPriceLabel}`}</button>
             <button type="button" className="secondary-button" disabled={bulkBusy || itemBusy || !selectedAreActive} onClick={() => reviewBulkMedia(false)}>Stop adding Photo</button>
             <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty || !selectedAreActive} onClick={() => {
               if (!activeProperty) return;
               setErrorMsg(null);
               setBulkDeleteTarget({ propertyId: activeProperty.id, items: items.filter(item => item.isActive && selectedItemIds.includes(item.id)) });
-            }}><Trash2 size={14} />Delete selected ({selectedItemIds.length})</button>
-            <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty || !canPermanentlyDeleteSelected} onClick={() => {
+            }}><Trash2 size={14} />Delete selected ({selectedItemIds.length})</button></>}
+            {showArchivedItems && <button type="button" className="danger-button" disabled={bulkBusy || itemBusy || !activeProperty || !canPermanentlyDeleteSelected} onClick={() => {
               if (!activeProperty || !canPermanentlyDeleteSelected) return;
               setErrorMsg(null); setBulkDeleteTarget({ propertyId: activeProperty.id, items: selectedItems, permanent: true });
-            }}>Permanently delete selected</button>
-            {!selectedAreActive && <p className="text-sm">Photo changes and normal deletion require active activities only. Permanent deletion requires deleted activities with no bill or package links.</p>}
+            }}>Permanently delete selected ({selectedItemIds.length})</button>}
+            {!selectedAreActive && <p className="text-sm">Permanent deletion is available only when every selected activity has no saved bill or package links. Use Restore on a row to make it available again.</p>}
             <button type="button" className="text-button" disabled={bulkBusy || itemBusy} onClick={() => setSelectedItemIds([])}>Clear selection</button>
           </div>}
 
-          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"><input type="checkbox" checked={showArchivedItems} onChange={event => setShowArchivedItems(event.target.checked)} />Show deleted activities</label>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-sm">
+          <p className="field-help">Select up to 200 activities at a time. On smaller screens, scroll the table to see all columns.</p>
+          <div className="overflow-x-auto catalogue-table-region" role="region" aria-label="Catalogue activities" tabIndex={0}>
+            <table className="w-full text-left border-collapse text-sm catalogue-table">
+              <caption className="sr-only">{showArchivedItems ? 'Deleted' : 'Active'} activities for {activeProperty?.name}</caption>
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
                   <th className="py-3 px-4"><input type="checkbox" aria-label="Select all visible activities"
@@ -1302,7 +1320,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     onChange={event => setSelectedItemIds(ids => event.target.checked ? [...new Set([...ids, ...selectableItems.map(item => item.id)])] : ids.filter(id => !selectableItems.some(item => item.id === id)))} /></th>
                   <th className="py-3 px-4">Code & Item</th>
                   <th className="py-3 px-4">Category</th>
-                  <th className="py-3 px-4">Price</th>
+                  <th className="py-3 px-4 catalogue-amount">Price</th>
                   <th className="py-3 px-4">Pool Contribution</th>
                   <th className="py-3 px-4">Employee Payments</th>
                   <th className="py-3 px-4">Include Photo ({photoPriceLabel})</th>
@@ -1311,7 +1329,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {!visibleItems.length && <tr><td colSpan={9} className="py-12 text-center text-slate-500">{items.length ? 'No services match these filters. Clear filters to see more services.' : 'No activities yet. Add an activity to get started.'}</td></tr>}
+                {!visibleItems.length && <tr><td colSpan={9} className="py-12 text-center text-slate-500">{viewItems.length ? 'No activities match these filters. Clear filters to see more.' : showArchivedItems ? 'No deleted activities. Activities you delete will appear here.' : 'No active activities. Add an activity or restore one from Deleted.'}</td></tr>}
                 {visibleItems.map((it) => (
                   <tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                     <td className="py-3 px-4"><input type="checkbox" aria-label={`Select ${it.name} for bulk update`} checked={selectedItemIds.includes(it.id)}
@@ -1324,7 +1342,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4 font-semibold text-slate-600 dark:text-slate-300">
                       {it.category?.name || 'General'}
                     </td>
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white catalogue-amount">
                       {formatMoney(it.price, activeProperty?.currencySymbol || '$')}
                     </td>
                     <td className="py-3 px-4">
@@ -1345,7 +1363,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                         onChange={event => toggleComplimentaryMedia(it, event.target.checked)} />
                       <span className="text-xs">Adds {photoPriceLabel} per unit · employee earns {photoCommissionLabel}</span>
                     </label></td>
-                    <td className="py-3 px-4">{it.isActive ? 'Active' : 'Deleted'}</td>
+                    <td className="py-3 px-4"><span className={`status-badge ${it.isActive ? 'status-active' : 'status-deleted'}`}>{it.isActive ? 'Active' : 'Deleted'}</span></td>
                     <td className="py-3 px-4"><div className="flex gap-2">
                       <button type="button" className="secondary-button" disabled={itemBusy || bulkBusy} onClick={() => openItemEditor(it)} aria-label={`Edit ${it.name}`}><Edit2 size={14} />Edit</button>
                       {it.isActive ? <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => { setDeleteItemTarget(it); setErrorMsg(null); }} aria-label={`Delete ${it.name}`}><Trash2 size={14} />Delete</button> : <button type="button" className="secondary-button" disabled={itemBusy} onClick={() => handleRestoreItem(it)} aria-label={`Restore ${it.name}`}>Restore</button>}

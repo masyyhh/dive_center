@@ -364,7 +364,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
 
   const reviewBill = () => {
     setAttemptedReview(true); setErrorMsg(null);
-    if (!isPositiveInt(checkNumber)) { setErrorMsg('Enter a whole check number between 1 and 2147483647.'); return; }
+    if (!isPositiveInt(checkNumber)) { setErrorMsg('Enter a whole check number between 1 and 2147483647.'); document.getElementById('bill-check-number')?.focus(); return; }
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); document.getElementById('checkout-discount')?.focus(); return; }
     if (!isBusinessDate(businessDate)) { document.getElementById('bill-business-date')?.focus(); return; }
     if (!isRoomNumber(roomNumber) || !guestName.trim()) {
@@ -378,70 +378,32 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
     setShowConfirmModal(true);
   };
   return (
-    <div className="space-y-6">
-      <div className="workflow-steps" aria-label="Bill workflow"><a href="#bill-activities" onClick={e => { e.preventDefault(); document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth' }); }}><span>1</span>Activities</a><a href="#bill-guest-details" onClick={e => { e.preventDefault(); document.getElementById('bill-room')?.focus(); }}><span>2</span>Guest details</a><button onClick={reviewBill}><span>3</span>Review & save</button></div>
-      {(restored || dirty) && <div className="draft-notice" role="status"><span>{draftError ? 'Draft storage unavailable. Keep this screen open until you save.' : restored ? 'Draft restored. Review the guest, check number, and prices before saving.' : 'Draft saved in this browser tab.'}</span><button className="text-button" onClick={() => setDiscardOpen(true)}>Discard draft</button></div>}
-      {staffNotice && <div className="notice notice-info" role="status"><span>{staffNotice}</span>{!staffReady && !staffLoading && <button type="button" onClick={() => setStaffReload(value => value + 1)}>Retry staff availability</button>}</div>}
-      {/* Top check number stepper bar */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <Receipt className="w-5 h-5 text-sky-500" />
-            <span className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Micros Check Number:
-            </span>
+    <div className="space-y-6" aria-busy={saving}>
+      <section className="billing-toolbar" aria-label="Bill setup and total">
+        <div className="billing-toolbar-top">
+          <nav className="billing-shortcuts" aria-label="Bill workflow">
+            <a href="#bill-activities" onClick={e => { e.preventDefault(); document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>1 Activities</a>
+            <a href="#bill-guest-details" onClick={e => { e.preventDefault(); document.getElementById('bill-room')?.focus(); }}>2 Guest details</a>
+          </nav>
+          <details className="billing-help"><summary>Billing guidance</summary><div id="bill-check-help">Check numbers must be whole numbers from 1 to 2147483647. Fields marked * are required. {staffNotice || 'Only staff eligible on the business date can receive commission or tips.'}</div></details>
+        </div>
+        <div className="billing-toolbar-fields">
+          <div className="billing-check-control">
+            <label htmlFor="bill-check-number">Micros check #</label>
+            <div className="billing-check-stepper">
+              <button type="button" aria-label="Decrement check number" disabled={saving || checkNumber <= 1} onClick={() => { setCheckEdited(true); setCheckNumber(prev => Math.max(1, prev - 1)); }}><Minus size={15} /></button>
+              <input type="number" id="bill-check-number" aria-label="Check number" aria-invalid={attemptedReview && !isPositiveInt(checkNumber)} aria-describedby="bill-check-help" min={1} max={2147483647} step={1} value={checkNumber} disabled={saving} onChange={e => { setCheckEdited(true); setCheckNumber(e.target.value === '' ? 0 : Number(e.target.value)); }} />
+              <button type="button" aria-label="Increment check number" disabled={saving || checkNumber >= 2147483647} onClick={() => { setCheckEdited(true); setCheckNumber(prev => prev + 1); }}><Plus size={15} /></button>
+            </div>
           </div>
-
-          {/* Stepper (+ / -) to match Micros check per PDF Page 3 */}
-          <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-            <button
-              onClick={() => { setCheckEdited(true); setCheckNumber(prev => Math.max(1, prev - 1)); }}
-              className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="Decrement check number"
-            >
-              <Minus className="w-4 h-4" />
-            </button>
-            <input
-              type="number"
-              aria-label="Check number" min={1} max={2147483647} step={1}
-              value={checkNumber}
-              onChange={e => { setCheckEdited(true); setCheckNumber(e.target.value === '' ? 0 : Number(e.target.value)); }}
-              className="w-20 text-center font-mono font-bold text-sm bg-transparent text-slate-900 dark:text-white focus:outline-none"
-            />
-            <button
-              onClick={() => { setCheckEdited(true); setCheckNumber(prev => prev + 1); }}
-              className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-              title="Increment check number"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
+          <div className="billing-date-control"><label htmlFor="bill-business-date">Business date</label><input type="date" id="bill-business-date" aria-label="Business date" aria-invalid={attemptedReview && !isBusinessDate(businessDate)} aria-describedby={attemptedReview && !isBusinessDate(businessDate) ? 'business-date-error' : undefined} value={businessDate} disabled={saving} onChange={e => setBusinessDate(e.target.value)} /></div>
+          <div className="billing-toolbar-total"><div><span>{billLines.reduce((count, line) => count + (line.autoPhotoFor ? 0 : line.quantity), 0)} activities · Net total</span><strong>{formatMoney(netTotal, currencySymbol)}</strong></div><button type="button" className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>{saving ? 'Saving…' : 'Review bill'}<ChevronRight size={16} /></button></div>
         </div>
-
-        {/* Business Date Picker */}
-        <div className="flex items-center space-x-3 text-sm">
-          <span className="font-semibold text-slate-500 dark:text-slate-400">Business Date:</span>
-          <input
-            type="date"
-            id="bill-business-date"
-            aria-label="Business date"
-            aria-invalid={attemptedReview && !isBusinessDate(businessDate)}
-            aria-describedby={attemptedReview && !isBusinessDate(businessDate) ? 'business-date-error' : undefined}
-            value={businessDate}
-            onChange={(e) => setBusinessDate(e.target.value)}
-            className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-          />{attemptedReview && !isBusinessDate(businessDate) && <p id="business-date-error" className="field-error">Choose a valid business date.</p>}
-        </div>
-      </div>
-
-      {errorMsg && (
-        <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-sm flex items-start space-x-2">
-          <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      <div className="bill-sticky-summary"><div><span>{billLines.reduce((count, line) => count + (line.autoPhotoFor ? 0 : line.quantity), 0)} {billLines.reduce((count, line) => count + (line.autoPhotoFor ? 0 : line.quantity), 0) === 1 ? 'activity' : 'activities'} · Net total</span><strong>{formatMoney(netTotal, currencySymbol)}</strong></div><button className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>Review bill<ChevronRight size={16} /></button></div>
+        {attemptedReview && !isBusinessDate(businessDate) && <p id="business-date-error" className="field-error" role="alert">Choose a valid business date.</p>}
+        {(restored || dirty) && <div className="billing-draft-status" role="status"><span>{draftError ? 'Draft storage unavailable. Keep this screen open until you save.' : restored ? 'Draft restored. Review the details before saving.' : 'Draft saved in this browser tab.'}</span><button type="button" className="text-button" disabled={saving} onClick={() => setDiscardOpen(true)}>Discard draft</button></div>}
+      </section>
+      {staffNotice && !staffReady && <div className="notice notice-info" role="status"><span>{staffNotice}</span>{!staffLoading && <button type="button" onClick={() => setStaffReload(value => value + 1)}>Retry staff availability</button>}</div>}
+      {errorMsg && <div role="alert" className="notice notice-error"><AlertCircle size={18} /><span>{errorMsg}</span></div>}
       {monthLock.locked && <div className="notice notice-info"><span>This business month is locked for payroll. Your draft can be edited, but choose a date in an open month before saving.</span></div>}
       {monthLock.error && <div role="alert" className="notice notice-error"><span>Could not check payroll status. Your draft is safe; retry before saving.</span><button onClick={monthLock.retry}>Retry</button></div>}
       {/* Two-half layout: Item Catalogue (Left) & Bill Draft (Right) */}
@@ -651,6 +613,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
               <span>2. Guest details</span>
             </h3>
 
+            <p className="workflow-section-help">Confirm the room and guest before reviewing the bill. Fields marked * are required.</p>
             {pmsMessage && <div className="notice" role="status">{pmsMessage}</div>}
             {pmsError && <div className="notice notice-error" role="alert">{pmsError}</div>}
 
@@ -739,7 +702,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
                 3. Review bill lines ({billLines.length})
               </h3>
               <span className="text-sm text-slate-400">
-                Click items on the left to add
+                Prices and assignments for this check
               </span>
             </div>
 
@@ -1007,7 +970,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
             </div>
             {/* Running Totals Breakdown Flow (PDF Page 3) */}
             {/* Gross -> - Discount -> + Service charge -> + Tax -> + Tip -> Net */}
-            <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 text-sm">
+            <section aria-label="Final bill total" className="bill-total-panel bg-slate-50 dark:bg-slate-800/80 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 text-sm">
+              <h3 className="bill-total-heading">Final total</h3>
               <div className="flex justify-between text-slate-500 dark:text-slate-400">
                 <span>Gross Total</span>
                 <span className="font-mono font-medium">{formatMoney(grossAmount, currencySymbol)}</span>
@@ -1041,7 +1005,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup }
               <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-400 dark:text-slate-500 leading-normal">
                 ℹ️ All activities, packages, and automatic Photo lines ({formatUnitPrice(photoRates.price ?? 41.975, currencySymbol)}/unit) are pre-tax and pre-service charge. Service charge ({scRate}%) and tax ({taxRate}%) are calculated at checkout.
               </div>
-            </div>
+            </section>
 
           </div>
         </div>
