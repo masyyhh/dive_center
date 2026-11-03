@@ -1,3 +1,5 @@
+import { packageBuilderEnabled } from '../features';
+import { AdminSection, resolveAdminSection } from '../utils/adminSections';
 import { CommissionRulesView } from './CommissionRulesView';
 import { useNavigation, useUnsavedChanges } from '../context/NavigationContext';
 import { PersonalCommissionEditor, PersonalCommissionSummary } from './PersonalCommissionEditor';
@@ -48,12 +50,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const photoSettings = { autoPhotoPrice: activeProperty?.autoPhotoPrice ?? 41.975, autoPhotoCommission: activeProperty?.autoPhotoCommission ?? 4.5 };
   const photoPriceLabel = formatUnitPrice(photoSettings.autoPhotoPrice, activeProperty?.currencySymbol || '$');
   const photoCommissionLabel = formatMoney(photoSettings.autoPhotoCommission, activeProperty?.currencySymbol || '$');
-  type AdminTab = 'properties' | 'users' | 'staff' | 'items' | 'commissions' | 'packages' | 'audit';
-  const [activeTab, setActiveTab] = useState<AdminTab>(section === 'items' || section === 'staff' || section === 'audit' || section === 'packages' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && (section === 'properties' || section === 'commissions'))) ? (section as AdminTab) : isGlobalAdmin ? 'properties' : 'staff');
-
-  useEffect(() => {
-    if (section === 'items' || section === 'staff' || section === 'audit' || section === 'packages' || ((canManageAccounts && section === 'users') || (isGlobalAdmin && (section === 'properties' || section === 'commissions')))) setActiveTab(section as AdminTab);
-  }, [section, isGlobalAdmin, canManageAccounts]);
+  type AdminTab = AdminSection;
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => resolveAdminSection(section, user?.role, packageBuilderEnabled));
+  useEffect(() => { setActiveTab(resolveAdminSection(section, user?.role, packageBuilderEnabled)); }, [section, user?.role]);
   // Properties state
   const [propertySaving, setPropertySaving] = useState(false);
   const [deletePropertyTarget, setDeletePropertyTarget] = useState<Property | null>(null);
@@ -894,7 +893,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             Catalogue
           </button>
 
-          <button
+          {packageBuilderEnabled && <button
             onClick={() => onSectionChange('packages')}
             aria-pressed={activeTab === 'packages'}
             className={`px-3 py-1.5 rounded-lg transition ${
@@ -904,9 +903,9 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
             }`}
           >
             Dive Packages
-          </button>
+          </button>}
 
-          {isGlobalAdmin && <button type="button" aria-pressed={activeTab === 'commissions'} className={activeTab === 'commissions' ? 'primary-button' : 'text-button'} onClick={() => onSectionChange('commissions')}>Commission rules</button>}
+          {canManageAccounts && <button type="button" aria-pressed={activeTab === 'commissions'} className={activeTab === 'commissions' ? 'primary-button' : 'text-button'} onClick={() => onSectionChange('commissions')}>Commission rules</button>}
 
           <button
             onClick={() => onSectionChange('audit')}
@@ -943,7 +942,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
         <p className="text-sm text-slate-500">Catalogue and commission settings belong to the selected property.</p>
       </div>}
 
-      {activeTab === 'commissions' && isGlobalAdmin && <CommissionRulesView key={activeProperty?.id || 'none'} property={activeProperty} items={items} loading={loading} busy={itemBusy || bulkBusy || categoryBusy} onEdit={openItemEditor} onCopy={copyItemRules} onStaff={() => onSectionChange('staff')} />}
+      {activeTab === 'commissions' && canManageAccounts && <CommissionRulesView key={activeProperty?.id || 'none'} property={activeProperty} items={items} loading={loading} busy={itemBusy || bulkBusy || categoryBusy} onEdit={openItemEditor} onCopy={copyItemRules} onStaff={() => onSectionChange('staff')} />}
 
       {/* TAB 1: PROPERTIES (Global Admin) */}
       {activeTab === 'properties' && isGlobalAdmin && (
@@ -1442,7 +1441,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       )}
 
       {/* TAB 6: DIVE PACKAGES */}
-      {activeTab === 'packages' && (
+      {packageBuilderEnabled && activeTab === 'packages' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -1600,7 +1599,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
       )}
 
       {/* MODAL: DIVE PACKAGE BUILDER */}
-      {showPackageModal && activeProperty && (
+      {packageBuilderEnabled && showPackageModal && activeProperty && (
         <Modal
           label={editingPackage ? `Edit package ${editingPackage.name}` : 'Dive Package Builder'}
           busy={packageBusy}
