@@ -146,10 +146,9 @@ Use HTTPS and a separate guest device/browser without a staff login.
 
 ## Dive package totals
 
-The package builder calculates the total as the sum of each selected catalogue
-item’s current price multiplied by its quantity. Package prices cannot be entered
-manually. The API calculates totals on create/update and returns current catalogue
-totals when listing packages, including packages saved with an older custom price.
+The package builder and package mutation endpoints have been removed. Existing
+package records remain available read-only for billing. Their totals use current
+catalogue prices multiplied by quantity. No historical package or bill data is removed.
 Adding a package to a bill uses those catalogue item prices without an automatic
 package discount. Automatic Photo lines, service charges and tax are applied by
 the existing billing rules. Previously saved bills retain their recorded amounts.
@@ -165,3 +164,5 @@ catalogue rates. The percentage is kept in the browser draft, shown at review,
 and recorded in the bill creation audit entry. No new database migration is needed.
 
 Catalogue deletion options: normal Delete archives an activity and allows restoration. Under Show deleted activities, Delete permanently removes unused archived activities after typing `DELETE PERMANENTLY`; selected batches are supported up to 200 activities. Items referenced by any saved bill or package cannot be permanently deleted. Each batch either completes entirely or changes nothing, and permanent-deletion audit records are retained.
+
+For the production rollout after package-builder removal, follow [the production release checklist](deploy/PRODUCTION-RELEASE.md). The builder is removed in every environment; existing package data remains read-only for billing.

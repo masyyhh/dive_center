@@ -13,7 +13,6 @@ const { waterSportsRouter } = loadTypeScript('src/routes/water-sports.routes.ts'
 const { itemsRouter } = loadTypeScript('src/routes/items.routes.ts', stubs);
 const { propertiesRouter } = loadTypeScript('src/routes/properties.routes.ts', stubs);
 const { auditRouter } = loadTypeScript('src/routes/audit.routes.ts', stubs);
-const { packagesRouter } = loadTypeScript('src/routes/packages.routes.ts', stubs);
 const { roomNumberSchema, positiveIntSchema } = loadTypeScript('src/utils/fields.ts');
 const call = (router, method, url, body = {}, query = {}, actor = user) => request({ handle(req, res, next) { res.setHeader = () => {}; router.handle(req, res, next); } }, method, url, { body, query, user: actor });
 const bill = { propertyId: 'a', checkNumber: 1, businessDate: '2026-11-01', guestName: 'Guest', roomNumber: '0012', items: [{ itemId: 'activity', itemName: 'Dive', categoryName: 'Dives', quantity: 1, unitPrice: 100 }] };
@@ -67,7 +66,6 @@ test('query and database integer inputs reject partial numbers and arrays for al
   assert.equal((await call(propertiesRouter, 'PUT', '/a', { nextCheckNumber: 2147483648 }, {}, { ...user, role: 'GLOBAL_ADMIN' })).status, 400);
   assert.equal((await call(staffRouter, 'GET', '/', {}, { propertyId: 'a', activeOnDate: '2026-02-30' })).status, 400);
   assert.equal((await call(staffRouter, 'GET', '/', {}, { propertyId: 'a', diveStaffOnly: 'yes' })).status, 400);
-  assert.equal((await call(packagesRouter, 'POST', '/', { propertyId: 'a', code: 'PKG', name: 'Overflow', items: [{ itemId: 'activity', quantity: 2147483647 }, { itemId: 'activity', quantity: 1 }] })).status, 400);
 });
 
 test('removed properties retain history and reject new bills and categories', async () => {
