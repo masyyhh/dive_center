@@ -28,7 +28,7 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
-export interface CommissionBreakdownDetail {
+interface CommissionBreakdownDetail {
   id: string;
   billId: string;
   billItemId: string | null;

@@ -13,13 +13,13 @@ node scripts/setup-local-secrets.cjs
 node scripts/setup-authenticator-key.cjs
 node scripts/local-postgres.cjs start
 npm run migrate:deploy --prefix backend
-npm run dev --prefix backend
+npm run dev:backend
 ```
 
 In another terminal:
 
 ```sh
-npm run dev --prefix frontend
+npm run dev:frontend
 ```
 
 The API listens on `127.0.0.1:5001`; Vite serves `http://localhost:5173` and proxies API requests. The local database helper creates private app/test connection URLs in `backend/.env.local`, stores the PostgreSQL cluster under `.local/`, and listens only on `127.0.0.1:55432`. Use `node scripts/local-postgres.cjs status` or `stop` to manage it. Stop retains data. PostgreSQL does not start automatically after reboot; run `start` again. `PG_BINDIR` can select the PostgreSQL tools; `LOCAL_POSTGRES_PORT` selects another port.
@@ -64,12 +64,22 @@ Keyboard navigation uses Alt + Shift (Option + Shift on Mac) plus 1 for Overview
 
 Start PostgreSQL before running backend tests. `TEST_DATABASE_URL` must point to a separate database with a name ending in `_test`. Each database integration suite creates and removes its own random schema; tests refuse the application database.
 
+Run the complete local checks from the repository root:
+
 ```sh
-node --test tests/*.test.cjs
-npm test --prefix backend
-npm test --prefix frontend
-npm run build --prefix backend
-npm run build --prefix frontend
+npm run check
+```
+
+This runs deployment-tooling tests (Node and Python), backend integration tests, frontend tests, and both builds. Backend tests use only the isolated test database described above. The root package adds command shortcuts and no application dependencies; install backend/frontend dependencies with the existing `npm ci --prefix` commands.
+
+For a smaller change, run the relevant checks:
+
+```sh
+npm run test:tooling
+npm run test:backend
+npm run test:frontend
+npm run build:backend
+npm run build:frontend
 ```
 
 CI runs tests against PostgreSQL 18, builds both production images and exercises a disposable Compose installation, including backup/restore checks. Require a successful run for the exact release commit. Build outputs and dependencies are ignored by Git; lockfiles pin npm dependencies, while base images should be pinned by reviewed digest for reproducible releases. Tests remain in source control but are excluded from production images.
@@ -170,3 +180,105 @@ and recorded in the bill creation audit entry. No new database migration is need
 Catalogue deletion options: normal Delete archives an activity and allows restoration. Under Show deleted activities, Delete permanently removes unused archived activities after typing `DELETE PERMANENTLY`; selected batches are supported up to 200 activities. Items referenced by any saved bill or package cannot be permanently deleted. Each batch either completes entirely or changes nothing, and permanent-deletion audit records are retained.
 
 For the production rollout after package-builder removal, follow [the production release checklist](deploy/PRODUCTION-RELEASE.md). The builder is removed in every environment; existing package data remains read-only for billing.
+
+## Maintaining the application
+
+Keep data fetching and state in a screen controller, and put substantial presentation sections in a folder beside that screen. Keep financial rules in the existing services/utilities; presentation components should display calculated values rather than implement new calculations.
+
+Reporting is organized as follows:
+
+| Location | Responsibility |
+| --- | --- |
+| `frontend/src/components/ReportingView.tsx` | Report filters, requests, downloads, payroll state, and dialogs |
+| `frontend/src/components/reporting/PerformancePanel.tsx` | Performance figures and charts |
+| `frontend/src/components/reporting/CommissionPanel.tsx` | Commission tables, CSV actions, and staff breakdown links |
+| `frontend/src/components/reporting/ExportPanel.tsx` | Daily/monthly export controls and payroll lock controls |
+| `backend/src/services/excelService.ts` | Stable entry points for daily/monthly Excel exports |
+| `backend/src/services/commissionService.ts` | Shared commission calculations |
+
+Run `npm test --prefix frontend` and `npm run build --prefix frontend` for frontend changes. For backend changes, use `npm test --prefix backend` with the isolated test database described above, then `npm run build --prefix backend`. A layout-only refactor should preserve report fields, export filenames, permission checks, and financial calculations.
+
+Administration follows the same separation:
+
+| Location | Responsibility |
+| --- | --- |
+| `frontend/src/components/AdminView.tsx` | Section navigation, notices, property switching, and composition |
+| `frontend/src/components/admin/useAdminController.ts` | State, requests, validation, permission flags, and action handlers |
+| `frontend/src/components/admin/*Section.tsx` | Properties, accounts, staff, catalogue, and audit presentation |
+| `frontend/src/components/admin/*Dialog*.tsx` | Editing and confirmation dialogs for each area |
+
+The controller's `AdminModel` type is inferred from its return value; keep derived types there rather than duplicating form or API types. Section components consume the model and keep permission/confirmation gates visible beside their controls. `frontend/tests/helpers/admin-fixture.mjs` exercises the actual controller and sections with a mocked API, including staff edits and cancellation.
+
+Billing uses `frontend/src/components/billing/`:
+
+| File | Responsibility |
+| --- | --- |
+| `NewBillView.tsx` (parent folder) | Screen composition, posted-bill reason, and notices |
+| `useBillController.ts` | Drafts, requests, PMS lookup, eligibility, calculated totals, validation, and saving |
+| `GuestDetails.tsx` | Guest, room, nationality, departure, and room lookup controls |
+| `ActivityCatalogue.tsx` | Catalogue filtering and activity/package selection |
+| `BillDraftPanel.tsx` | Bill lines, quantity discounts, commission recipients, notes, and tip recipients |
+| `CheckoutFields.tsx`, `BillToolbar.tsx`, `BillTotals.tsx` | Shared checkout inputs, check/date controls, and total presentation |
+| `BillCheckout.tsx` | Siyam World persistent checkout bar |
+| `BillDialogs.tsx` | Guest selection, draft discard, and final confirmation |
+
+Use `frontend/tests/helpers/billing-fixture.mjs` to exercise the real controller and extracted controls without sending API requests. Keep monetary calculations in the controller and existing calculation utilities; presentation components consume their results.
+
+Bill history and bill actions use `frontend/src/components/bills/`:
+
+| File | Responsibility |
+| --- | --- |
+| `BillsView.tsx` (parent folder) | Saved/edited notices and posted-bill editor handoff |
+| `useBillsController.ts` | Filter state, requests, current selection, stale-response guards, and bill actions |
+| `BillsFilters.tsx`, `BillsTable.tsx` | Search, dates, status/discount filters, and bill rows |
+| `BillDetails.tsx` | Receipt details, printing, and action entry points |
+| `BillActionDialogs.tsx` | Re-date, rebate, and soft-delete confirmations |
+
+`frontend/tests/helpers/bills-fixture.mjs` provides a mocked API for bill-history workflow tests. Keep mutations in the controller; receipt and dialog components should use its handlers. Financial cells and bill totals use the saved API amounts.
+
+The cross-property overview uses `frontend/src/components/global-dashboard/`: `useGlobalDashboardController.ts` owns date validation, requests, filters, sorting, and investigation navigation; `ComparisonPeriod.tsx`, `CurrencyTotals.tsx`, and `PropertyComparison.tsx` render those sections; `MetricGuide.tsx` keeps financial and attendance definitions in one place. Preserve per-currency totals and the selected property's report period when changing links.
+
+`Navbar.tsx` receives menu, shortcut, and authenticator callbacks from `App.tsx`. Property switching and logout must continue through `requestNavigation` so unsaved-work checks remain in effect.
+
+Attendance uses `frontend/src/components/attendance/`: `useAttendanceController.ts` owns date selection, requests, the saved baseline, unsaved-work guards, payroll-lock state, and saving; `AttendanceCalendar.tsx`, `AttendanceRegister.tsx`, and `AttendanceSummary.tsx` render those sections. Keep an unknown payroll-lock state read-only and update the saved baseline only after a successful save. `frontend/tests/helpers/attendance-fixture.mjs` exercises the real controller with a mocked API, including failed saves and blocked navigation.
+
+The catalogue API starts at `backend/src/routes/items.routes.ts`, which registers the existing routes in order:
+
+| File | Responsibility |
+| --- | --- |
+| `catalogue.bulk.ts` | Bulk soft deletion, permanent deletion, and Photo settings |
+| `catalogue.items.ts` | Listing, categories, and individual activity mutations |
+| `catalogue.transfer.ts` | Catalogue spreadsheet import, export, and previews |
+| `catalogue.validation.ts` | Shared activity create/update schemas |
+
+Keep static endpoint registration before item-ID mutations. Preserve each handler's authentication, role/property middleware, transaction boundaries, locking, and audit writes when moving code. The existing catalogue integration tests exercise these contracts in isolated schemas of the local test database.
+
+The billing API starts at `backend/src/routes/bills.routes.ts`, with related modules beside it:
+
+| File | Responsibility |
+| --- | --- |
+| `bill.read.ts` | Next check, room lookup, bill list, and receipt details |
+| `bill.save.ts` | Shared create/edit handler, historical-rate handling, totals, credits, and the complete save/audit transaction |
+| `bill.actions.ts` | Re-date, rebate, and soft-delete transactions |
+| `bill.validation.ts` | Bill and line request schemas |
+| `bill.payroll.ts` | Shared property/month lock lookup |
+
+Keep create and edit on the same save handler. Keep payroll checks, mutations, and audit records inside their existing transaction boundaries. Preserve static lookup routes before the `/:id` route and retain property/role checks when changing registrations.
+
+Reporting endpoints start at `backend/src/routes/reports.routes.ts`: `report.read.ts` contains the global/property dashboards and staff commission breakdown; `report.payroll.ts` contains recompute and month locking; `report.export.ts` contains daily and monthly Excel downloads. Workbook layouts live in `backend/src/services/dailyExcelReport.ts` and `backend/src/services/monthlyExcelWorkbook.ts`; their stable exports remain in `excelService.ts`. Commission calculations stay in `backend/src/services/commissionService.ts`. Preserve export filenames/content types and date/property access checks when changing report formats.
+
+For Excel format changes, edit `backend/src/services/dailyExcelReport.ts` or `monthlyExcelWorkbook.ts`. `reportWorkbook.ts` provides shared workbook metadata and plain/colored header styling. Keep worksheet names/order, stored value types, widths, and totals stable unless the requested format change explicitly includes them. The public functions in `excelService.ts` remain unchanged for routes and tests.
+
+Further cleanup should separate one request domain at a time while preserving property-switch cancellation and unsaved-work guards. Avoid combining structural work with schema migrations or calculation changes.
+
+## Frontend presentation
+
+`frontend/src/ui.css` contains the shared UI refinements layered after `index.css` and `workspace.css`: navigation at small widths, numeric table alignment, dialog action rows, touch targets, and existing-theme fixes. Keep property-specific composition in its own components and classes, including the Siyam World checkout.
+
+Use `TableScroll` for wide tables. It measures overflow, adds a visible horizontal-scrolling cue, and makes the region keyboard-focusable only when needed. Keep monetary columns right-aligned and keep status text alongside status colors. Use `dialog-actions` for modal actions and preserve labels and native required/invalid states when changing forms.
+
+Both application TypeScript builds enforce `noUnusedLocals` and `noUnusedParameters`. Keep frontend test transpilers on the automatic JSX runtime (`ReactJSX`), matching the application. Before removing source files or exports, check feature flags, lazy imports, tests, CLI entry points, and deployment/recovery tools as well as direct imports.
+
+The Disclaimer frontend lives in `DisclaimerView.tsx` (staff workflow), `DisclaimerTablet.tsx` (guest workflow), `DisclaimerShared.tsx` (shared document/signature components), and `disclaimer.css` (feature styles). Existing URLs and backend compatibility names remain stable.
+
+Siyam World Create Bill uses a compact guest/check row and a full-width bill ledger. The activity picker adds items without replacing the ledger. Row options reveal staff credits and selected-quantity discounts; totals and review remain in the checkout bar. Other properties retain their standard catalogue/draft layout. Keep these differences behind `usesCompactBilling`, and preserve all calculation and validation behavior when refining presentation.

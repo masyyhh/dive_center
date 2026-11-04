@@ -8,8 +8,8 @@ import { useProperty } from './context/PropertyContext';
 import { Navbar } from './components/Navbar';
 import { SubNav, NavTab, navLabels } from './components/SubNav';
 import { waterSportsEnabled } from './features';
-const DiveCentreView = waterSportsEnabled
-  ? lazy(() => import('./components/WaterSportsView').then(module => ({ default: module.DiveCentreView })))
+const DisclaimerView = waterSportsEnabled
+  ? lazy(() => import('./components/DisclaimerView').then(module => ({ default: module.DisclaimerView })))
   : () => null;
 const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(module => ({ default: module.GlobalDashboard })));
 const HomeDashboard = lazy(() => import('./components/HomeDashboard').then(module => ({ default: module.HomeDashboard })));
@@ -119,9 +119,9 @@ export const AppContent: React.FC = () => {
     <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => { if (import.meta.env.VITE_DEPLOYMENT_MODE === 'testing') window.location.assign('/'); else setSecurityOpen(true); })} onShortcuts={() => setShortcutsOpen(true)} />
       <main id="main-content" className={`main-content view-${currentTab}`} ref={mainRef} tabIndex={-1}>
         {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' && !(currentTab === 'home' && user.role === 'GLOBAL_ADMIN') ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
-          {waterSportsEnabled && currentTab === 'dive-centre' && <DiveCentreView />}
+          {waterSportsEnabled && currentTab === 'dive-centre' && <DisclaimerView />}
           {currentTab === 'home' && (user.role === 'GLOBAL_ADMIN' && section !== 'property' ? <GlobalDashboard onNavigate={navigate} /> : <HomeDashboard onNavigate={navigate} />)}
-          {currentTab === 'new-bill' && <><div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1><p>Add activities, assign your guest, and review the total before saving.</p></div><NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
+          {currentTab === 'new-bill' && <><div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1></div><NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
           {currentTab === 'bills' && <BillsView onSetup={() => navigate('admin', 'items')} section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
           {currentTab === 'presence' && <PresenceView initialDate={section} onSetup={() => navigate('admin', 'staff')} onPayroll={() => navigate('reporting', 'exports')} />}
           {currentTab === 'reporting' && <ReportingView section={section} onSectionChange={value => navigate('reporting', value)} />}

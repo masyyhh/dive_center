@@ -8,9 +8,10 @@ import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
 const source = await readFile(new URL('../src/components/CommissionRulesView.tsx', import.meta.url), 'utf8');
-const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true } });
+const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } });
 const module = { exports: {} };
 new Function('require', 'module', 'exports', outputText)(name => {
+  if (name === './TableScroll') return { TableScroll: ({ children }) => React.createElement('div', null, children) };
   if (name === './PersonalCommissionEditor') return { PersonalCommissionSummary: ({ item }) => React.createElement('span', null, item.personalRatesJson) };
   if (name === '../utils/format') return { formatMoney: (value, symbol) => `${symbol}${value.toFixed(2)}`, formatUnitPrice: (value, symbol) => `${symbol}${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 3 })}` };
   return require(name);
@@ -21,12 +22,12 @@ const render = (props = {}) => renderToStaticMarkup(React.createElement(Commissi
 
 test('property rules show percentage pools, fixed certifications and automatic Photo terms', () => {
   const html = render({ items: [item, { ...item, id: 'cert', name: 'Certification fee', poolType: 'CERTIFICATION_POOL', poolContribution: 20, includesComplimentaryMedia: true }] });
-  assert.match(html, /Commission rules · Centre A/);
+  assert.match(html, /Commission rules<\/h2>/);
   assert.match(html, /Dive pool · 12%/);
   assert.match(html, /Certifications · €20.00 \/ unit/);
   assert.match(html, /Automatic Photo: €41\.975 charge · €4.50 employee payment per unit/);
   assert.match(html, /Edit commission rules for Boat dive/);
-  assert.match(html, /New activity with these rules/);
+  assert.match(html, /Copy to new activity/);
 });
 
 test('switching properties cannot display the previous property’s rules or deleted activities', () => {

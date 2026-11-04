@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import React from 'react';
+import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 const source=readFileSync(new URL('../src/components/InstructorPicker.tsx',import.meta.url),'utf8');
-const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
 function load(){const module={exports:{}};new Function('require','module','exports',compiled)(name=>{
+ if(name==='react/jsx-runtime')return jsxRuntime;
  if(name==='react')return {...React,useState:value=>[value,()=>{}],useId:()=> 'instructor-help'};
  if(name==='../utils/format')return {formatMoney:(amount,symbol)=>symbol+amount.toFixed(2)};
  throw Error('Unexpected dependency '+name);

@@ -1,6 +1,6 @@
 import type { NavTab } from '../components/SubNav';
 
-export type WorkspaceShortcut = { code: string; key: string; label: string; tab?: NavTab };
+type WorkspaceShortcut = { code: string; key: string; label: string; tab?: NavTab };
 
 export function workspaceShortcuts(canAdmin: boolean, waterSportsEnabled: boolean): WorkspaceShortcut[] {
   return [
@@ -17,7 +17,7 @@ export function workspaceShortcuts(canAdmin: boolean, waterSportsEnabled: boolea
 
 type ShortcutEvent = Pick<KeyboardEvent, 'code' | 'altKey' | 'shiftKey' | 'ctrlKey' | 'metaKey' | 'repeat' | 'isComposing' | 'defaultPrevented'>;
 
-export function matchWorkspaceShortcut(event: ShortcutEvent, shortcuts: WorkspaceShortcut[], blocked: boolean) {
+function matchWorkspaceShortcut(event: ShortcutEvent, shortcuts: WorkspaceShortcut[], blocked: boolean) {
   if (blocked || event.defaultPrevented || event.repeat || event.isComposing ||
       !event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return undefined;
   // Physical key codes also work with Option+Shift on macOS and non-US layouts.

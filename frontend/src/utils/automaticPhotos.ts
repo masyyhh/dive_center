@@ -5,7 +5,7 @@ import { billPersonalRates } from './personalRates';
 const makeId = () => crypto.randomUUID();
 const total = (line: BillItem) => line.unitPrice * line.quantity * (1 - line.discountPercent / 100);
 
-export interface AutoPhotoRates {
+interface AutoPhotoRates {
   price?: number;
   commission?: number;
 }

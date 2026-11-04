@@ -1,0 +1,17 @@
+{
+  "name": "dive-centre-manager",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "test:tooling": "node --test tests/*.test.cjs && python3 -m unittest discover -s scripts/cd -p 'test_*.py'",
+    "test:backend": "npm test --prefix backend",
+    "test:frontend": "npm test --prefix frontend",
+    "test": "npm run test:tooling && npm run test:backend && npm run test:frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build:backend && npm run build:frontend",
+    "check": "npm test && npm run build"
+  }
+}

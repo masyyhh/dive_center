@@ -1,68 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ts from 'typescript';
-const require = createRequire(import.meta.url);
-function load(path, stubs = {}) {
-  const source = readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll('import.meta.env.VITE_DEPLOYMENT_MODE', JSON.stringify('live'));
-  const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText;
-  const module = { exports: {} };
-  new Function('require', 'module', 'exports', js)(name => name in stubs ? stubs[name] : require(name), module, module.exports);
-  return module.exports;
-}
-const personalRates = load('../src/utils/personalRates.ts');
-const photoCredits = load('../src/utils/photoCredits.ts');
-const automaticPhotos = load('../src/utils/automaticPhotos.ts', { './personalRates': personalRates, './photoCredits': photoCredits });
-const checkout = load('../src/utils/checkoutDiscount.ts');
-const instructorCredits = load('../src/utils/instructorCredits.ts');
-const editing = load('../src/utils/billEditing.ts', { './instructorCredits': instructorCredits, './photoCredits': photoCredits });
-const dates = load('../src/utils/dates.ts');
-const inputs = load('../src/utils/inputValidation.ts');
-function descendants(node, predicate) {
-  if (node === null || node === undefined || typeof node === 'boolean') return [];
-  if (Array.isArray(node)) return node.flatMap(child => descendants(child, predicate));
-  if (!React.isValidElement(node)) return [];
-  return [...(predicate(node) ? [node] : []), ...descendants(node.props.children, predicate)];
-}
-const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : Array.isArray(node) ? node.map(text).join('') : React.isValidElement(node) ? text(node.props.children) : '';
-function fixture() {
-  const draft = { version: 1, checkNumber: 1001, checkEdited: true, businessDate: '2026-11-04', roomNumber: '0012', guestName: 'Test Guest', nationality: 'Other', departureDate: '', tipAmount: 0, tipStaffIds: [], notes: '', billLines: [{ clientLineId: 'root', itemId: 'dive', itemName: 'Dive', categoryName: 'Dives', quantity: 3, unitPrice: 100, discountPercent: 0, lineTotal: 300 }] };
-  let cursor = 0;
-  const states = [];
-  const hooks = { ...React, useMemo: fn => fn(), useEffect() {}, useRef: value => ({ current: value }), useState: initial => {
-    const index = cursor++;
-    if (!(index in states)) states[index] = initial;
-    return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
-  } };
-  const { NewBillView } = load('../src/components/NewBillView.tsx', {
-    react: hooks,
-    '../utils/instructorCredits': instructorCredits,
-    '../utils/photoCredits': photoCredits,
-    './InstructorPicker': { InstructorPicker: () => null },
-    '../utils/billEditing': editing,
-    '../utils/inputValidation': inputs,
-    '../utils/checkoutDiscount': checkout,
-    '../utils/nationalities': { nationalityCountries: [] },
-    '../utils/automaticPhotos': automaticPhotos,
-    '../utils/pmsGuests': {},
-    '../hooks/useMonthLock': { useMonthLock: () => ({ locked: false, error: '', retry() {} }) },
-    '../utils/format': { formatMoney: amount => '$' + amount.toFixed(2), formatUnitPrice: amount => '$' + amount.toFixed(3) },
-    '../context/AuthContext': { useAuth: () => ({ user: { id: 'manager', role: 'PROPERTY_MANAGER' } }) },
-    '../context/NavigationContext': { useUnsavedChanges: () => () => {} },
-    '../utils/billDraft': { billDraftKey: () => 'fixture', loadBillDraft: () => draft },
-    './Modal': { Modal: ({ children }) => React.createElement('div', null, children) },
-    '../utils/dates': dates,
-    '../context/PropertyContext': { useProperty: () => ({ activeProperty: { id: 'own', serviceChargeRate: 10, taxRate: 16 } }) },
-    '../services/api': { apiFetch() { throw Error('No API during render'); } },
-  });
-  const render = () => { cursor = 0; return NewBillView({ onBillSaved() {}, onSetup() {} }); };
-  const button = (tree, name) => descendants(tree, node => node.type === 'button' && text(node) === name)[0];
-  const input = (tree, label) => descendants(descendants(tree, node => node.type === 'label' && text(node) === label)[0], node => node.type === 'input')[0];
-  return { render, states, button, input };
-}
+import { fixture, descendants, text } from './helpers/billing-fixture.mjs';
 test('the actual selected-unit discount controls split the chosen quantity and leave remaining units at full price', () => {
   const f = fixture();
   f.button(f.render(), 'Discount only some units').props.onClick();
@@ -81,4 +20,109 @@ test('invalid quantities and an unapplied selected-unit discount cannot silently
   assert.match(renderToStaticMarkup(f.render()), /Choose a whole quantity on this line/);
   f.button(f.render(), 'Review bill').props.onClick();
   assert.match(renderToStaticMarkup(f.render()), /Apply or cancel the selected-unit discount/);
+});
+
+test('compact billing is confined to Siyam World and mounts a single copy of each field', () => {
+  for (const name of ['Siyam World', 'Sun Siyam World', 'Iru Fushi', 'Sun Siyam Vilu Reef']) {
+    const tree = fixture(name).render();
+    const compact = name.includes('World');
+    assert.equal(descendants(tree, node => node.props.className === 'siyam-checkout').length, compact ? 1 : 0);
+    for (const id of ['bill-room', 'bill-guest', 'bill-check-number', 'bill-business-date', 'checkout-discount', 'newbillview-field-10']) {
+      assert.equal(descendants(tree, node => node.props.id === id).length, 1, `${name}: ${id}`);
+    }
+  }
+});
+test('Siyam World footer updates the same bill discount and tip state and retains line controls', () => {
+  const f = fixture('Siyam World');
+  let tree = f.render();
+  descendants(tree, node => node.props.id === 'checkout-discount')[0].props.onChange({ target: { value: '10' } });
+  descendants(tree, node => node.props.id === 'newbillview-field-10')[0].props.onChange({ target: { value: '5' } });
+  tree = f.render();
+  const footer = descendants(tree, node => node.props.className === 'siyam-checkout')[0];
+  assert.match(text(footer), /\$270.00/);
+  assert.match(text(footer), /\$349.52/); // 270 + 27 service + 47.52 tax + 5 tip
+  assert.ok(f.button(tree, 'Discount only some units'));
+  assert.ok(f.button(tree, 'Review & save'));
+});
+
+test('guest controls keep leading zeros and update the guest on both bill layouts', () => {
+  for (const property of ['Iru Fushi', 'Siyam World']) {
+    const f = fixture(property);
+    descendants(f.render(), node => node.props.id === 'bill-room')[0].props.onChange({ target: { value: '0009' } });
+    descendants(f.render(), node => node.props.id === 'bill-guest')[0].props.onChange({ target: { value: 'Updated Guest' } });
+    const tree = f.render();
+    assert.equal(descendants(tree, node => node.props.id === 'bill-room')[0].props.value, '0009');
+    assert.equal(descendants(tree, node => node.props.id === 'bill-guest')[0].props.value, 'Updated Guest');
+  }
+});
+test('locked payroll blocks bill review in both layouts', () => {
+  for (const property of ['Iru Fushi', 'Siyam World']) {
+    const f = fixture(property, { locked: true });
+    f.button(f.render(), property === 'Siyam World' ? 'Review & save' : 'Review bill').props.onClick();
+    assert.match(renderToStaticMarkup(f.render()), /Choose a business date in an open month before saving/);
+    assert.equal(f.button(f.render(), 'Confirm & Save'), undefined);
+  }
+});
+test('invalid checkout discount remains an inline error after moving the shared controls', () => {
+  for (const property of ['Iru Fushi', 'Siyam World']) {
+    const f = fixture(property);
+    descendants(f.render(), node => node.props.id === 'checkout-discount')[0].props.onChange({ target: { value: '101' } });
+    const tree = f.render();
+    assert.equal(descendants(tree, node => node.props.id === 'checkout-discount')[0].props['aria-invalid'], true);
+    assert.ok(text(descendants(tree, node => node.props.id === 'checkout-discount-error')[0]).length > 0);
+  }
+});
+
+test('opening the activity picker preserves the draft and guest fields', () => {
+  const f = fixture('Siyam World');
+  let tree = f.render();
+  assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.open, false);
+  descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.onToggle({ currentTarget: { open: true } });
+  tree = f.render();
+  assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.open, true);
+  assert.equal(descendants(tree, node => node.props.id === 'bill-room')[0].props.value, '0012');
+  assert.equal(descendants(tree, node => node.props.id === 'bill-guest')[0].props.value, 'Test Guest');
+  assert.match(text(tree), /Dive/);
+});
+
+test('Siyam World guest fields remain visible and invalid discounts expose their controls', () => {
+  const f = fixture('Siyam World', { draft: { roomNumber: '', guestName: '' } });
+  const tree = f.render();
+  assert.equal(descendants(tree, node => node.props.id === 'bill-guest-details')[0].type, 'div');
+  for (const id of ['bill-room', 'bill-guest', 'newbillview-field-3', 'newbillview-field-4']) assert.equal(descendants(tree, node => node.props.id === id).length, 1);
+  descendants(tree, node => node.props.id === 'checkout-discount')[0].props.onChange({ target: { value: '101' } });
+  assert.equal(descendants(f.render(), node => node.props.id === 'checkout-discount')[0].props['aria-invalid'], true);
+});
+
+test('Siyam World line options expand without changing quantities or prices', () => {
+  const f = fixture('Siyam World');
+  let tree = f.render();
+  assert.equal(descendants(tree, node => node.props.id === 'siyam-line-details-0')[0].props.hidden, true);
+  descendants(tree, node => node.props['aria-controls'] === 'siyam-line-details-0')[0].props.onClick();
+  tree = f.render();
+  assert.equal(descendants(tree, node => node.props.id === 'siyam-line-details-0')[0].props.hidden, false);
+  assert.match(renderToStaticMarkup(tree), /€?300.00|\$300.00/);
+});
+
+test('the redesigned workspace is exclusive to Siyam World; other properties keep the original view', () => {
+  for (const name of ['Iru Fushi', 'Sun Siyam Vilu Reef', 'Olhuveli', 'Siyam World', 'Sun Siyam World']) {
+    const tree = fixture(name).render();
+    const compact = name.endsWith('World');
+    assert.equal(descendants(tree, node => node.props.className === 'bill-builder siyam-bill siyam-ledger').length, compact ? 1 : 0);
+    assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker').length, compact ? 1 : 0);
+    assert.equal(descendants(tree, node => node.props.id === 'bill-guest-details')[0].type, 'div');
+    assert.equal(descendants(tree, node => node.props.className === 'billing-toolbar-total').length, compact ? 0 : 1);
+    assert.equal(descendants(tree, node => node.props.className === 'bill-breakdown').length, compact ? 1 : 0);
+    assert.equal(/siyam-lines-table/.test(renderToStaticMarkup(tree)), compact);
+  }
+});
+
+test('Siyam World ledger quantity and discount cells use the existing bill calculations', () => {
+  const f = fixture('Siyam World');
+  descendants(f.render(), node => node.props['aria-label'] === 'Increase quantity for Dive')[0].props.onClick();
+  descendants(f.render(), node => node.props['aria-label'] === 'Discount percentage for Dive')[0].props.onChange({ target: { value: '20' } });
+  const lines = f.states.find(value => Array.isArray(value) && value[0]?.itemId === 'dive');
+  assert.equal(lines[0].quantity, 4);
+  assert.equal(lines[0].discountPercent, 20);
+  assert.equal(lines[0].lineTotal, 320);
 });

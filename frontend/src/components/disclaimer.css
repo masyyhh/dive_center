@@ -12,7 +12,6 @@
 .ws-tablet-card { max-width: 940px; margin: auto; }
 .ws-tablet button, .ws-tablet a { min-height: 50px; padding: 12px 24px; font-size: 16px; }
 .ws-tablet h1 { font-size: clamp(26px, 4vw, 38px); margin: 14px 0; }
-.ws-progress { border-top: 1px solid var(--border); padding-top: 20px; color: var(--accent); font-weight: 600; }
 .ws-disclaimer { white-space: pre-wrap; line-height: 1.9; overflow-wrap: anywhere; margin: 24px 0; }
 .ws-disclaimer h2 { white-space: normal; line-height: 1.4; }
 .ws-tablet .ws-check { display: flex; align-items: flex-start; gap: 14px; padding: 20px; background: var(--soft); border-radius: 8px; }

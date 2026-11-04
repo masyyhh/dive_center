@@ -1,14 +1,14 @@
 import { isRoomNumber, roomNumberHelp } from '../utils/inputValidation';
 import { API_BASE } from '../services/api';
-import React, { useEffect, useRef, useState } from 'react';
-import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './WaterSportsShared';
+import { useEffect, useRef, useState } from 'react';
+import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './DisclaimerShared';
 import { signatureHasInk, remainingMinutes } from '../utils/diveCentreJourney';
-import './water-sports.css';
+import './disclaimer.css';
 
 type Guest = { id: string; fullName: string; roomNumber: string; checkoutDate: string | null; propertyCode: string };
 type Session = { testingGuests?: boolean; completed?: boolean; runningNumber?: number; propertyName?: string; formType: string; staffFields: Record<string, string>; documents: Disclaimer[]; businessDate: string; expiresAt: string };
 // The private guest capability stays in the fragment and is never used as a staff credential.
-export const DiveCentreTablet = ({ token }: { token: string }) => {
+export const DisclaimerTablet = ({ token }: { token: string }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [step, setStep] = useState(1), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [documentId, setDocumentId] = useState(''), [read, setRead] = useState(false), [unavailable, setUnavailable] = useState(false);

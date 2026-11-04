@@ -6,7 +6,7 @@ export const commissionRoles = [
   { id: 'video', label: 'Videographer', description: 'Employee who recorded the video' },
 ] as const;
 
-export type CommissionRole = typeof commissionRoles[number]['id'];
+type CommissionRole = typeof commissionRoles[number]['id'];
 export type CommissionSelection = { role: CommissionRole; enabled: boolean; amount: string };
 
 export function hasNoCommissions(item: { poolType: string; personalRoles?: string | null; personalRatesJson?: string | null; includesComplimentaryMedia: boolean }) {

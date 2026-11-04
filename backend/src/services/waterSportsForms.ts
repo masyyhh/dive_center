@@ -6,7 +6,7 @@ import { isBusinessDate } from '../utils/dates';
 export const formTypeSchema = z.enum(['DIVE_PARTICIPATION', 'PARTICIPATION', 'SNORKELING', 'GEAR_RENTAL', 'AID_GEAR']);
 export const documentKind = (type: string) => type === 'DIVE_PARTICIPATION' ? 'DIVING' : type === 'SNORKELING' ? 'SNORKELING' : 'PARTICIPATION';
 export const languageSchema = z.string().trim().min(2).max(35).regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/);
-export const dateSchema = z.string().refine(isBusinessDate, 'Use a valid calendar date.');
+const dateSchema = z.string().refine(isBusinessDate, 'Use a valid calendar date.');
 export const staffFieldsSchema = z.object({
   checkNumber: z.string().trim().max(100).default(''),
   maskNumber: z.string().trim().max(100).default(''),
@@ -30,7 +30,7 @@ export const submissionSchema = z.object({
 });
 
 // Transcribed from the supplied Vilu Reef forms; each published translation is versioned separately.
-export const participationText = `1. I declare that I am participating in the Sun Siyam Vilu Reef Water Sports programs at my own risk and under no coercion from Sun Siyam Vilu Reef Water Sports. I am aware that I have to check the equipment before using it and report any possible defects to the Water Sports center.
+const participationText = `1. I declare that I am participating in the Sun Siyam Vilu Reef Water Sports programs at my own risk and under no coercion from Sun Siyam Vilu Reef Water Sports. I am aware that I have to check the equipment before using it and report any possible defects to the Water Sports center.
 
 2. I am aware that the use of windsurfing and other water sports equipment requires basic skills and that individuals are not allowed to teach themselves or others for safety reasons. Sun Siyam Vilu Reef Water Sports will not be held liable for any injury or accident arising from self-negligence.
 
@@ -63,7 +63,7 @@ export const participationText = `1. I declare that I am participating in the Su
 16. Participants under 18 years of age must have the signature of their parent or guardian.
 
 17. With my signature, I accept the terms and conditions set forth by Sun Siyam Vilu Reef Water Sports center, stated above, in order to participate in their activities.`;
-export const snorkelingText = `I, the undersigned participant, acknowledge and understand that snorkeling involves inherent risk, including but not limited to:
+const snorkelingText = `I, the undersigned participant, acknowledge and understand that snorkeling involves inherent risk, including but not limited to:
 • Strong currents, waves or changing weather conditions.
 • Marine life interactions, including potential stings, bites or other injuries.
 • Lack of individual fitness.

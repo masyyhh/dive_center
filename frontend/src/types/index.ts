@@ -1,4 +1,4 @@
-export type UserRole = 'GLOBAL_ADMIN' | 'PROPERTY_MANAGER' | 'CENTRE_STAFF';
+type UserRole = 'GLOBAL_ADMIN' | 'PROPERTY_MANAGER' | 'CENTRE_STAFF';
 
 export interface Property {
   id: string;
@@ -195,7 +195,7 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
-export interface PayrollBreakdownDetail {
+interface PayrollBreakdownDetail {
   id: string;
   billId: string;
   billItemId: string | null;
@@ -303,7 +303,7 @@ export interface GlobalDashboardReport {
   };
 }
 
-export interface DivePackageItem {
+interface DivePackageItem {
   id?: string;
   packageId?: string;
   itemId: string;

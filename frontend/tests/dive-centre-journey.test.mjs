@@ -40,9 +40,10 @@ test('preparation accepts fictional guests without PMS mapping, while live looku
 
 test('the rendered Create guest link button follows testing lookup readiness', async () => {
   const React = await import('react');
+  const jsxRuntime = await import('react/jsx-runtime');
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const component = await readFile(new URL('../src/components/WaterSportsView.tsx', import.meta.url), 'utf8');
-  const js = ts.transpileModule(component.replaceAll('import.meta.env.VITE_DEPLOYMENT_MODE', JSON.stringify('live')), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true } }).outputText;
+  const component = await readFile(new URL('../src/components/DisclaimerView.tsx', import.meta.url), 'utf8');
+  const js = ts.transpileModule(component.replaceAll('import.meta.env.VITE_DEPLOYMENT_MODE', JSON.stringify('live')), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   for (const [testingGuests, mapped, documents, disabled] of [[true, false, 1, false], [false, true, 1, false], [false, false, 1, true], [true, false, 0, true]]) {
     let injected = false;
     const overview = { testingGuests, pendingCount: 0, signedToday: 0, totalSigned: 0, readiness: { pmsPropertyConfigured: mapped, documents: { DIVE_PARTICIPATION: documents } } };
@@ -52,21 +53,23 @@ test('the rendered Create guest link button follows testing lookup readiness', a
     } };
     const stubs = {
       react: hooks,
+      'react/jsx-runtime': jsxRuntime,
       '../utils/diveCentreJourney': { disclaimerReadiness },
       '../utils/inputValidation': { isRoomNumber: value => /^[0-9]+$/.test(value), roomNumberHelp: 'Digits only' },
       '../services/api': {},
       '../context/PropertyContext': { useProperty: () => ({ activeProperty: { id: 'test' } }) },
       '../context/AuthContext': { useAuth: () => ({ user: { role: 'PROPERTY_MANAGER' } }) },
       '../context/NavigationContext': { useUnsavedChanges: () => {} },
-      './WaterSportsShared': { formNames: { DIVE_PARTICIPATION: 'Diving participation' } },
-      './water-sports.css': {},
+      './DisclaimerShared': { formNames: { DIVE_PARTICIPATION: 'Diving participation' } },
+      './disclaimer.css': {},
+      './TableScroll': { TableScroll: ({ children }) => React.createElement('div', null, children) },
     };
     const module = { exports: {} };
     new Function('require', 'module', 'exports', js)(name => {
       if (!(name in stubs)) throw Error('Unexpected component dependency: ' + name);
       return stubs[name];
     }, module, module.exports);
-    const html = renderToStaticMarkup(module.exports.DiveCentreView());
+    const html = renderToStaticMarkup(module.exports.DisclaimerView());
     const button = html.match(/<button\b([^>]*)>Create guest link<\/button>/);
     assert.ok(button);
     assert.equal(button[1].includes('disabled'), disabled, JSON.stringify({ testingGuests, mapped, documents }));

@@ -1,17 +1,38 @@
+import {fixture as billsFixture} from './helpers/bills-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
-function load(path, stubs = {}) {
-  const { outputText } = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true } });
+const dashboardComponents = new Set();
+function load(path, stubs = {}, origin) {
+  const url = path instanceof URL ? path : new URL(path, import.meta.url);
+  origin ??= url.pathname === '/tmp/GlobalDashboard-before.tsx' ? new URL('../src/components/GlobalDashboard.tsx', import.meta.url) : url;
+  const { outputText } = ts.transpileModule(readFileSync(url, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } });
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', outputText)(name => name in stubs ? stubs[name] : require(name), module, module.exports);
+  new Function('require', 'module', 'exports', outputText)(name => {
+    if (name in stubs) return stubs[name];
+    if (!name.startsWith('.')) return require(name);
+    const base = new URL(name, url.pathname === '/tmp/GlobalDashboard-before.tsx' ? origin : url);
+    const override = Object.entries(stubs).find(([key]) => key.startsWith('.') && new URL(key, origin).href === base.href);
+    if (override) return override[1];
+    const target = ['.ts', '.tsx'].map(ext => new URL(base.href + ext)).find(existsSync);
+    const result = load(target, stubs, origin);
+    if (target.pathname.includes('/components/global-dashboard/')) for (const value of Object.values(result)) if (typeof value === 'function') dashboardComponents.add(value);
+    return result;
+  }, module, module.exports);
   return module.exports;
 }
+function expand(node) {
+  if (Array.isArray(node)) return node.map((child,index) => { const value=expand(child); return React.isValidElement(value)?React.cloneElement(value,{key:value.key??index}):value; });
+  if (!React.isValidElement(node)) return node;
+  if (dashboardComponents.has(node.type)) return expand(node.type(node.props));
+  return node.props.children === undefined ? node : React.cloneElement(node, {}, expand(node.props.children));
+}
+
 const dates = load('../src/utils/dates.ts');
 const navigation = load('../src/utils/dashboardNavigation.ts', { './dates': dates });
 const { investigationPeriod, investigationSection } = navigation;
@@ -29,12 +50,12 @@ test('bad deep-linked ranges cannot override report defaults', () => {
 });
 const row = { propertyId: 'a', name: 'Centre A', code: 'A', isActive: true, currency: 'USD', currencySymbol: '$', revenue: 150, discounts: 50, commissions: 31.5, billCount: 1, missingAttendance: 2, missingDays: 2, firstMissingDate: '2026-08-03' };
 const data = { period: { startDate: '2026-08-01', endDate: '2026-08-31', attendanceBefore: '2026-11-01' }, properties: [row], totals: { propertyCount: 1, missingAttendance: 2, currencies: [{ currency: 'USD', revenue: 150, discounts: 50, commissions: 31.5, billCount: 1 }] } };
-function dashboard(report = data, busy = false) {
+function dashboard(report = data, busy = false, sourceFile = '../src/components/GlobalDashboard.tsx') {
   let hook = 0;
   const calls = [];
   const property = { id: 'a', name: 'Centre A' };
   const react = { ...React, useState: initial => { const index = hook++; return [index === 2 ? report : index === 3 ? busy : initial, () => {}]; }, useEffect() {}, useRef: value => ({ current: value }) };
-  const { GlobalDashboard } = load('../src/components/GlobalDashboard.tsx', {
+  const { GlobalDashboard } = load(sourceFile, {
     react,
     '../context/PropertyContext': { useProperty: () => ({ properties: [property], setActiveProperty: value => calls.push(['property', value.id]) }) },
     '../context/NavigationContext': { useNavigation: () => ({ requestNavigation: action => action() }) },
@@ -43,7 +64,7 @@ function dashboard(report = data, busy = false) {
     '../utils/dashboardNavigation': navigation,
     '../utils/format': { formatMoney: (amount, symbol) => `${symbol}${amount.toFixed(2)}` },
   });
-  const tree = GlobalDashboard({ onNavigate: (...args) => calls.push(['navigate', ...args]) });
+  const tree = expand(GlobalDashboard({ onNavigate: (...args) => calls.push(['navigate', ...args]) }));
   return { tree, calls, html: renderToStaticMarkup(tree) };
 }
 function find(node, label) {
@@ -81,32 +102,22 @@ test('an unavailable report shows loading rather than invented financial zeros',
   assert.doesNotMatch(html, /USD 0.00|Compare properties/);
 });
 
-test('discount investigation opens active bills in the exact period and shows only discounted rows with reconcilable amounts', () => {
+test('discount investigation opens active bills in the exact period and shows only discounted rows with reconcilable amounts', async () => {
   const fixtureBills = [
     { id: 'discounted', checkNumber: 101, businessDate: '2026-08-04', guestName: 'Discount guest', roomNumber: '101', grossAmount: 200, discountAmount: 50, netAmount: 180, status: 'ACTIVE' },
     { id: 'regular', checkNumber: 102, businessDate: '2026-08-04', guestName: 'Regular guest', roomNumber: '102', grossAmount: 100, discountAmount: 0, netAmount: 110, status: 'ACTIVE' },
   ];
-  let hook = 0;
-  const { BillsView } = load('../src/components/BillsView.tsx', {
-    react: { ...React, useState: initial => { const index = hook++; return [index === 7 ? fixtureBills : index === 8 ? false : initial, () => {}]; }, useEffect() {}, useRef: value => ({ current: value }) },
-    './NewBillView': { NewBillView: () => null },
-    '../context/AuthContext': { useAuth: () => ({ user: { role: 'PROPERTY_MANAGER' } }) },
-    '../hooks/useMonthLock': { useMonthLock: () => ({ locked: false, error: '', retry() {} }) },
-    './Modal': { Modal: () => null },
-    '../context/PropertyContext': { useProperty: () => ({ activeProperty: { id: 'a', currencySymbol: '$' } }) },
-    '../services/api': { apiFetch() { throw Error('Effects must not run during render'); } },
-    '../utils/dates': dates,
-    '../utils/dashboardNavigation': navigation,
-    '../utils/format': { formatMoney: (amount, symbol) => `${symbol}${amount.toFixed(2)}` },
-  });
-  const tree = BillsView({ section: investigationSection('discounts', '2026-08-01', '2026-08-31'), savedCheck: null, onDismissSaved() {} });
+  const fixture = billsFixture({ bills: fixtureBills, section: investigationSection('discounts', '2026-08-01', '2026-08-31') });
+  fixture.render(); await fixture.flush();
+  const tree = fixture.render();
   const html = renderToStaticMarkup(tree);
   assert.equal(find(tree, 'Bills from date').props.value, '2026-08-01');
   assert.equal(find(tree, 'Bills to date').props.value, '2026-08-31');
   assert.match(html, /aria-pressed="true"[^>]*>Active/);
   assert.match(html, /Discount guest/);
   assert.doesNotMatch(html, /Regular guest/);
-  assert.match(html, /revenue \$150.00 · discounts \$50.00/);
+  assert.match(html, /<td[^>]*>\$150\.00<\/td>/);
+  assert.match(html, /<td[^>]*>\$50\.00<\/td>/);
   assert.match(html, />Revenue<\/th>/);
   assert.match(html, />Discounts<\/th>/);
 });
