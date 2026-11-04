@@ -35,12 +35,19 @@ An unfinished selected-unit discount must be applied or cancelled before review.
 
 Course/dive pool contributions remain percentages of discounted line totals.
 Certifications contributions remain fixed per unit and are not staff pay.
-The additive migration defaults historical personal commission factors to 1;
+The `20261104010000_multiple_line_instructors` migration adds unique instructor
+credits and backfills the historical single recipient.
+The additive discount migration defaults historical personal commission factors to 1;
 existing bills and locked payroll are not bulk recalculated. Explicitly editing
 an unlocked historical bill applies the new discount rule, disclosed in the editor.
 
-Instructor selection and payment entry remain unchanged in this release, pending
-the user's decision on individual instructor amounts per unit versus per line.
+Select one or more instructors on a line. Every selected instructor receives the full
+saved catalogue instructor rate per unit, multiplied by quantity and reduced by
+the line's discount (including any checkout discount). The amount is not divided
+between instructors. For a $10 rate, 3 units and 20% discount, each instructor gets
+$24; two instructors total $48. Duplicate and ineligible recipients are rejected.
+The multiple-instructors migration backfills historical single-instructor credits
+without changing their payout. Old bills retain their saved rates when edited.
 
 ## Validation and testing
 

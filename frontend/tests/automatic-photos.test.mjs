@@ -110,7 +110,7 @@ test('package billing uses current catalogue prices and rejects incomplete packa
 test('discounting selected activity units separates the prices and retains linked Photo quantities and staff', () => {
   let lines = addActivityWithPhoto([], activity, [activity], id);
   lines = updateLinkedQuantity(lines, 0, 2, [activity]);
-  lines[0].sellerStaffId = 'seller'; lines[1].photoStaffId = 'photographer';
+  lines[0].sellerStaffId = 'seller'; lines[0].instructorStaffIds = ['one', 'two']; lines[1].photoStaffId = 'photographer';
   const before = structuredClone(lines);
   const split = discountSelectedQuantity(lines, 0, 1, 20, id);
   assert.deepEqual(lines, before);
@@ -118,7 +118,7 @@ test('discounting selected activity units separates the prices and retains linke
   assert.deepEqual(split.filter(line => !line.autoPhotoFor).map(line => [line.quantity, line.discountPercent, line.lineTotal]), [[2, 0, 200], [1, 20, 80]]);
   assert.deepEqual(split.filter(line => line.autoPhotoFor).map(line => line.quantity), [2, 1]);
   for (const root of split.filter(line => !line.autoPhotoFor)) {
-    assert.equal(root.sellerStaffId, 'seller');
+    assert.equal(root.sellerStaffId, 'seller'); assert.deepEqual(root.instructorStaffIds, ['one', 'two']);
     const photo = split.find(line => line.autoPhotoFor === root.clientLineId);
     assert.equal(photo.quantity, root.quantity); assert.equal(photo.photoStaffId, 'photographer'); assert.equal(photo.discountPercent, 0);
   }

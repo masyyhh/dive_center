@@ -16,7 +16,8 @@ function load(path, stubs = {}) {
 const personalRates = load('../src/utils/personalRates.ts');
 const automaticPhotos = load('../src/utils/automaticPhotos.ts', { './personalRates': personalRates });
 const checkout = load('../src/utils/checkoutDiscount.ts');
-const editing = load('../src/utils/billEditing.ts');
+const instructorCredits = load('../src/utils/instructorCredits.ts');
+const editing = load('../src/utils/billEditing.ts', { './instructorCredits': instructorCredits });
 const dates = load('../src/utils/dates.ts');
 const inputs = load('../src/utils/inputValidation.ts');
 function descendants(node, predicate) {
@@ -37,6 +38,8 @@ function fixture() {
   } };
   const { NewBillView } = load('../src/components/NewBillView.tsx', {
     react: hooks,
+    '../utils/instructorCredits': instructorCredits,
+    './InstructorPicker': { InstructorPicker: () => null },
     '../utils/billEditing': editing,
     '../utils/inputValidation': inputs,
     '../utils/checkoutDiscount': checkout,

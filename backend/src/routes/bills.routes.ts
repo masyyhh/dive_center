@@ -1,3 +1,4 @@
+import { instructorIds } from '../utils/instructorCredits';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
 import { roomNumberSchema, positiveIntSchema, optionalDateSchema } from '../utils/fields';
 import { boundedArray, validationIssues } from '../utils/validation';
@@ -131,7 +132,7 @@ billsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       where,
       include: {
         createdBy: { select: { id: true, name: true } },
-        items: { orderBy: { linePosition: 'asc' } },
+        items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } },
       },
       orderBy: [{ businessDate: 'desc' }, { checkNumber: 'desc' }],
     });
@@ -167,6 +168,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
           include: {
             sellerStaff: { select: { id: true, name: true, propertyId: true } },
             guideStaff: { select: { id: true, name: true, propertyId: true } },
+            instructorCredits: { include: { staff: { select: { id: true, name: true, propertyId: true } } } },
             instructorStaff: { select: { id: true, name: true, propertyId: true } },
             photoStaff: { select: { id: true, name: true, propertyId: true } },
             videoStaff: { select: { id: true, name: true, propertyId: true } },
@@ -182,6 +184,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     for (const line of bill.items) {
+      if (line.instructorCredits) line.instructorCredits = line.instructorCredits.filter(credit => credit.staff.propertyId === bill.propertyId);
       for (const role of ['sellerStaff', 'guideStaff', 'instructorStaff', 'photoStaff', 'videoStaff'] as const) {
         if (line[role] && line[role]!.propertyId !== bill.propertyId) line[role] = null;
       }
@@ -206,6 +209,7 @@ const billItemSchema = z.object({
   sellerStaffId: z.string().optional().nullable(),
   guideStaffId: z.string().optional().nullable(),
   instructorStaffId: z.string().optional().nullable(),
+  instructorStaffIds: boundedArray(z.string().min(1).max(100), 1000).refine(ids => new Set(ids).size === ids.length, 'Select each instructor only once.').optional(),
   photoStaffId: z.string().optional().nullable(),
   videoStaffId: z.string().optional().nullable(),
   personalCommissionsJson: z.string().optional().nullable(),
@@ -242,7 +246,7 @@ const saveBill = async (req: Request, res: Response) => {
     if (editingId && (!data.expectedUpdatedAt || !data.editReason)) return res.status(400).json({ error: 'An edit reason and the bill version are required.' });
     const result = await withPropertyPayrollTransaction(prisma, data.propertyId, async prisma => {
 
-      const previous = editingId ? await prisma.bill.findFirst({ where: { id: editingId, propertyId: data.propertyId }, include: { items: { orderBy: { linePosition: 'asc' } } } }) : null;
+      const previous = editingId ? await prisma.bill.findFirst({ where: { id: editingId, propertyId: data.propertyId }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } }) : null;
       if (editingId && !previous) return payrollReply(404, { error: 'Bill not found in this property.' });
       if (previous) {
         if (previous.status !== 'ACTIVE') return payrollReply(409, { error: 'Only active posted bills can be edited.' });
@@ -281,6 +285,7 @@ const saveBill = async (req: Request, res: Response) => {
       const expectedPhotoCommission = property.autoPhotoCommission ?? 4.5;
       const sourceFor = (line: typeof data.items[number]) => previous?.items.find(saved => saved.id === line.sourceLineId);
       for (const line of data.items) {
+        if (line.instructorStaffIds === undefined && sourceFor(line) && instructorIds(sourceFor(line)!).length > 1) return payrollReply(400, { error: 'Refresh the bill editor to retain all instructor credits before saving.' });
         if (line.sourceLineId && (!sourceFor(line) || (sourceFor(line)!.itemId || null) !== (line.itemId || null))) return payrollReply(400, { error: 'An edited line must refer to an original line from this bill and the same item.' });
       }
       const includedFor = (line: typeof data.items[number], item: { includesComplimentaryMedia: boolean }) => sourceFor(line)?.includesComplimentaryMedia ?? item.includesComplimentaryMedia;
@@ -303,7 +308,7 @@ const saveBill = async (req: Request, res: Response) => {
       for (const photo of data.items.filter(line => line.autoPhotoFor)) {
         const parent = rootMap.get(photo.autoPhotoFor!);
         if (!parent || !includedFor(parent, itemMap.get(parent.itemId!)!) || photoLines.has(photo.autoPhotoFor!) || photo.itemId ||
-            Math.abs(photo.unitPrice - photoPriceFor(photo)) > 0.001 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || photo.instructorStaffId || photo.videoStaffId) {
+            Math.abs(photo.unitPrice - photoPriceFor(photo)) > 0.001 || photo.quantity !== parent.quantity || photo.sellerStaffId || photo.guideStaffId || instructorIds(photo).length || photo.videoStaffId) {
           return payrollReply(400, { error: `Photo lines must be linked once to an included activity, priced at $${expectedPhotoPrice.toFixed(2)} per unit, with matching quantity and one photographer.` });
         }
         photoLines.set(photo.autoPhotoFor!, photo);
@@ -322,7 +327,7 @@ const saveBill = async (req: Request, res: Response) => {
       }
       const discountedRoots = checkout.lines.filter(line => !line.autoPhotoFor);
       const discountedPhotos = new Map(checkout.lines.filter(line => line.autoPhotoFor).map(line => [line.autoPhotoFor!, line]));
-      const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
+      const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
       const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true, hireDate: { lte: data.businessDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: data.businessDate } }] }, select: { id: true } });
       if (creditedStaff.length !== creditedIds.length || new Set(data.tipStaffIds).size !== data.tipStaffIds.length) {
         return payrollReply(400, { error: 'Choose unique tip recipients and credited staff from this property.' });
@@ -356,7 +361,7 @@ const saveBill = async (req: Request, res: Response) => {
           delete rates.video;
         }
         const commissionDiscountFactor = 1 - line.discountPercent / 100;
-        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + ((line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
+        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + (role === 'instructor' ? instructorIds(line).length * rate * line.quantity : (line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
         const lineGross = line.unitPrice * line.quantity;
         const discount = (lineGross * line.discountPercent) / 100;
         const lineTotal = lineGross - discount;
@@ -383,7 +388,8 @@ const saveBill = async (req: Request, res: Response) => {
           poolContributionAmount: 0,
           sellerStaffId: line.sellerStaffId || null,
           guideStaffId: line.guideStaffId || null,
-          instructorStaffId: line.instructorStaffId || null,
+          instructorStaffId: instructorIds(line)[0] || null,
+          instructorCredits: { create: instructorIds(line).map(staffId => ({ staffId })) },
           commissionDiscountFactor,
           photoStaffId: included ? null : line.photoStaffId || null,
           videoStaffId: included ? null : line.videoStaffId || null,
@@ -446,8 +452,8 @@ const saveBill = async (req: Request, res: Response) => {
           notes: data.notes || null,
       };
       const bill = previous
-        ? await prisma.bill.update({ where: { id: previous.id }, data: { ...billData, updatedAt: new Date(Math.max(Date.now(), previous.updatedAt.getTime() + 1)), items: { deleteMany: {}, create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' } } } })
-        : await prisma.bill.create({ data: { ...billData, createdById: req.user!.id, items: { create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' } } } });
+        ? await prisma.bill.update({ where: { id: previous.id }, data: { ...billData, updatedAt: new Date(Math.max(Date.now(), previous.updatedAt.getTime() + 1)), items: { deleteMany: {}, create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } })
+        : await prisma.bill.create({ data: { ...billData, createdById: req.user!.id, items: { create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } });
 
       // Update next check number on property if this check is higher
       if (data.checkNumber >= property.nextCheckNumber) {
@@ -493,7 +499,7 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
     const target = await prisma.bill.findUnique({ where: { id }, select: { propertyId: true } });
     if (!target) return res.status(404).json({ error: 'Bill not found.' });
     const result = await withPropertyPayrollTransaction(prisma, target.propertyId, async prisma => {
-      const bill = await prisma.bill.findUnique({ where: { id }, include: { items: true, property: { select: { deletedAt: true } } } });
+      const bill = await prisma.bill.findUnique({ where: { id }, include: { items: { include: { instructorCredits: true } }, property: { select: { deletedAt: true } } } });
       if (!bill) return payrollReply(404, { error: 'Bill not found.' });
 
       // Property authorization
@@ -514,7 +520,7 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
 
       const creditedIds = [...new Set([
         ...(bill.tipStaffIdsJson ? JSON.parse(bill.tipStaffIdsJson) as string[] : []),
-        ...bill.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, line.instructorStaffId, line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id))),
+        ...bill.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id))),
       ])];
       if (creditedIds.length) {
         const staff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: bill.propertyId, isActive: true, hireDate: { lte: newDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: newDate } }] } });

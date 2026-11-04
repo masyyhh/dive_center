@@ -467,7 +467,7 @@ export const BillsView: React.FC<{ section?: string; savedCheck: number | null; 
                           <div className="flex flex-wrap gap-2 text-xs text-purple-600 dark:text-purple-400 mt-0.5">
                             {line.sellerStaff && <span>Seller: {line.sellerStaff.name}</span>}
                             {line.guideStaff && <span>Guide: {line.guideStaff.name}</span>}
-                            {line.instructorStaff && <span>Inst: {line.instructorStaff.name}</span>}
+                            {line.instructorCredits?.length ? line.instructorCredits.map(credit => credit.staff && <span key={credit.staffId}>Inst: {credit.staff.name}</span>) : line.instructorStaff && <span>Inst: {line.instructorStaff.name}</span>}
                             {line.photoStaff && <span>{line.includesComplimentaryMedia ? 'Photo / video' : 'Photo'}: {line.photoStaff.name}</span>}
                             {line.videoStaff && <span>Video: {line.videoStaff.name}</span>}
                           </div>

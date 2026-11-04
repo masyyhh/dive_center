@@ -100,6 +100,8 @@ export interface BillItem {
   sellerStaffId?: string | null;
   guideStaffId?: string | null;
   instructorStaffId?: string | null;
+  instructorStaffIds?: string[];
+  instructorCredits?: { staffId: string; staff?: { id: string; name: string } }[];
   photoStaffId?: string | null;
   videoStaffId?: string | null;
   sellerStaff?: { id: string; name: string };

@@ -117,6 +117,7 @@ model StaffMember {
   sellerLines           BillItem[]    @relation("SellerStaff")
   guideLines            BillItem[]    @relation("GuideStaff")
   instructorLines       BillItem[]    @relation("InstructorStaff")
+  instructorCredits     BillItemInstructor[]
   photoLines            BillItem[]    @relation("PhotoStaff")
   videoLines            BillItem[]    @relation("VideoStaff")
 }
@@ -266,6 +267,7 @@ model BillItem {
   sellerStaff             StaffMember? @relation("SellerStaff", fields: [sellerStaffId], references: [id])
   guideStaff              StaffMember? @relation("GuideStaff", fields: [guideStaffId], references: [id])
   instructorStaff         StaffMember? @relation("InstructorStaff", fields: [instructorStaffId], references: [id])
+  instructorCredits       BillItemInstructor[]
   photoStaff              StaffMember? @relation("PhotoStaff", fields: [photoStaffId], references: [id])
   videoStaff              StaffMember? @relation("VideoStaff", fields: [videoStaffId], references: [id])
 
@@ -437,4 +439,15 @@ model TestingLiveSession {
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
+}
+
+// Each selected instructor receives the line's saved catalogue rate in full.
+model BillItemInstructor {
+  billItemId String
+  staffId    String
+  billItem   BillItem    @relation(fields: [billItemId], references: [id], onDelete: Cascade)
+  staff      StaffMember @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@id([billItemId, staffId])
+  @@index([staffId])
 }

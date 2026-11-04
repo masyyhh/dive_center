@@ -1,3 +1,5 @@
+import { instructorIds } from '../utils/instructorCredits';
+import { InstructorPicker } from './InstructorPicker';
 import { billToEditDraft } from '../utils/billEditing';
 import { isRoomNumber, isPositiveInt, roomNumberHelp } from '../utils/inputValidation';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
@@ -174,7 +176,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
         setStaffList(staff);
         setTipStaffIds(previous => previous.filter(id => ids.has(id)));
         setBillLines(previous => previous.map(line => {
-          const updated = { ...line };
+          const selectedInstructors = instructorIds(line).filter(id => ids.has(id));
+          const updated = { ...line, instructorStaffIds: selectedInstructors, instructorStaffId: selectedInstructors[0] || null };
           for (const role of ['seller', 'guide', 'instructor', 'photo', 'video'] as const) {
             const field = `${role}StaffId` as const;
             if (updated[field] && !ids.has(updated[field]!)) updated[field] = null;
@@ -265,7 +268,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
     const line = updated[index];
     if (role === 'seller') line.sellerStaffId = staffId || null;
     if (role === 'guide') line.guideStaffId = staffId || null;
-    if (role === 'instructor') line.instructorStaffId = staffId || null;
+    if (role === 'instructor') { line.instructorStaffId = staffId || null; line.instructorStaffIds = staffId ? [staffId] : []; }
     if (role === 'photo') line.photoStaffId = staffId || null;
     if (role === 'video') line.videoStaffId = staffId || null;
     setBillLines(updated);
@@ -870,26 +873,13 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
                               </div>
                             )}
 
-                            {personalRoles.includes('instructor') && (
-                              <div>
-                                <label htmlFor={`newbillview-field-7-${idx}`} className="block text-xs font-medium text-slate-500">
-                                  Instructor:
-                                </label>
-                                <select id={`newbillview-field-7-${idx}`}
-                                  disabled={!staffReady || saving}
-                                  value={line.instructorStaffId || ''}
-                                  onChange={(e) => updateStaffAssignment(idx, 'instructor', e.target.value)}
-                                  className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
-                                >
-                                  <option value="">Select instructor...</option>
-                                  {staffList.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.name} ({s.roleTitle})
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
+                            {personalRoles.includes('instructor') && <InstructorPicker
+                              staff={staffList} selectedIds={instructorIds(line)} disabled={!staffReady || saving}
+                              unitRate={personalRates.instructor} quantity={line.quantity}
+                              discountPercent={checkoutPreview.lines[idx]?.discountPercent ?? line.discountPercent}
+                              currencySymbol={currencySymbol}
+                              onChange={selected => setBillLines(lines => lines.map((value, index) => index === idx ? { ...value, instructorStaffIds: selected, instructorStaffId: selected[0] || null } : value))}
+                            />}
 
                             {personalRoles.includes('photo') && (
                               <div>

@@ -1,3 +1,4 @@
+import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
 
@@ -87,6 +88,7 @@ export const calculateCommissionForPeriod = async (
       items: {
         include: {
           item: true,
+          instructorCredits: true,
         },
       },
     },
@@ -250,25 +252,18 @@ export const calculateCommissionForPeriod = async (
                 amount: amt,
               });
             }
-            // Instructor
-            if (line.instructorStaffId && canReceiveCredit(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
-              const amt = Number(rates.instructor) * line.quantity * discountFactor;
-              const entry = commissionMap.get(line.instructorStaffId);
-              if (entry) entry.personalCommission += amt;
-              addDetail(line.instructorStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Instructor fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.instructor));
-              const sObj = staffMap.get(line.instructorStaffId);
-              personalDetails.push({
-                id: `${line.id}-instructor`,
-                checkNumber: bill.checkNumber,
-                businessDate: bill.businessDate,
-                guestName: bill.guestName,
-                roomNumber: bill.roomNumber,
-                itemName: line.itemName,
-                role: 'Instructor',
-                staffId: line.instructorStaffId,
-                staffName: sObj?.name || 'Staff',
-                amount: amt,
-              });
+            // The catalogue amount is paid in full to every selected instructor.
+            if (typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
+              for (const staffId of instructorIds(line)) {
+                if (!canReceiveCredit(staffId)) continue;
+                const amt = rates.instructor * line.quantity * discountFactor;
+                const entry = commissionMap.get(staffId);
+                if (entry) entry.personalCommission += amt;
+                addDetail(staffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Full saved catalogue instructor rate × quantity × saved after-discount factor; paid to each selected instructor', 1, 1, rates.instructor);
+                personalDetails.push({ id: `${line.id}-instructor-${staffId}`, checkNumber: bill.checkNumber, businessDate: bill.businessDate,
+                  guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName, role: 'Instructor',
+                  staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
+              }
             }
             // Photo
             if (line.photoStaffId && canReceiveCredit(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
