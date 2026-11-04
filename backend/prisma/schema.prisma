@@ -119,6 +119,7 @@ model StaffMember {
   instructorLines       BillItem[]    @relation("InstructorStaff")
   instructorCredits     BillItemInstructor[]
   photoLines            BillItem[]    @relation("PhotoStaff")
+  photoCredits          BillItemPhotoStaff[]
   videoLines            BillItem[]    @relation("VideoStaff")
 }
 
@@ -269,6 +270,7 @@ model BillItem {
   instructorStaff         StaffMember? @relation("InstructorStaff", fields: [instructorStaffId], references: [id])
   instructorCredits       BillItemInstructor[]
   photoStaff              StaffMember? @relation("PhotoStaff", fields: [photoStaffId], references: [id])
+  photoCredits            BillItemPhotoStaff[]
   videoStaff              StaffMember? @relation("VideoStaff", fields: [videoStaffId], references: [id])
 
   createdAt               DateTime     @default(now())
@@ -443,6 +445,17 @@ model TestingLiveSession {
 
 // Each selected instructor receives the line's saved catalogue rate in full.
 model BillItemInstructor {
+  billItemId String
+  staffId    String
+  billItem   BillItem    @relation(fields: [billItemId], references: [id], onDelete: Cascade)
+  staff      StaffMember @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@id([billItemId, staffId])
+  @@index([staffId])
+}
+
+// Each selected photographer receives the full saved Photo rate per unit.
+model BillItemPhotoStaff {
   billItemId String
   staffId    String
   billItem   BillItem    @relation(fields: [billItemId], references: [id], onDelete: Cascade)

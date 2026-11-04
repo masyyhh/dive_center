@@ -1,3 +1,4 @@
+import { photoIds } from './photoCredits';
 import type { BillItem, Item, DivePackage } from '../types';
 import { billPersonalRates } from './personalRates';
 
@@ -19,11 +20,11 @@ export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], i
     const item = catalogue.find(item => item.id === original.itemId);
     const included = (original.sourceLineId ? original.includesComplimentaryMedia : item?.includesComplimentaryMedia) ?? original.includesComplimentaryMedia ?? false;
     const key = original.clientLineId || id();
-    const legacyPhotographer = original.photoStaffId;
+    const legacyPhotographers = photoIds(original);
     const parent: BillItem = { ...original, clientLineId: key, includesComplimentaryMedia: included };
     if (item && !original.sourceLineId) parent.personalCommissionsJson = billPersonalRates(item);
     if (included) {
-      parent.photoStaffId = null; parent.videoStaffId = null;
+      parent.photoStaffId = null; parent.photoStaffIds = []; parent.videoStaffId = null;
       // If an inactive item is absent from the catalogue, its old draft still
       // displays the new split. The API will require an active item before save.
       if (!item) parent.personalCommissionsJson = billPersonalRates({ personalRatesJson: parent.personalCommissionsJson, includesComplimentaryMedia: true });
@@ -32,13 +33,14 @@ export function normalizeAutomaticPhotos(lines: BillItem[], catalogue: Item[], i
     result.push(parent);
     if (included) {
       const previous = photos.get(key);
+      const selectedPhotoStaff = previous ? photoIds(previous) : legacyPhotographers;
       const photo: BillItem = {
         ...(previous?.sourceLineId ? { sourceLineId: previous.sourceLineId, id: previous.id } : {}),
         clientLineId: previous?.clientLineId || id(), autoPhotoFor: key, itemId: null,
         itemName: 'Photo', categoryName: 'Photo & Video', quantity: parent.quantity,
         unitPrice: previous?.sourceLineId ? previous.unitPrice : photoPrice, discountPercent: previous?.discountPercent ?? 0, lineTotal: 0,
         personalCommissionsJson: previous?.sourceLineId ? previous.personalCommissionsJson : JSON.stringify({ photo: photoCommission }), includesComplimentaryMedia: false,
-        photoStaffId: previous?.photoStaffId || legacyPhotographer || null,
+        photoStaffId: selectedPhotoStaff[0] || null, photoStaffIds: selectedPhotoStaff,
         sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
       };
       photo.lineTotal = total(photo);

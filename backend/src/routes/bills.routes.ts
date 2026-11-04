@@ -1,3 +1,4 @@
+import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
 import { roomNumberSchema, positiveIntSchema, optionalDateSchema } from '../utils/fields';
@@ -132,7 +133,7 @@ billsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       where,
       include: {
         createdBy: { select: { id: true, name: true } },
-        items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } },
+        items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true, photoCredits: true } },
       },
       orderBy: [{ businessDate: 'desc' }, { checkNumber: 'desc' }],
     });
@@ -170,6 +171,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
             guideStaff: { select: { id: true, name: true, propertyId: true } },
             instructorCredits: { include: { staff: { select: { id: true, name: true, propertyId: true } } } },
             instructorStaff: { select: { id: true, name: true, propertyId: true } },
+            photoCredits: { include: { staff: { select: { id: true, name: true, propertyId: true } } } },
             photoStaff: { select: { id: true, name: true, propertyId: true } },
             videoStaff: { select: { id: true, name: true, propertyId: true } },
           },
@@ -184,6 +186,7 @@ billsRouter.get('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     for (const line of bill.items) {
+      if (line.photoCredits) line.photoCredits = line.photoCredits.filter(credit => credit.staff.propertyId === bill.propertyId);
       if (line.instructorCredits) line.instructorCredits = line.instructorCredits.filter(credit => credit.staff.propertyId === bill.propertyId);
       for (const role of ['sellerStaff', 'guideStaff', 'instructorStaff', 'photoStaff', 'videoStaff'] as const) {
         if (line[role] && line[role]!.propertyId !== bill.propertyId) line[role] = null;
@@ -211,6 +214,7 @@ const billItemSchema = z.object({
   instructorStaffId: z.string().optional().nullable(),
   instructorStaffIds: boundedArray(z.string().min(1).max(100), 1000).refine(ids => new Set(ids).size === ids.length, 'Select each instructor only once.').optional(),
   photoStaffId: z.string().optional().nullable(),
+  photoStaffIds: boundedArray(z.string().min(1).max(100), 1000).refine(ids => new Set(ids).size === ids.length, 'Select each Photo staff member only once.').optional(),
   videoStaffId: z.string().optional().nullable(),
   personalCommissionsJson: z.string().optional().nullable(),
   totalPersonalCommission: z.number().min(0).default(0),
@@ -246,7 +250,7 @@ const saveBill = async (req: Request, res: Response) => {
     if (editingId && (!data.expectedUpdatedAt || !data.editReason)) return res.status(400).json({ error: 'An edit reason and the bill version are required.' });
     const result = await withPropertyPayrollTransaction(prisma, data.propertyId, async prisma => {
 
-      const previous = editingId ? await prisma.bill.findFirst({ where: { id: editingId, propertyId: data.propertyId }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } }) : null;
+      const previous = editingId ? await prisma.bill.findFirst({ where: { id: editingId, propertyId: data.propertyId }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true, photoCredits: true } } } }) : null;
       if (editingId && !previous) return payrollReply(404, { error: 'Bill not found in this property.' });
       if (previous) {
         if (previous.status !== 'ACTIVE') return payrollReply(409, { error: 'Only active posted bills can be edited.' });
@@ -285,6 +289,7 @@ const saveBill = async (req: Request, res: Response) => {
       const expectedPhotoCommission = property.autoPhotoCommission ?? 4.5;
       const sourceFor = (line: typeof data.items[number]) => previous?.items.find(saved => saved.id === line.sourceLineId);
       for (const line of data.items) {
+        if (line.photoStaffIds === undefined && sourceFor(line) && photoIds(sourceFor(line)!).length > 1) return payrollReply(400, { error: 'Refresh the bill editor to retain all Photo staff credits before saving.' });
         if (line.instructorStaffIds === undefined && sourceFor(line) && instructorIds(sourceFor(line)!).length > 1) return payrollReply(400, { error: 'Refresh the bill editor to retain all instructor credits before saving.' });
         if (line.sourceLineId && (!sourceFor(line) || (sourceFor(line)!.itemId || null) !== (line.itemId || null))) return payrollReply(400, { error: 'An edited line must refer to an original line from this bill and the same item.' });
       }
@@ -314,7 +319,7 @@ const saveBill = async (req: Request, res: Response) => {
         photoLines.set(photo.autoPhotoFor!, photo);
       }
       for (const parent of roots) {
-        if (includedFor(parent, itemMap.get(parent.itemId!)!) && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || parent.photoStaffId || parent.videoStaffId)) {
+        if (includedFor(parent, itemMap.get(parent.itemId!)!) && (!parent.clientLineId || !photoLines.has(parent.clientLineId) || photoIds(parent).length || parent.videoStaffId)) {
           return payrollReply(400, { error: `This activity includes an automatic $${expectedPhotoPrice.toFixed(2)} Photo line. Refresh the bill and select the team member on that Photo line before saving.` });
         }
       }
@@ -327,7 +332,7 @@ const saveBill = async (req: Request, res: Response) => {
       }
       const discountedRoots = checkout.lines.filter(line => !line.autoPhotoFor);
       const discountedPhotos = new Map(checkout.lines.filter(line => line.autoPhotoFor).map(line => [line.autoPhotoFor!, line]));
-      const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id)))])];
+      const creditedIds = [...new Set([...data.tipStaffIds, ...data.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), ...photoIds(line), line.videoStaffId].filter((id): id is string => Boolean(id)))])];
       const creditedStaff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: data.propertyId, isActive: true, hireDate: { lte: data.businessDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: data.businessDate } }] }, select: { id: true } });
       if (creditedStaff.length !== creditedIds.length || new Set(data.tipStaffIds).size !== data.tipStaffIds.length) {
         return payrollReply(400, { error: 'Choose unique tip recipients and credited staff from this property.' });
@@ -361,7 +366,7 @@ const saveBill = async (req: Request, res: Response) => {
           delete rates.video;
         }
         const commissionDiscountFactor = 1 - line.discountPercent / 100;
-        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + (role === 'instructor' ? instructorIds(line).length * rate * line.quantity : (line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
+        const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + (role === 'instructor' ? instructorIds(line).length * rate * line.quantity : role === 'photo' ? photoIds(line).length * rate * line.quantity : (line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
         const lineGross = line.unitPrice * line.quantity;
         const discount = (lineGross * line.discountPercent) / 100;
         const lineTotal = lineGross - discount;
@@ -391,7 +396,8 @@ const saveBill = async (req: Request, res: Response) => {
           instructorStaffId: instructorIds(line)[0] || null,
           instructorCredits: { create: instructorIds(line).map(staffId => ({ staffId })) },
           commissionDiscountFactor,
-          photoStaffId: included ? null : line.photoStaffId || null,
+          photoStaffId: included ? null : photoIds(line)[0] || null,
+          photoCredits: { create: (included ? [] : photoIds(line)).map(staffId => ({ staffId })) },
           videoStaffId: included ? null : line.videoStaffId || null,
           includesComplimentaryMedia: included,
           personalCommissionsJson: JSON.stringify(rates),
@@ -410,10 +416,10 @@ const saveBill = async (req: Request, res: Response) => {
             itemId: null, itemName: 'Photo', categoryName: 'Photo & Video', quantity: line.quantity,
             unitPrice: photoPriceFor(photo), discountPercent: photo.discountPercent, lineTotal: photoGross - photoDiscount,
             poolTypeSnapshot: 'NONE', poolContributionAmount: 0,
-            photoStaffId: photo.photoStaffId || null, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
+            photoStaffId: photoIds(photo)[0] || null, photoCredits: { create: photoIds(photo).map(staffId => ({ staffId })) }, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
             includesComplimentaryMedia: false, personalCommissionsJson: JSON.stringify({ photo: photoCommissionFor(photo) }),
             commissionDiscountFactor: 1 - photo.discountPercent / 100,
-            totalPersonalCommission: photo.photoStaffId ? photoCommissionFor(photo) * line.quantity * (1 - photo.discountPercent / 100) : 0,
+            totalPersonalCommission: photoIds(photo).length * photoCommissionFor(photo) * line.quantity * (1 - photo.discountPercent / 100),
           });
         }
       }
@@ -452,8 +458,8 @@ const saveBill = async (req: Request, res: Response) => {
           notes: data.notes || null,
       };
       const bill = previous
-        ? await prisma.bill.update({ where: { id: previous.id }, data: { ...billData, updatedAt: new Date(Math.max(Date.now(), previous.updatedAt.getTime() + 1)), items: { deleteMany: {}, create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } })
-        : await prisma.bill.create({ data: { ...billData, createdById: req.user!.id, items: { create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true } } } });
+        ? await prisma.bill.update({ where: { id: previous.id }, data: { ...billData, updatedAt: new Date(Math.max(Date.now(), previous.updatedAt.getTime() + 1)), items: { deleteMany: {}, create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true, photoCredits: true } } } })
+        : await prisma.bill.create({ data: { ...billData, createdById: req.user!.id, items: { create: lineItemsData } }, include: { items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true, photoCredits: true } } } });
 
       // Update next check number on property if this check is higher
       if (data.checkNumber >= property.nextCheckNumber) {
@@ -499,7 +505,7 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
     const target = await prisma.bill.findUnique({ where: { id }, select: { propertyId: true } });
     if (!target) return res.status(404).json({ error: 'Bill not found.' });
     const result = await withPropertyPayrollTransaction(prisma, target.propertyId, async prisma => {
-      const bill = await prisma.bill.findUnique({ where: { id }, include: { items: { include: { instructorCredits: true } }, property: { select: { deletedAt: true } } } });
+      const bill = await prisma.bill.findUnique({ where: { id }, include: { items: { include: { instructorCredits: true, photoCredits: true } }, property: { select: { deletedAt: true } } } });
       if (!bill) return payrollReply(404, { error: 'Bill not found.' });
 
       // Property authorization
@@ -520,7 +526,7 @@ billsRouter.post('/:id/re-date', requireAuth, async (req: Request, res: Response
 
       const creditedIds = [...new Set([
         ...(bill.tipStaffIdsJson ? JSON.parse(bill.tipStaffIdsJson) as string[] : []),
-        ...bill.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), line.photoStaffId, line.videoStaffId].filter((id): id is string => Boolean(id))),
+        ...bill.items.flatMap(line => [line.sellerStaffId, line.guideStaffId, ...instructorIds(line), ...photoIds(line), line.videoStaffId].filter((id): id is string => Boolean(id))),
       ])];
       if (creditedIds.length) {
         const staff = await prisma.staffMember.findMany({ where: { id: { in: creditedIds }, propertyId: bill.propertyId, isActive: true, hireDate: { lte: newDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: newDate } }] } });

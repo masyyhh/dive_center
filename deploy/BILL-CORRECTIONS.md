@@ -49,6 +49,24 @@ $24; two instructors total $48. Duplicate and ineligible recipients are rejected
 The multiple-instructors migration backfills historical single-instructor credits
 without changing their payout. Old bills retain their saved rates when edited.
 
+## Multiple Photo staff and roster editing
+
+Photo lines support multiple recipients, including the automatically added line
+from **Include Photo**. Each selected person receives the complete saved Photo
+commission per unit after that Photo line's discount and checkout discount. The
+Photo charge is still added once per service unit. Credits belong on the linked
+Photo line, not the parent activity. Splitting quantities retains every recipient.
+Migration `20261104020000_multiple_photo_staff` backfills each historical single
+photographer without changing their payout. Stored rates survive later bill edits.
+
+Property managers and global administrators can use **Administration → Staff &
+Pools → Edit staff** for their permitted property. The form supports name, email,
+role title, hire/leaving dates, pool flags and active status. An inactive staff
+member remains in this management roster for reactivation. Billing choices keep
+using active staff eligible for the business date. The API rejects property and
+login-permission changes through staff editing. Audit records retain before/after
+values for the edited fields.
+
 ## Validation and testing
 
 The migration `20261104000000_posted_bill_edits_and_discount_commission` adds

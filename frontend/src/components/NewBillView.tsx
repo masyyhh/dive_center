@@ -1,3 +1,4 @@
+import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { InstructorPicker } from './InstructorPicker';
 import { billToEditDraft } from '../utils/billEditing';
@@ -177,7 +178,8 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
         setTipStaffIds(previous => previous.filter(id => ids.has(id)));
         setBillLines(previous => previous.map(line => {
           const selectedInstructors = instructorIds(line).filter(id => ids.has(id));
-          const updated = { ...line, instructorStaffIds: selectedInstructors, instructorStaffId: selectedInstructors[0] || null };
+          const selectedPhotoStaff = photoIds(line).filter(id => ids.has(id));
+          const updated = { ...line, photoStaffIds: selectedPhotoStaff, photoStaffId: selectedPhotoStaff[0] || null, instructorStaffIds: selectedInstructors, instructorStaffId: selectedInstructors[0] || null };
           for (const role of ['seller', 'guide', 'instructor', 'photo', 'video'] as const) {
             const field = `${role}StaffId` as const;
             if (updated[field] && !ids.has(updated[field]!)) updated[field] = null;
@@ -269,7 +271,7 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
     if (role === 'seller') line.sellerStaffId = staffId || null;
     if (role === 'guide') line.guideStaffId = staffId || null;
     if (role === 'instructor') { line.instructorStaffId = staffId || null; line.instructorStaffIds = staffId ? [staffId] : []; }
-    if (role === 'photo') line.photoStaffId = staffId || null;
+    if (role === 'photo') { line.photoStaffId = staffId || null; line.photoStaffIds = staffId ? [staffId] : []; }
     if (role === 'video') line.videoStaffId = staffId || null;
     setBillLines(updated);
   };
@@ -881,27 +883,13 @@ export const NewBillView: React.FC<NewBillViewProps> = ({ onBillSaved, onSetup, 
                               onChange={selected => setBillLines(lines => lines.map((value, index) => index === idx ? { ...value, instructorStaffIds: selected, instructorStaffId: selected[0] || null } : value))}
                             />}
 
-                            {personalRoles.includes('photo') && (
-                              <div>
-                                <label htmlFor={`newbillview-field-8-${idx}`} className="block text-xs font-medium text-slate-500">
-                                  {line.autoPhotoFor ? 'Team member who took the photo' : 'Photographer'}: {formatMoney(personalRates.photo, activeProperty?.currencySymbol || '$')} per service unit
-                                </label>
-                                <select id={`newbillview-field-8-${idx}`}
-                                  disabled={!staffReady || saving}
-                                  value={line.photoStaffId || ''}
-                                  onChange={(e) => updateStaffAssignment(idx, 'photo', e.target.value)}
-                                  className="w-full text-xs px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-purple-200 dark:border-purple-900 text-slate-900 dark:text-white focus:outline-none"
-                                >
-                                  <option value="">{line.autoPhotoFor ? 'Select team member...' : 'Select photographer...'}</option>
-                                  {staffList.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.name} ({s.roleTitle})
-                                    </option>
-                                  ))}
-                                </select>
-                                {line.photoStaffId && <p className="text-xs text-slate-500 mt-1">Employee payment: {formatMoney(personalRates.photo * line.quantity, activeProperty?.currencySymbol || '$')}. Applies even when the service is complimentary.</p>}
-                              </div>
-                            )}
+                            {personalRoles.includes('photo') && <InstructorPicker role="photo"
+                              staff={staffList} selectedIds={photoIds(line)} disabled={!staffReady || saving}
+                              unitRate={personalRates.photo} quantity={line.quantity}
+                              discountPercent={checkoutPreview.lines[idx]?.discountPercent ?? line.discountPercent}
+                              currencySymbol={currencySymbol}
+                              onChange={selected => setBillLines(lines => lines.map((value, index) => index === idx ? { ...value, photoStaffIds: selected, photoStaffId: selected[0] || null } : value))}
+                            />}
 
                             {personalRoles.includes('video') && (
                               <div>

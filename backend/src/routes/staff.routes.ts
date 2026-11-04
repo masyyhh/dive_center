@@ -60,7 +60,7 @@ staffRouter.post('/role-titles', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPE
 // GET /api/staff?propertyId=...&diveStaffOnly=...&activeOnDate=...
 staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
   try {
-    const { propertyId, diveStaffOnly, activeOnDate, creditOnDate } = req.query;
+    const { propertyId, diveStaffOnly, activeOnDate, creditOnDate, includeInactive } = req.query;
     if (typeof propertyId !== 'string' || !propertyId.trim()) return res.status(400).json({ error: 'Property ID is required.' });
     if (diveStaffOnly !== undefined && diveStaffOnly !== 'true' && diveStaffOnly !== 'false') return res.status(400).json({ error: 'Choose true or false for diveStaffOnly.' });
     if (activeOnDate !== undefined && !isBusinessDate(activeOnDate)) return res.status(400).json({ error: 'Enter a valid activeOnDate (YYYY-MM-DD).' });
@@ -69,9 +69,12 @@ staffRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), 
       return res.status(400).json({ error: 'Valid creditOnDate (YYYY-MM-DD) is required.' });
     }
 
+    if (includeInactive !== undefined && includeInactive !== 'true' && includeInactive !== 'false') return res.status(400).json({ error: 'Choose true or false for includeInactive.' });
+    if (includeInactive === 'true' && !['GLOBAL_ADMIN', 'PROPERTY_MANAGER'].includes(req.user!.role)) return res.status(403).json({ error: 'Only property managers and administrators can manage inactive staff.' });
+    if (includeInactive === 'true' && (activeOnDate !== undefined || creditOnDate !== undefined)) return res.status(400).json({ error: 'Inactive staff are available only in the staff roster.' });
     const where: any = {
       propertyId: String(propertyId),
-      isActive: true,
+      ...(includeInactive === 'true' ? {} : { isActive: true }),
     };
 
     if (diveStaffOnly === 'true') {
@@ -220,7 +223,7 @@ staffRouter.put(
         action: 'STAFF_UPDATE',
         targetType: 'StaffMember',
         targetId: updated.id,
-        details: { name: updated.name, roleTitle: updated.roleTitle },
+        details: { name: updated.name, roleTitle: updated.roleTitle, before: Object.fromEntries(Object.keys(data).map(key => [key, existing[key as keyof typeof existing]])), after: Object.fromEntries(Object.keys(data).map(key => [key, updated[key as keyof typeof updated]])) },
       });
 
       return res.json({ staff: updated });

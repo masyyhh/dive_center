@@ -112,10 +112,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   const [roleTitlesLoading, setRoleTitlesLoading] = useState(false);
   const roleTitleProperty = React.useRef(activeProperty?.id);
   roleTitleProperty.current = activeProperty?.id;
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [showStaffModal, setShowStaffModal] = useState<boolean>(false);
   const [staffForm, setStaffForm] = useState({
     name: '',
     email: '',
+    isActive: true,
     roleTitle: 'Instructor',
     isDiveStaff: true,
     isCoursePoolSharing: true,
@@ -161,7 +163,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   useUnsavedChanges(showItemModal, 'An activity has unfinished catalogue or commission changes.', itemBusy || categoryBusy);
   useEffect(() => {
     ++itemLoadGeneration.current;
-    setItems([]); setCategories([]); setShowItemModal(false); setEditingItem(null); setDeleteItemTarget(null);
+    setItems([]); setCategories([]); setStaffList([]); setShowStaffModal(false); setEditingStaff(null); setShowItemModal(false); setEditingItem(null); setDeleteItemTarget(null);
   }, [activeProperty?.id]);
   const [noCommissions, setNoCommissions] = useState(false);
   const previousCommissionSettings = React.useRef<{ poolType: Item['poolType']; poolContribution: number; includesComplimentaryMedia: boolean; selections: CommissionSelection[] } | null>(null);
@@ -244,16 +246,17 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
   // Fetch Staff
   const loadStaff = async () => {
     if (!activeProperty) return;
+    const propertyId = activeProperty.id;
     try {
       setLoading(true);
       const res = await apiFetch<{ staff: StaffMember[] }>(
-        `/staff?propertyId=${activeProperty.id}`
+        `/staff?propertyId=${propertyId}&includeInactive=true`
       );
-      setStaffList(res.staff);
+      if (roleTitleProperty.current === propertyId) setStaffList(res.staff);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
+      if (roleTitleProperty.current === propertyId) setErrorMsg(err instanceof Error ? err.message : 'Could not load this section. Please try again.');
     } finally {
-      setLoading(false);
+      if (roleTitleProperty.current === propertyId) setLoading(false);
     }
   };
 
@@ -457,29 +460,37 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
     }
   };
 
-  // Create Staff Member Handler
-  const handleCreateStaff = async (e: React.FormEvent) => {
+  const openStaffEditor = (staff?: StaffMember) => {
+    if (!canManageAccounts || !activeProperty || staffBusy || (staff && staff.propertyId !== activeProperty.id)) return;
+    setEditingStaff(staff || null); setErrorMsg(null); setGiveStaffLogin(false); setStaffLogin({ username: '', password: '' });
+    setStaffForm(staff ? { name: staff.name, email: staff.email || '', roleTitle: staff.roleTitle, isActive: staff.isActive,
+      isDiveStaff: staff.isDiveStaff, isCoursePoolSharing: staff.isCoursePoolSharing, isDivePoolSharing: staff.isDivePoolSharing,
+      isBaseLeaderOverride: staff.isBaseLeaderOverride, hireDate: staff.hireDate, leavingDate: staff.leavingDate || '' }
+      : { name: '', email: '', roleTitle: 'Instructor', isActive: true, isDiveStaff: true, isCoursePoolSharing: true,
+        isDivePoolSharing: true, isBaseLeaderOverride: false, hireDate: businessToday(), leavingDate: '' });
+    setShowStaffModal(true);
+  };
+  const handleSaveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeProperty || staffBusy) return;
+    if (!activeProperty || !canManageAccounts || staffBusy || (editingStaff && editingStaff.propertyId !== activeProperty.id)) return;
+    if (staffForm.leavingDate && staffForm.leavingDate < staffForm.hireDate) { setErrorMsg('Leaving date cannot be before the hire date.'); return; }
+    const propertyId = activeProperty.id;
     setStaffBusy(true); setErrorMsg(null);
     try {
-      await apiFetch('/staff', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...staffForm,
-          leavingDate: staffForm.leavingDate || null,
-          ...(giveStaffLogin ? { loginAccess: staffLogin } : {}),
-          propertyId: activeProperty.id,
-        }),
+      const { isActive, ...fields } = staffForm;
+      await apiFetch(editingStaff ? `/staff/${editingStaff.id}` : '/staff', {
+        method: editingStaff ? 'PUT' : 'POST',
+        body: JSON.stringify({ ...fields, leavingDate: staffForm.leavingDate || null,
+          ...(editingStaff ? { isActive } : { propertyId, ...(giveStaffLogin ? { loginAccess: staffLogin } : {}) }) }),
       });
-      setShowStaffModal(false);
+      if (roleTitleProperty.current !== propertyId) return;
+      setShowStaffModal(false); setEditingStaff(null);
       setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false);
-      setStaffForm(form => ({ ...form, name: '', email: '', hireDate: businessToday(), leavingDate: '' }));
       if (giveStaffLogin) void loadUsers();
-      showNotification(`Staff member '${staffForm.name}' added.`);
-      loadStaff();
+      showNotification(`Staff member '${staffForm.name}' ${editingStaff ? 'updated' : 'added'}.`);
+      void loadStaff();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to add staff member.');
+      if (roleTitleProperty.current === propertyId) setErrorMsg(err.message || 'Failed to save staff member.');
     } finally { setStaffBusy(false); }
   };
 
@@ -972,7 +983,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
               </p>
             </div>
             <button
-              onClick={() => { setErrorMsg(null); setShowStaffModal(true); }}
+              onClick={() => openStaffEditor()}
+              disabled={!canManageAccounts || !activeProperty || staffBusy}
               className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold text-sm shadow-xs transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
@@ -1005,6 +1017,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   <th className="py-3 px-4">Course Pool</th>
                   <th className="py-3 px-4">Dive Pool</th>
                   <th className="py-3 px-4">BL Override (+10%)</th>
+                  {canManageAccounts && <th className="py-3 px-4">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1014,9 +1027,10 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 dark:text-white">{s.name}</div>
                       <div className="text-xs text-slate-400">{s.roleTitle}</div>
+                      {!s.isActive && <span className="status-badge status-deleted">Inactive</span>}
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">
-                      Hired: {s.hireDate} {s.leavingDate ? `• Left: ${s.leavingDate}` : '• Active'}
+                      Hired: {s.hireDate} {s.leavingDate ? `• Left: ${s.leavingDate}` : s.isActive ? '• Active' : '• Inactive'}
                     </td>
                     <td className="py-3 px-4">{s.userId ? 'Login account created' : 'No linked login'}</td>
                     <td className="py-3 px-4">
@@ -1051,6 +1065,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
+                    {canManageAccounts && <td className="py-3 px-4"><button type="button" className="secondary-button" disabled={staffBusy} aria-label={`Edit staff ${s.name}`} onClick={() => openStaffEditor(s)}>Edit staff</button></td>}
                   </tr>
                 ))}
               </tbody>
@@ -1631,12 +1646,12 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
 
       {/* MODAL: ADD STAFF */}
       {showStaffModal && (
-        <Modal label="Add team member" busy={staffBusy} onClose={() => { if (!staffBusy) { setShowStaffModal(false); setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false); setErrorMsg(null); } } } error={errorMsg}>
+        <Modal label={editingStaff ? "Edit team member" : "Add team member"} busy={staffBusy} onClose={() => { if (!staffBusy) { setShowStaffModal(false); setStaffLogin({ username: '', password: '' }); setGiveStaffLogin(false); setErrorMsg(null); } } } error={errorMsg}>
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 space-y-4">
             <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Add Staff Member to {activeProperty?.name}
+              {editingStaff ? 'Edit Staff Member in' : 'Add Staff Member to'} {activeProperty?.name}
             </h3>
-            <form onSubmit={handleCreateStaff} className="space-y-3 text-sm"><fieldset disabled={staffBusy} className="space-y-3">
+            <form onSubmit={handleSaveStaff} className="space-y-3 text-sm"><fieldset disabled={staffBusy} className="space-y-3">
               <div>
                 <label htmlFor="adminview-field-11" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Full Name *
@@ -1644,6 +1659,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 <input id="adminview-field-11"
                   type="text"
                   required
+                  maxLength={200} minLength={2}
                   value={staffForm.name}
                   onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
                   placeholder="e.g. Elena Petrova"
@@ -1651,6 +1667,8 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 />
               </div>
 
+              <label className="block font-semibold">Email (optional)<input type="email" maxLength={254} value={staffForm.email} onChange={event => setStaffForm({ ...staffForm, email: event.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" /></label>
+              {editingStaff && <label className="flex items-center gap-2"><input type="checkbox" checked={staffForm.isActive} onChange={event => setStaffForm({ ...staffForm, isActive: event.target.checked })} />Active staff member</label>}
               <div>
                 <label htmlFor="adminview-field-12" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   Role Title *
@@ -1702,7 +1720,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                 </div>
               </div>
 
-              <fieldset className="space-y-3 border-t border-slate-200 pt-3">
+              {!editingStaff && <fieldset className="space-y-3 border-t border-slate-200 pt-3">
                 <legend>Workspace access</legend>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={giveStaffLogin} onChange={e => setGiveStaffLogin(e.target.checked)} />Give this staff member login access</label>
                 {giveStaffLogin && <>
@@ -1710,7 +1728,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   <label className="block" htmlFor="staff-login-password">Temporary password<input id="staff-login-password" className="w-full border rounded p-2 mt-1" type="password" autoComplete="new-password" required minLength={12} pattern={passwordPattern} title={passwordHelp} value={staffLogin.password} onChange={e => setStaffLogin({ ...staffLogin, password: e.target.value })} /></label>
                   <p className="text-xs text-slate-500">{passwordHelp} This grants centre staff access to {activeProperty?.name}. They must change the temporary password and set up their own authenticator.</p>
                 </>}
-              </fieldset>
+              </fieldset>}
 
               {/* Pool checkboxes */}
               <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -1765,7 +1783,7 @@ export const AdminView: React.FC<{ section?: string; onSectionChange: (section: 
                   type="submit"
                   className="flex-1 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-bold transition"
                 >
-                  {staffBusy ? 'Adding…' : 'Add Staff Member'}
+                  {staffBusy ? 'Saving…' : editingStaff ? 'Save changes' : 'Add Staff Member'}
                 </button>
               </div>
               </fieldset>

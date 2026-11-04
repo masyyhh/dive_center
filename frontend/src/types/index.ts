@@ -103,6 +103,8 @@ export interface BillItem {
   instructorStaffIds?: string[];
   instructorCredits?: { staffId: string; staff?: { id: string; name: string } }[];
   photoStaffId?: string | null;
+  photoStaffIds?: string[];
+  photoCredits?: { staffId: string; staff?: { id: string; name: string } }[];
   videoStaffId?: string | null;
   sellerStaff?: { id: string; name: string };
   guideStaff?: { id: string; name: string };

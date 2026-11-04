@@ -89,7 +89,7 @@ test('checked services enforce one $4.50 payment per unit regardless of stored o
   assert.equal(saved.includesComplimentaryMedia, false);
   assert.equal(saved.totalPersonalCommission, 9);
   const payroll = await calculateCommissionForPeriod('a', '2026-10-30', '2026-10-30');
-  assert(payroll.personalDetails.some(detail => detail.id === `${line.id}-photo` && detail.role === 'Photo' && detail.amount === 9));
+  assert(payroll.personalDetails.some(detail => detail.id === `${line.id}-photo-employee` && detail.role === 'Photo' && detail.amount === 9));
   const next = await save('photo', 1, true);
   assert.equal(next.body.bill.items[0].includesComplimentaryMedia, false);
   assert.equal(next.body.bill.items[0].totalPersonalCommission, 7);

@@ -1,3 +1,4 @@
+import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
@@ -89,6 +90,7 @@ export const calculateCommissionForPeriod = async (
         include: {
           item: true,
           instructorCredits: true,
+          photoCredits: true,
         },
       },
     },
@@ -265,25 +267,18 @@ export const calculateCommissionForPeriod = async (
                   staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
               }
             }
-            // Photo
-            if (line.photoStaffId && canReceiveCredit(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
-              const amt = Number(rates.photo) * line.quantity * discountFactor;
-              const entry = commissionMap.get(line.photoStaffId);
-              if (entry) entry.personalCommission += amt;
-              addDetail(line.photoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', `${line.includesComplimentaryMedia ? 'Photo / Video' : 'Photographer'} fixed payment per service unit × quantity × saved after-discount factor`, 1, 1, Number(rates.photo));
-              const sObj = staffMap.get(line.photoStaffId);
-              personalDetails.push({
-                id: `${line.id}-photo`,
-                checkNumber: bill.checkNumber,
-                businessDate: bill.businessDate,
-                guestName: bill.guestName,
-                roomNumber: bill.roomNumber,
-                itemName: line.itemName,
-                role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo',
-                staffId: line.photoStaffId,
-                staffName: sObj?.name || 'Staff',
-                amount: amt,
-              });
+            // Each selected Photo staff member receives the saved rate in full.
+            if (typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
+              for (const staffId of photoIds(line)) {
+                if (!canReceiveCredit(staffId)) continue;
+                const amt = rates.photo * line.quantity * discountFactor;
+                const entry = commissionMap.get(staffId);
+                if (entry) entry.personalCommission += amt;
+                addDetail(staffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Full saved Photo rate × quantity × saved after-discount factor; paid to each selected Photo staff member', 1, 1, rates.photo);
+                personalDetails.push({ id: `${line.id}-photo-${staffId}`, checkNumber: bill.checkNumber, businessDate: bill.businessDate,
+                  guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName,
+                  role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo', staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
+              }
             }
             // Video
             if (line.videoStaffId && canReceiveCredit(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {

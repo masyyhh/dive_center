@@ -32,3 +32,8 @@ test('empty staff and zero selections give clear feedback',()=>{
  const html=renderToStaticMarkup(Picker({...base,staff:[],selectedIds:[]}));
  assert.match(html,/No eligible staff available/);assert.match(html,/0 selected/);assert.match(html,/\$0\.00/);
 });
+
+test('Photo mode shows the full catalogue rate for every selected Photo staff member', () => {
+ const html=renderToStaticMarkup(Picker({...base,role:'photo',selectedIds:['one','two']}));
+ assert.match(html,/Photo staff/);assert.match(html,/Photo commission total/);assert.match(html,/\$24\.00 each/);assert.match(html,/\$48\.00/);
+});
