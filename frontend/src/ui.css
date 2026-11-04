@@ -368,3 +368,69 @@
   .catalogue-workspace .catalogue-table td:last-child button { min-width: 44px; min-height: 44px; }
 }
 .catalogue-workspace .catalogue-table td:nth-child(5) > span { display: inline-block; max-width: 100%; white-space: normal; line-height: 1.5; }
+
+/* Overview: figures first, concise priorities and a balanced working area. */
+.property-overview .dashboard-heading { margin-bottom: 0; align-items: center; }
+.property-overview .metric-grid { border: 0; background: transparent; overflow: visible; gap: 12px; }
+.main-content .property-overview .metric-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 16px 18px; min-width: 0; }
+.property-overview .metric-card.featured { border-top: 3px solid var(--accent); padding-top: 14px; }
+.property-overview .metric-label { font-size: 12px; font-weight: 500; }
+.property-overview .metric-card > strong { margin-top: 10px; font-size: clamp(24px,2.2vw,31px); line-height: 1.2; overflow-wrap: anywhere; }
+.property-overview .metric-card > p { line-height: 1.5; margin-top: 8px; }
+.property-overview .attention-grid { border: 0; background: transparent; overflow: visible; gap: 12px; }
+.app-shell .property-overview .attention-card { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); min-width: 0; text-align: left; }
+.app-shell .property-overview .attention-card:hover { background: var(--canvas); border-color: var(--muted); }
+.property-overview .attention-card > span:last-child { min-width: 0; flex: 1; }
+.property-overview .attention-icon { display: grid; place-items: center; background: var(--soft); color: var(--muted); border-radius: 6px; width: 30px; height: 30px; flex-shrink: 0; }
+.property-overview .attention-icon svg { width: 16px; height: 16px; }
+.property-overview .attention-card strong { display: block; font-size: 12px; line-height: 1.5; }
+.property-overview .attention-card small { display: block; margin: 4px 0 6px; line-height: 1.4; }
+.property-overview .overview-needs-attention .attention-icon { color: #a16207; background: #fef3c7; }
+.dark .property-overview .overview-needs-attention .attention-icon { color: #fbbf24; background: #78350f40; }
+.overview-content-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr); gap: 16px; align-items: stretch; }
+.overview-content-grid > * { min-width: 0; }
+.property-overview .dashboard-middle { display: block; margin: 0; }
+.property-overview .trend-card { height: 100%; padding: 16px; }
+.property-overview .section-heading { gap: 12px; min-height: 36px; }
+.property-overview .section-heading h2 { font-size: 14px; font-weight: 600; }
+.main-content .property-overview .dashboard-chart { height: 285px; margin-top: 12px; }
+.property-overview .chart-footer { margin-top: 12px; gap: 8px; flex-wrap: wrap; }
+.property-overview .recent-bills { padding: 16px; min-width: 0; }
+.property-overview .recent-bills .section-heading { margin-bottom: 12px; }
+.property-overview .recent-bills table { min-width: 420px; }
+.property-overview .recent-bills :is(th,td) { padding: 10px 8px; font-size: 12px; }
+.property-overview .recent-bills td:nth-child(2) { max-width: 180px; overflow-wrap: anywhere; }
+.property-overview .recent-bills td:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.property-overview .recent-empty { min-height: 220px; }
+.global-dashboard .overview-heading { align-items: center; }
+.global-dashboard .overview-currency-card { padding: 16px; border-radius: 8px; }
+.global-dashboard .overview-currency-card h2 { font-size: 12px; font-weight: 600; padding-bottom: 10px; }
+.global-dashboard .global-totals dt { font-size: 11px; color: var(--muted); }
+.global-dashboard .global-totals dd { font-size: clamp(18px,1.8vw,25px); line-height: 1.3; margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.global-dashboard .global-totals > div { min-width: 0; }
+.global-dashboard .global-totals > div:first-child dd { color: var(--accent); }
+.overview-attendance-alert { padding: 12px 16px; }
+.overview-attendance-alert > span { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.global-dashboard .global-dashboard-filters { gap: 12px; }
+@media (max-width: 1199px) {
+  .overview-content-grid { grid-template-columns: minmax(0,1fr); }
+  .main-content .property-overview .dashboard-chart { height: 240px; }
+}
+@media (max-width: 767px) {
+  .property-overview .dashboard-heading { align-items: flex-start; }
+  .property-overview .metric-grid, .property-overview .attention-grid { gap: 10px; }
+  .main-content .property-overview .metric-card { padding: 14px; }
+  .property-overview .metric-card.featured { padding-top: 12px; }
+  .property-overview .metric-card > strong { font-size: 24px; }
+  .property-overview .trend-card, .property-overview .recent-bills { padding: 14px; }
+  .property-overview .segmented-control button { min-height: 40px; }
+  .property-overview .recent-bills button { min-height: 44px; }
+}
+@media (max-width: 480px) {
+  .property-overview .trend-card > .section-heading { flex-wrap: wrap; }
+  .property-overview .heading-actions { gap: 8px; }
+}
+.property-overview .recent-bills .section-heading { padding: 0; }
+@media (max-width: 899px) {
+  .app-shell .property-overview .attention-card { border: 1px solid var(--border) !important; }
+}

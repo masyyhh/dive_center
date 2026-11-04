@@ -13,7 +13,7 @@ export function GlobalDashboard(props: GlobalDashboardProps) {
   return (
     <div className="dashboard global-dashboard space-y-6 text-gray-900 dark:text-gray-100 transition-colors">
       {/* Page Heading */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="overview-heading flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
 
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mt-1">All properties overview</h1>
@@ -61,19 +61,19 @@ export function GlobalDashboard(props: GlobalDashboardProps) {
         <>
           {/* Totals by Currency */}
           <CurrencyTotals model={model} />
-          <MetricGuide />
 
           {/* Missing Attendance Summary Alert */}
           {data.totals.missingAttendance > 0 && (
-            <div className="surface p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-center justify-between shadow-sm">
+            <div className="overview-attendance-alert surface p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 flex items-center justify-between shadow-sm">
               <span className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                ⚠️ {data.totals.missingAttendance} missing attendance {data.totals.missingAttendance === 1 ? 'entry' : 'entries'} detected across properties.
+                <AlertCircle size={16} aria-hidden="true" /> {data.totals.missingAttendance} missing attendance {data.totals.missingAttendance === 1 ? 'entry' : 'entries'} detected across properties.
               </span>
             </div>
           )}
 
           {/* Property Comparison Table Section */}
           <PropertyComparison model={model} />
+          <MetricGuide />
         </>
       )}
     </div>

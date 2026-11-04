@@ -9,7 +9,7 @@ export function CurrencyTotals({ model }: { model: GlobalDashboardModel }) {
   return (
     <section className="global-currency-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Totals by currency">
       {data.totals.currencies.map(total => (
-        <div className="surface p-5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm space-y-4" key={total.currency}>
+        <div className="overview-currency-card surface p-5 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm space-y-4" key={total.currency}>
           <h2 className="font-bold text-lg text-gray-900 dark:text-gray-100 border-b border-gray-100 dark:border-gray-800 pb-2">
             {total.currency} totals
           </h2>
