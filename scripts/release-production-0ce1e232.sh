@@ -13,7 +13,7 @@ secrets="$root/captured/secrets"
 fingerprint_tool=/usr/local/lib/dive-production-0ce1e232/fingerprint.cjs
 phase=${1:-}
 test "$(id -u)" = 0 || { echo 'Run this helper with sudo.'; exit 1; }
-case "$phase" in prepare|deploy) ;; *) echo 'Usage: helper prepare /absolute/source/checkout OR helper deploy'; exit 1;; esac
+case "$phase" in prepare|resume|deploy) ;; *) echo 'Usage: helper prepare|resume /absolute/source/checkout OR helper deploy'; exit 1;; esac
 test -z "${DOCKER_HOST:-}"
 test "${DOCKER_CONTEXT:-default}" = default
 cd "$root"
@@ -123,6 +123,79 @@ run_image() {
     --mount "type=bind,src=$fingerprint_tool,dst=/run/release/fingerprint.cjs,readonly" \
     "${extra[@]}" "$image" "$@"
 }
+# Probe runtime access as the non-root application user, without a database connection.
+probe_backend_image() {
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    --user node --entrypoint node "$1" -e '
+const fs=require("node:fs");if(process.getuid()===0)throw Error("Backend must remain non-root");
+function walk(path){const info=fs.statSync(path);fs.accessSync(path,fs.constants.R_OK|(info.isDirectory()?fs.constants.X_OK:0));if(info.isDirectory())for(const name of fs.readdirSync(path))walk(path+"/"+name);}
+for(const path of ["/app/tools","/app/dist","/app/prisma","/app/package.json","/app/package-lock.json"])walk(path);
+fs.accessSync("/app/entrypoint.sh",fs.constants.R_OK|fs.constants.X_OK);console.log("Backend runtime files readable as non-root node user.");' || return 1
+  docker run --rm --network none --read-only --tmpfs /tmp:size=64m,mode=1777 \
+    --cap-drop ALL --security-opt no-new-privileges:true -e CHECKPOINT_DISABLE=1 \
+    "$1" node tools/prisma.cjs --version > /dev/null || return 1
+  echo 'Prisma tooling starts successfully as the non-root application user.'
+}
+probe_web_image() {
+  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+    --user 65534:65534 --entrypoint sh "$1" -ec '
+    test -r /etc/caddy/Caddyfile
+    test -r /srv/index.html
+    for file in /srv/index.html /srv/environment.js /srv/logo.png /srv/assets/*; do
+      if [ -f "$file" ]; then cat "$file" > /dev/null; fi
+    done
+    echo "Frontend assets readable by an unprivileged user."
+  '
+}
+ensure_runtime_access() {
+  local backend_image web_image fixed base original_user
+  backend_image=$(cat "$work/candidate-backend.id")
+  web_image=$(cat "$work/candidate-web.id")
+  local context="$work/runtime-permissions-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  mkdir -m700 "$context"
+  printf '%s\n' "$backend_image" > "$context/backend.before.id"
+  printf '%s\n' "$web_image" > "$context/web.before.id"
+  if [ -f "$work/compose.candidate.yaml" ]; then cp -p "$work/compose.candidate.yaml" "$context/compose.before.yaml"; fi
+  if ! probe_backend_image "$backend_image"; then
+    echo 'Repairing backend runtime ownership in a small image layer; application code is unchanged.'
+    base="dive-runtime-permission-base-backend:$release-$$"
+    fixed="dive-runtime-permission-fixed-backend:$release-$$"
+    docker image tag "$backend_image" "$base"
+    cat > "$context/Backend.Dockerfile" <<DOCKER_BACKEND
+FROM $base
+USER root
+RUN chown -R node:node /app/tools /app/package.json /app/package-lock.json /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
+USER node
+DOCKER_BACKEND
+    docker build --pull=false --network=none --file "$context/Backend.Dockerfile" --tag "$fixed" "$context"
+    probe_backend_image "$fixed"
+    backend_image=$(docker image inspect --format '{{.Id}}' "$fixed")
+    docker image tag "$backend_image" "dive-centre-backend:$release"
+    printf '%s\n' "$backend_image" > "$work/candidate-backend.id"
+  fi
+  if ! probe_web_image "$web_image"; then
+    echo 'Normalizing public asset permissions in a small frontend image layer.'
+    base="dive-runtime-permission-base-web:$release-$$"
+    fixed="dive-runtime-permission-fixed-web:$release-$$"
+    original_user=$(docker image inspect --format '{{.Config.User}}' "$web_image")
+    original_user=${original_user:-0}
+    [[ "$original_user" =~ ^[a-zA-Z0-9_.:-]+$ ]]
+    docker image tag "$web_image" "$base"
+    cat > "$context/Web.Dockerfile" <<DOCKER_WEB
+FROM $base
+USER 0
+RUN chmod -R a+rX /srv && chmod 644 /etc/caddy/Caddyfile
+USER $original_user
+DOCKER_WEB
+    docker build --pull=false --network=none --file "$context/Web.Dockerfile" --tag "$fixed" "$context"
+    probe_web_image "$fixed"
+    web_image=$(docker image inspect --format '{{.Id}}' "$fixed")
+    docker image tag "$web_image" "dive-centre-web:$release"
+    printf '%s\n' "$web_image" > "$work/candidate-web.id"
+  fi
+  printf '%s\n' "$backend_image" > "$context/backend.after.id"
+  printf '%s\n' "$web_image" > "$context/web.after.id"
+}
 verify_authenticators() {
   run_image "$candidate_id" node - <<'JS'
 const {prisma}=require('./dist/db');
@@ -168,27 +241,48 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [ "$phase" = prepare ]; then
+if [ "$phase" = prepare ] || [ "$phase" = resume ]; then
   source_dir=$(realpath "${2:?Provide the pinned application source checkout.}")
   test "$(git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD)" = "$commit"
   test -z "$(git -c safe.directory="$source_dir" -C "$source_dir" status --porcelain --untracked-files=normal -- backend frontend)"
-  test ! -e "$work" || { echo 'This preparation directory already exists. Inspect its prior journal before retrying.'; exit 1; }
-  test "$(df -Pk "$root" | awk 'NR==2 {print $4}')" -ge 8388608 || { df -h /; echo 'Preparation requires at least 8 GiB free. Stop and report disk usage.'; exit 1; }
-  mkdir -p -m700 "$root/releases"
-  mkdir -m700 "$work"
-  printf '%s\n' "$feature" > "$work/feature-flag"
-  docker inspect --format '{{.Image}}' "$backend" > "$work/running-backend.id"
-  docker inspect --format '{{.Image}}' "$web" > "$work/running-web.id"
-  sha256sum compose.migration.yaml compose.app.yaml > "$work/compose.sha256"
-  sha256sum "$secrets/database_url" "$secrets/database_password" "$secrets/postgres_admin_password" "$secrets/jwt_secret" "$secrets/authenticator_key" "$secrets/pms_api_key" > "$work/secrets.sha256"
-  docker image tag "$(cat "$work/running-backend.id")" "dive-centre-backend:rollback-pre-$release"
-  docker image tag "$(cat "$work/running-web.id")" "dive-centre-web:rollback-pre-$release"
-  echo 'Building production images. Existing production services remain online.'
-  docker build --pull=false --tag "dive-centre-backend:$release" "$source_dir/backend"
-  docker build --pull=false --build-arg VITE_DEPLOYMENT_MODE=live --build-arg "VITE_ENABLE_WATER_SPORTS=$feature" \
-    --tag "dive-centre-web:$release" "$source_dir/frontend"
-  docker image inspect --format '{{.Id}}' "dive-centre-backend:$release" > "$work/candidate-backend.id"
-  docker image inspect --format '{{.Id}}' "dive-centre-web:$release" > "$work/candidate-web.id"
+  attempt="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if [ "$phase" = prepare ]; then
+    test ! -e "$work" || { echo 'This preparation directory already exists. Inspect its prior journal before retrying.'; exit 1; }
+    test "$(df -Pk "$root" | awk 'NR==2 {print $4}')" -ge 8388608 || { df -h /; echo 'Preparation requires at least 8 GiB free. Stop and report disk usage.'; exit 1; }
+    mkdir -p -m700 "$root/releases"
+    mkdir -m700 "$work"
+    printf '%s\n' "$feature" > "$work/feature-flag"
+    docker inspect --format '{{.Image}}' "$backend" > "$work/running-backend.id"
+    docker inspect --format '{{.Image}}' "$web" > "$work/running-web.id"
+    sha256sum compose.migration.yaml compose.app.yaml > "$work/compose.sha256"
+    sha256sum "$secrets/database_url" "$secrets/database_password" "$secrets/postgres_admin_password" "$secrets/jwt_secret" "$secrets/authenticator_key" "$secrets/pms_api_key" > "$work/secrets.sha256"
+    docker image tag "$(cat "$work/running-backend.id")" "dive-centre-backend:rollback-pre-$release"
+    docker image tag "$(cat "$work/running-web.id")" "dive-centre-web:rollback-pre-$release"
+    echo 'Building production images. Existing production services remain online.'
+    docker build --pull=false --tag "dive-centre-backend:$release" "$source_dir/backend"
+    docker build --pull=false --build-arg VITE_DEPLOYMENT_MODE=live --build-arg "VITE_ENABLE_WATER_SPORTS=$feature" \
+      --tag "dive-centre-web:$release" "$source_dir/frontend"
+    docker image inspect --format '{{.Id}}' "dive-centre-backend:$release" > "$work/candidate-backend.id"
+    docker image inspect --format '{{.Id}}' "dive-centre-web:$release" > "$work/candidate-web.id"
+    preparation_dir="$work/preparation"
+  else
+    test -d "$work"
+    test ! -e "$work/READY" || { echo 'Preparation already passed. Do not resume it.'; exit 1; }
+    test ! -e "$work/STARTED" || { echo 'Cutover already started. Inspect its journal.'; exit 1; }
+    test ! -e "$work/COMPLETE"
+    test "$(df -Pk "$root" | awk 'NR==2 {print $4}')" -ge 2097152 || { df -h /; echo 'Resume requires at least 2 GiB free for backups and small repair layers.'; exit 1; }
+    sha256sum -c "$work/compose.sha256"
+    sha256sum -c "$work/secrets.sha256"
+    (cd "$work/preparation" && sha256sum -c SHA256SUMS)
+    test "$feature" = "$(cat "$work/feature-flag")"
+    test "$(docker inspect --format '{{.Image}}' "$backend")" = "$(cat "$work/running-backend.id")"
+    test "$(docker inspect --format '{{.Image}}' "$web")" = "$(cat "$work/running-web.id")"
+    test "$(docker image inspect --format '{{.Id}}' "dive-centre-backend:$release")" = "$(cat "$work/candidate-backend.id")"
+    test "$(docker image inspect --format '{{.Id}}' "dive-centre-web:$release")" = "$(cat "$work/candidate-web.id")"
+    echo 'Resuming failed preparation using the existing built images. Existing backups are retained.'
+    preparation_dir="$work/preparation-resume-$attempt"
+  fi
+  ensure_runtime_access
   candidate_id=$(cat "$work/candidate-backend.id")
   web_id=$(cat "$work/candidate-web.id")
   docker run --rm --network none --entrypoint cat "$web_id" /srv/index.html | sha256sum | cut -d' ' -f1 > "$work/frontend.sha256"
@@ -231,7 +325,8 @@ before['services']['backend'].setdefault('environment',{}).update(flags)
 if before!=after: raise SystemExit('Candidate changed settings beyond the approved images and production safety flags.')
 CONFIG
   echo 'Taking the rehearsal backup from the live database.'
-  backup "$work/preparation"
+  backup "$preparation_dir"
+  printf '%s\n' "$preparation_dir" > "$work/REHEARSAL_BACKUP"
   clone="dive_rehearsal_${release}_$(date -u +%Y%m%d%H%M%S)_$$"
   [[ "$clone" =~ ^dive_rehearsal_0ce1e232_[0-9]+_[0-9]+$ ]]
   python3 - "$secrets/database_url" "$work/rehearsal-database-url" "$clone" <<'CLONE_URL'
@@ -247,14 +342,16 @@ CLONE_URL
   docker exec -i "$db" sh -ec '
     export PGPASSWORD="$(cat /run/secrets/database_password)"
     exec pg_restore -h127.0.0.1 -U dive_center -d "$1" --no-owner --no-acl --exit-on-error --single-transaction
-  ' sh "$clone" < "$work/preparation/production.dump"
+  ' sh "$clone" < "$preparation_dir/production.dump"
   url_file="$work/rehearsal-database-url"
-  run_image "$(cat "$work/running-backend.id")" node /run/release/fingerprint.cjs > "$work/rehearsal-before.json"
-  chmod 444 "$work/rehearsal-before.json"
+  before_file="$work/rehearsal-before-$attempt.json"
+  after_file="$work/rehearsal-after-$attempt.json"
+  run_image "$(cat "$work/running-backend.id")" node /run/release/fingerprint.cjs > "$before_file"
+  chmod 444 "$before_file"
   run_image "$candidate_id" node tools/prisma.cjs migrate deploy
-  baseline_file="$work/rehearsal-before.json"
-  run_image "$candidate_id" node /run/release/fingerprint.cjs /run/release/baseline.json > "$work/rehearsal-after.json"
-  compare_data "$work/rehearsal-before.json" "$work/rehearsal-after.json"
+  baseline_file="$before_file"
+  run_image "$candidate_id" node /run/release/fingerprint.cjs /run/release/baseline.json > "$after_file"
+  compare_data "$before_file" "$after_file"
   verify_authenticators
   printf 'DROP DATABASE "%s" WITH (FORCE);\n' "$clone" | admin_sql
   created=0

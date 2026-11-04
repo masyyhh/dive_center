@@ -34,6 +34,27 @@ historical recipient. Authenticator bindings must still decrypt. The temporary
 database is removed. A READY marker is written only after all checks pass.
 Preparation leaves production web/backend services running.
 
+## Resume a permission failure before cutover
+
+If preparation built both images and completed its backup but failed with EACCES
+reading /app/tools/prisma.cjs, install the updated helper and run its
+`resume /absolute/source/checkout` phase. Do not delete the preparation directory
+or alter the pinned application checkout.
+
+Resume refuses READY/STARTED/COMPLETE markers, and checks the original running
+images, feature flag, configuration, secrets and backup checksums. It requires
+2 GiB free because it reuses existing images rather than rebuilding dependencies.
+Small repair layers give the backend node user ownership of tooling/package
+metadata and make public frontend files readable. The backend remains non-root.
+Both filesystem access and Prisma CLI startup are tested without a database.
+Original and repaired image IDs and Dockerfiles are retained in the release records.
+A new rehearsal backup and timestamped before/after fingerprints are created;
+previous backups and failed rehearsal records are preserved. The application
+code stays pinned to the tested 0ce1e232 commit. Future Docker builds also apply
+the corrected runtime ownership and public-asset permissions directly.
+
+Wait for PRODUCTION PREPARATION PASSED before running deploy.
+
 ## Deploy
 
 Only after `PRODUCTION PREPARATION PASSED`, run the helper's `deploy` phase in a
