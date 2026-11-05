@@ -10,7 +10,7 @@ export function fixture(options={}){
  const values=[],refs=[],effects=[],calls=[];let state=0,ref=0,effect=0,pending=[];
  const staff=options.staff??[{...sampleStaff},{...sampleStaff,staffMemberId:'staff-2',staffName:'Instructor Two',status:'OFF'}];let dirty=false;
  const hooks={...React,useState(initial){const index=state++;if(!(index in values))values[index]=typeof initial==='function'?initial():initial;return[values[index],value=>{values[index]=typeof value==='function'?value(values[index]):value;}];},useRef(initial){const index=ref++;return refs[index]??={current:initial};},useEffect(callback,deps){const index=effect++;if(!effects[index]||deps.some((value,i)=>!Object.is(value,effects[index][i]))){effects[index]=deps;pending.push(callback);}}};
- const property={id:'a',name:'Test Property',currencySymbol:'$'};
+ const property={id:'a',name:options.propertyName??'Test Property',currencySymbol:'$'};
  const api=async(url,request={})=>{
   calls.push({url,...request});
   if(request.method==='POST'){

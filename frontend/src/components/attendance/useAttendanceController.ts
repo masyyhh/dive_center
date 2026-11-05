@@ -172,6 +172,7 @@ export function useAttendanceController({ initialDate, onSetup, onPayroll }: Att
   ];
 
   return {
+    activeProperty,
     baseline,
     canManage,
     daysInMonth,

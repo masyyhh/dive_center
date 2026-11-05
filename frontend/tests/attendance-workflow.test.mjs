@@ -43,3 +43,35 @@ test('changing month goes through the navigation guard and cancellation keeps th
 test('unchanged recorded attendance cannot be submitted again',async()=>{
  const f=await loaded({staff:[{...sampleStaff,isSaved:true}]});assert.equal(save(f.render()).props.disabled,true);assert.equal(f.dirty,false);
 });
+
+test('the compact attendance layout applies only to Siyam World',async()=>{
+ for(const name of ['Siyam World','Sun Siyam World','Olhuveli','Iru Fushi','Sun Siyam Vilu Reef']){
+  const f=await loaded({propertyName:name});const tree=f.render();const compact=name.endsWith('World');
+  assert.equal(nodes(tree).some(n=>n.props?.className==='siyam-attendance-roster'),compact);
+  assert.equal(nodes(tree).some(n=>n.props?.id==='siyam-attendance-date'),compact);
+  assert.equal(nodes(tree).filter(n=>n.type==='time').length,compact?2:0);
+ }
+});
+test('Siyam World retains saved status until explicitly saved and preserves existing notes',async()=>{
+ const f=await loaded({propertyName:'Siyam World',staff:[{...sampleStaff,isSaved:true}]});
+ status(f.render()).props.onChange({target:{value:'SICK'}});let tree=f.render();
+ const saved=nodes(tree).find(n=>n.props?.className==='siyam-attendance-saved');
+ assert.ok(nodes(saved).some(n=>n.type==='strong'&&n.props.children==='Present'));
+ assert.equal(f.calls.some(c=>c.method==='POST'),false);
+ await save(tree).props.onClick();await f.flush();
+ const body=JSON.parse(f.calls.find(c=>c.method==='POST').body);
+ assert.equal(body.propertyId,'a');assert.equal(body.date,'2026-11-04');
+ assert.deepEqual(body.records[0],{staffMemberId:'staff-1',status:'SICK',note:'Existing note'});
+});
+test('Siyam World date changes respect the unsaved-work guard and locked payroll prevents edits',async()=>{
+ const guarded=await loaded({propertyName:'Siyam World',blockNavigation:true});
+ status(guarded.render()).props.onChange({target:{value:'SICK'}});
+ nodes(guarded.render()).find(n=>n.props?.id==='siyam-attendance-date').props.onChange({target:{value:'2026-11-03'}});
+ assert.ok(guarded.calls.some(c=>c.action==='navigation-guard'));
+ assert.equal(nodes(guarded.render()).find(n=>n.props?.id==='siyam-attendance-date').props.value,'2026-11-04');
+ for(const locked of [true,null]){
+  const f=await loaded({propertyName:'Siyam World',locked});const tree=f.render();
+  assert.equal(status(tree).props.disabled,true);assert.equal(save(tree).props.disabled,true);
+  assert.equal(button(tree,'All Present').props.disabled,true);
+ }
+});

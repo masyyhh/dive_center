@@ -4,7 +4,9 @@ import { AttendanceItem } from '../../types';
 import { CheckCircle2, Users, Save, Sparkles } from 'lucide-react';
 import type { AttendanceModel } from './useAttendanceController';
 
-export function AttendanceRegister({ model }: { model: AttendanceModel }) {
+const statusLabels: Record<AttendanceItem['status'], string> = { PRESENT: 'Present', OFF: 'Off', OFF_HALF: 'Off (half day)', ANNUAL_LEAVE: 'Annual leave', SICK: 'Sick', ABSENT: 'Absent', EMERGENCY_LEAVE: 'Emergency leave' };
+
+export function AttendanceRegister({ model, compact = false }: { model: AttendanceModel; compact?: boolean }) {
   const {
     baseline, canManage, dirty, handleAllPresent,
     handleSaveAttendance, handleStatusChange, loadingDay, monthLock,
@@ -12,21 +14,21 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
     selectedDate, staffAttendance, todayStr,
   } = model;
   return (
-    <div className="xl:col-span-7 space-y-4">
+    <div className={compact ? "siyam-attendance-register space-y-4" : "xl:col-span-7 space-y-4"}>
       <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-              <span>{displayDate(selectedDate)}</span>
-              {selectedDate === todayStr && (
+              <span>{compact ? `Staff attendance (${staffAttendance.length})` : displayDate(selectedDate)}</span>
+              {!compact && selectedDate === todayStr && (
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
                   Today
                 </span>
               )}
             </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-              {staffAttendance.length} dive staff employed on this date
-            </p>
+            {!compact && <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              {staffAttendance.length} {compact ? 'staff' : 'dive staff employed on this date'}
+            </p>}
           </div>
 
           {/* Bulk "All present" button (PDF Page 5) */}
@@ -56,7 +58,7 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
             <Users className="mx-auto mb-3" size={28} /><strong className="block mb-2">No dive staff on this date</strong><span>{canManage ? 'Add your dive team, or choose a date within their employment period.' : 'Ask your property manager to add the dive team, or choose another date.'}</span>{canManage && <button className="primary-button mt-4" onClick={onSetup}>Add team members</button>}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className={compact ? "siyam-attendance-roster" : "space-y-3"}>
             {staffAttendance.map((staff) => {
               const original = (JSON.parse(baseline) as { id: string; status: string; note: string }[]).find(record => record.id === staff.staffMemberId);
               const changed = original && (original.status !== staff.status || original.note !== (staff.note || ''));
@@ -67,7 +69,7 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
                   key={staff.staffMemberId}
                   className={`attendance-row ${changed ? 'is-dirty' : ''} p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm`}
                 >
-                  <div>
+                  <div className="attendance-staff-identity">
                     <div className="flex items-center space-x-2">
                       <span className="font-bold text-slate-900 dark:text-white">
                         {staff.staffName}
@@ -83,7 +85,7 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
                     </div>
 
                     {/* Commission Impact Indicator */}
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center space-x-1">
+                    {!compact && <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center space-x-1">
                       <span>Commission Pool:</span>
                       {countsTowardCommission ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">
@@ -94,12 +96,13 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
                           {staff.isSaved && !changed ? '✕ Excluded from pool' : 'Would be excluded when saved'}
                         </span>
                       )}
-                    </div>
+                    </div>}
                   </div>
 
                   {/* Status Dropdown */}
-                  <div className="flex items-center space-x-2">
-                    <select
+                  <div className={compact ? "siyam-attendance-status-control" : "flex items-center space-x-2"}>
+                    {compact && <label htmlFor={`attendance-status-${staff.staffMemberId}`}>Status</label>}
+                    <select id={`attendance-status-${staff.staffMemberId}`}
                       aria-label={`Attendance for ${staff.staffName}`}
                       value={staff.status}
                       disabled={readOnly || saving || loadingDay}
@@ -120,6 +123,10 @@ export function AttendanceRegister({ model }: { model: AttendanceModel }) {
                       <option value="EMERGENCY_LEAVE">Emergency Leave (Excluded)</option>
                     </select>
                   </div>
+                  {compact && <>
+                    <div className="siyam-attendance-row-date"><span>Date</span><time dateTime={selectedDate}>{displayDate(selectedDate, { day: '2-digit', month: 'short', year: 'numeric' })}</time></div>
+                    <div className="siyam-attendance-saved"><span>Saved status</span><strong>{staff.isSaved && original ? statusLabels[original.status as AttendanceItem['status']] : 'Not recorded'}</strong></div>
+                  </>}
                 </div>
               );
             })}
