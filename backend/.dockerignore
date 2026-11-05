@@ -11,3 +11,6 @@
 !tools/
 !tools/**
 !entrypoint.sh
+!assets/
+!assets/fonts/
+!assets/fonts/**
