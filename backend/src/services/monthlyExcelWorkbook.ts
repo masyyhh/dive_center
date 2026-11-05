@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
 import { isYearMonth } from '../utils/dates';
 import { createReportWorkbook, styleReportHeader } from './reportWorkbook';
+import { createSiyamMonthlyWorkbook } from './siyamMonthlyWorkbook';
 
 export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth: string) => {
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
@@ -39,6 +40,15 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     include: { staffMember: true },
     orderBy: { date: 'asc' },
   });
+
+  // Match the full property name, consistently with the Siyam-only billing UI.
+  if (/^(sun\s+)?siyam\s+world$/i.test(property.name.trim())) {
+    const staff = await prisma.staffMember.findMany({
+      where: { propertyId, hireDate: { lte: endDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: startDate } }] },
+      orderBy: { name: 'asc' },
+    });
+    return createSiyamMonthlyWorkbook({ property, yearMonth, bills, staff, attendances, staffResults, personalDetails, certificationPoolTotal }).xlsx.writeBuffer();
+  }
 
   const workbook = createReportWorkbook();
 
