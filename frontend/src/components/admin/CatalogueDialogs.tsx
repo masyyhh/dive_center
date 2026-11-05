@@ -2,6 +2,7 @@ import { PersonalCommissionEditor } from '../PersonalCommissionEditor';
 import { CommissionCalculatorPreview } from '../CommissionCalculator';
 import { BulkMediaReview } from '../BulkMediaReview';
 import { Modal } from '../Modal';
+import { usesStoreAttendantPool } from '../../utils/storeAttendantPool';
 
 import type { AdminModel } from './useAdminController';
 
@@ -19,6 +20,7 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
     setNewCategoryName, setNoCommissions, setPermanentDeleteConfirmation, setShowCategoryInput,
     showCategoryInput, showItemModal,
   } = model;
+  const storeAttendantPool = usesStoreAttendantPool(activeProperty, categories.find(category => category.id === itemForm.categoryId)?.name);
   return (
     <>
       {activeTab === 'items' && bulkDeleteTarget && bulkDeleteTarget.propertyId === activeProperty?.id && <Modal label={bulkDeleteTarget.permanent ? "Permanently delete catalogue activities" : "Delete selected catalogue activities"} busy={itemBusy} onClose={() => { if (!itemBusy) { setBulkDeleteTarget(null); setErrorMsg(null); } }} error={errorMsg}>
@@ -125,7 +127,7 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
                       setCommissionSelections(previous.selections);
                     }
                     setNoCommissions(checked);
-                  }} /><span><strong>No commissions for this activity</strong><small>No pool contribution, employee payments or automatically added Photo.</small></span></label>
+                  }} /><span><strong>{storeAttendantPool ? 'No additional commissions for this activity' : 'No commissions for this activity'}</strong><small>{storeAttendantPool ? 'The automatic 5% Store attendant Retail pool still applies.' : 'No pool contribution, employee payments or automatically added Photo.'}</small></span></label>
                 {editingItem?.hasBillHistory && editingItem.poolType !== 'NONE' && <p>Pool rules are protected on this billed service. Create a new activity to change them.</p>}
               </div>
 
@@ -162,7 +164,7 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
                 </div>
               </div>
 
-              {noCommissions ? <p className="commission-free-notice">This service earns no commissions. You can still set its guest price above.</p> : <>
+              {noCommissions ? <p className="commission-free-notice">{storeAttendantPool ? 'The 5% Store attendant pool applies. No additional commissions are configured.' : 'This service earns no commissions. You can still set its guest price above.'}</p> : <>
               {itemForm.poolType === 'CERTIFICATION_POOL' && <p className="text-sm text-slate-500">Certifications pool contributions are tracked in reports and are not paid to staff or included in the base-leader override. Personal commission settings below are separate.</p>}
 
               <div><label htmlFor="activity-pool-contribution" className="block font-semibold text-slate-600 dark:text-slate-300 mb-1">{itemForm.poolType === 'COURSE_POOL' || itemForm.poolType === 'DIVE_POOL' ? 'Pool commission rate (%)' : `Pool contribution (${activeProperty?.currencySymbol || '$'})`}<span className="required-mark" aria-hidden="true">*</span></label><input id="activity-pool-contribution" type="number" min="0" max={itemForm.poolType === 'COURSE_POOL' || itemForm.poolType === 'DIVE_POOL' ? 100 : undefined} step="0.01" required disabled={editingItem?.hasBillHistory} value={itemForm.poolContribution} onChange={event => setItemForm({ ...itemForm, poolContribution: Number(event.target.value) })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" />{editingItem?.hasBillHistory && <p className="text-xs text-slate-500 mt-1">Pool rules are fixed for activities used on saved bills. Create a new activity to use different rules.</p>}</div>
@@ -176,10 +178,11 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
                 <p className="text-xs text-slate-500">Adds a separate Photo line at {photoPriceLabel} per unit on top of the activity price. Each selected Photo staff member on that line earns {photoCommissionLabel} per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
               </div>
 
-              <PersonalCommissionEditor {...photoSettings} value={commissionSelections} onChange={setCommissionSelections}
-                combinedMedia={itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} showPreview={false} />
               </>}
+              {(!noCommissions || storeAttendantPool) && <PersonalCommissionEditor {...photoSettings} value={commissionSelections} onChange={setCommissionSelections}
+                storeAttendantPool={storeAttendantPool} onlyStorePool={noCommissions} combinedMedia={!noCommissions && itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} showPreview={false} />}
               <CommissionCalculatorPreview {...photoSettings} price={itemForm.price} poolType={noCommissions ? 'NONE' : itemForm.poolType} poolRate={noCommissions ? 0 : itemForm.poolContribution}
+                storeAttendantPool={storeAttendantPool}
                 selections={noCommissions ? commissionSelections.map(row => ({ ...row, enabled: false })) : commissionSelections}
                 combinedMedia={!noCommissions && itemForm.includesComplimentaryMedia} currencySymbol={activeProperty?.currencySymbol || '$'} />
 

@@ -5,11 +5,19 @@ import { displayDate } from '../../utils/dates';
 import { Receipt } from 'lucide-react';
 import type { BillsModel } from './useBillsController';
 
-export function BillsTable({ model }: { model: BillsModel }) {
+export function BillsTable({ model, compact = false }: { model: BillsModel; compact?: boolean }) {
   const {
     currencySymbol, loading, openBillDetails, resetFilters,
     visibleBills,
   } = model;
+  if (compact) return <section className="bill-list-pane" aria-label="Bills list">
+    {loading ? <p className="bill-list-empty" role="status">Loading bills…</p> : !visibleBills.length ? <div className="bill-list-empty"><Receipt size={24} /><h2>No bills match your filters</h2><p>Try another guest, room, check number, or date range.</p><button type="button" className="text-button" onClick={resetFilters}>Reset filters</button></div> : <ul className="bill-selection-list">
+      {visibleBills.map(bill => <li key={bill.id}><button type="button" className="bill-selection-row" aria-label={`View bill ${bill.checkNumber}`} aria-controls="bill-reading-pane" aria-pressed={model.selectedBillId === bill.id} disabled={model.actionLoading} onClick={() => openBillDetails(bill.id)}>
+        <span className="bill-list-title"><span className="bill-list-heading"><strong>#{bill.checkNumber}</strong><span className="bill-list-guest" title={bill.guestName}>{bill.guestName}</span></span><span className={`status-badge status-${bill.status.toLowerCase()}`}>{bill.status === 'ACTIVE' ? 'Active' : bill.status === 'REBATED' ? 'Rebated' : 'Deleted'}</span></span>
+        <span className="bill-list-meta"><span>Room {bill.roomNumber} · {displayDate(bill.businessDate)}</span><strong>{formatMoney(bill.netAmount, currencySymbol)}</strong></span>
+      </button></li>)}
+    </ul>}
+  </section>;
   return (
     <>
       {/* Bills Table */}

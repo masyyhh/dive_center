@@ -25,6 +25,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
             </button>
 
 </div>
+      {(report?.headline.storeAttendantPoolTotal ?? 0) > 0 && <div className="notice notice-info" role="status"><span>Store attendant Retail pool: {formatMoney(report!.headline.storeAttendantPoolTotal!, currencySymbol)}. Eligible Store attendants share 5% after discounts; payments are included under Personal and listed in employee payment details.{(report?.headline.unallocatedStoreAttendantPoolTotal ?? 0) > 0 && ` Unallocated (no eligible Store attendants): ${formatMoney(report!.headline.unallocatedStoreAttendantPoolTotal!, currencySymbol)}.`}</span></div>}
       {/* Staff Commission Table (PDF Page 6 & 7: Course, Dive, Override, Tips, Personal) */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

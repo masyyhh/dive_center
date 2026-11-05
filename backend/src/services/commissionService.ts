@@ -2,6 +2,7 @@ import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
+import { isStoreAttendant, splitStorePool, STORE_ATTENDANT_RETAIL_RATE } from '../utils/storeAttendantPool';
 
 export interface StaffCommissionResult {
   staffId: string;
@@ -134,6 +135,8 @@ export const calculateCommissionForPeriod = async (
   };
   // Certifications are tracked separately and never distributed as staff pay.
   let certificationPoolTotal = 0;
+  let storeAttendantPoolTotal = 0;
+  let unallocatedStoreAttendantPoolTotal = 0;
 
   // Helper function to check if attendance status counts toward commission pool
   // Per PDF Page 5: Present = Yes, Off / Off (half day) = Yes (counted in full).
@@ -207,6 +210,25 @@ export const calculateCommissionForPeriod = async (
         }
 
         const source = { billId: bill.id, billItemId: line.id, checkNumber: bill.checkNumber, businessDate: date, itemName: line.itemName, quantity: line.quantity };
+        // Only explicit saved snapshots participate; never backfill historical sales.
+        const retailPool = line.storeAttendantRateSnapshot === STORE_ATTENDANT_RETAIL_RATE &&
+          typeof line.storeAttendantPoolAmount === 'number' && Number.isFinite(line.storeAttendantPoolAmount) && line.storeAttendantPoolAmount > 0 ? line.storeAttendantPoolAmount : 0;
+        if (retailPool > 0) {
+          storeAttendantPoolTotal += retailPool;
+          const recipients = staffMembers.filter(staff => isStoreAttendant(staff.roleTitle) && canReceiveCredit(staff.id));
+          const shares = splitStorePool(retailPool, recipients.map(staff => staff.id));
+          if (!shares.length) unallocatedStoreAttendantPoolTotal += retailPool;
+          for (const share of shares) {
+            const entry = commissionMap.get(share.staffId)!;
+            entry.personalCommission += share.amount;
+            personalDetails.push({ id: `${line.id}-store-${share.staffId}`, checkNumber: bill.checkNumber, businessDate: date,
+              guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName, role: 'Store attendant (Retail 5% shared)',
+              staffId: share.staffId, staffName: entry.staffName, amount: share.amount });
+            if (share.staffId === detailStaffId) breakdownDetails.push({ ...source, id: `${line.id}-STORE-${share.staffId}`, kind: 'PERSONAL',
+              basisAmount: retailPool, recipientCount: shares.length, factor: 1, amount: share.amount,
+              explanation: 'Saved 5% of Retail sales after discounts, before tax and service charge; shared equally among eligible Store attendants, with remaining cents allocated by staff ID.' });
+          }
+        }
         if (detailStaffId && contribution > 0 && (poolType === 'COURSE_POOL' || poolType === 'DIVE_POOL')) poolSources.push({ ...source, basisAmount: contribution, poolType });
 
         // Personal commission (fixed amounts to designated roles on line)
@@ -393,6 +415,8 @@ export const calculateCommissionForPeriod = async (
     personalDetails,
     breakdownDetails,
     certificationPoolTotal: Math.round(certificationPoolTotal * 100) / 100,
+    storeAttendantPoolTotal: Math.round(storeAttendantPoolTotal * 100) / 100,
+    unallocatedStoreAttendantPoolTotal: Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100,
     grandTotal: Math.round(grandTotal * 100) / 100,
   };
 };

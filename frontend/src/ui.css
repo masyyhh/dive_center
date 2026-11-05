@@ -242,22 +242,26 @@
 }
 
 /* Siyam World: familiar ledger layout with a restrained modern finish. */
-.bill-builder.siyam-bill.siyam-ledger .billing-toolbar { padding: 12px 14px; }
+.bill-builder.siyam-bill.siyam-ledger .billing-toolbar { padding: 16px 18px; }
 .bill-builder.siyam-bill.siyam-ledger .billing-toolbar-top { margin-bottom: 8px; }
-.bill-builder.siyam-bill.siyam-ledger .billing-toolbar-fields { display: grid; grid-template-columns: minmax(110px,.8fr) minmax(150px,1.4fr) minmax(115px,1fr) minmax(115px,1fr) minmax(130px,.9fr) minmax(135px,1fr); align-items: start; gap: 12px; }
+.bill-builder.siyam-bill.siyam-ledger .billing-toolbar-fields { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.7fr) repeat(2,minmax(0,1fr)) minmax(0,1.15fr) minmax(0,1.05fr) auto; align-items: start; gap: 16px; }
 .bill-builder.siyam-bill.siyam-ledger .billing-check-control { order: 5; padding: 0; display: grid; gap: 5px; }
-.bill-builder.siyam-bill.siyam-ledger .billing-date-control { order: 6; grid-column: auto; grid-row: auto; display: grid; gap: 5px; }
+.bill-builder.siyam-bill.siyam-ledger .billing-date-control { order: 6; grid-column: auto; grid-row: auto; display: grid; gap: 6px; justify-content: stretch; }
 .bill-builder.siyam-bill.siyam-ledger #bill-guest-details, .bill-builder.siyam-bill.siyam-ledger #bill-guest-details > .grid { display: contents; }
 .bill-builder.siyam-bill.siyam-ledger #bill-guest-details > h3, .bill-builder.siyam-bill.siyam-ledger #bill-guest-details > .workflow-section-help { display: none; }
 .bill-builder.siyam-bill.siyam-ledger #bill-guest-details .notice { grid-column: 1 / -1; }
-.bill-builder.siyam-bill.siyam-ledger #bill-guest-details label { margin-bottom: 5px; }
-.bill-builder.siyam-bill.siyam-ledger .billing-toolbar input, .bill-builder.siyam-bill.siyam-ledger .billing-toolbar select { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; }
+.bill-builder.siyam-bill.siyam-ledger .billing-toolbar-fields label { font-size: 11px; font-weight: 500; line-height: 16px; }
+.bill-builder.siyam-bill.siyam-ledger #bill-guest-details label { margin-bottom: 6px; }
+.bill-builder.siyam-bill.siyam-ledger .billing-toolbar input, .bill-builder.siyam-bill.siyam-ledger .billing-toolbar select { width: 100%; min-width: 0; height: 42px; min-height: 42px; padding: 8px 10px; font-size: 13px; font-weight: 400; }
+.bill-builder.siyam-bill.siyam-ledger .billing-check-control { gap: 6px; }
+.bill-builder.siyam-bill.siyam-ledger #bill-check-number { appearance: textfield; }
+.bill-builder.siyam-bill.siyam-ledger #bill-check-number::-webkit-inner-spin-button, .bill-builder.siyam-bill.siyam-ledger #bill-check-number::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .bill-builder.siyam-bill.siyam-ledger .billing-check-stepper { width: 100%; }
 .bill-builder.siyam-bill.siyam-ledger .billing-check-stepper input { width: 62px; flex: 1; }
-.bill-builder.siyam-bill.siyam-ledger .billing-check-stepper button { width: 26px; min-height: 36px; flex-shrink: 0; }
+.bill-builder.siyam-bill.siyam-ledger .billing-check-stepper button { width: 30px; min-height: 42px; flex-shrink: 0; }
 .bill-builder.siyam-bill.siyam-ledger .room-lookup-control { flex-wrap: nowrap; gap: 4px; }
 .bill-builder.siyam-bill.siyam-ledger .room-lookup-control input { flex: 1; flex-basis: 0; }
-.bill-builder.siyam-bill.siyam-ledger .room-lookup-control button { width: 32px; min-width: 32px; min-height: 36px; font-size: 0; padding: 4px; }
+.bill-builder.siyam-bill.siyam-ledger .room-lookup-control button { width: 42px; min-width: 42px; min-height: 42px; font-size: 0; padding: 4px; }
 .bill-builder.siyam-bill.siyam-ledger #room-help { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .siyam-entry-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .siyam-entry-toolbar > span { font-size: 12px; color: var(--muted); }
@@ -536,4 +540,188 @@
 .siyam-attendance .attendance-row { padding: 7px 10px; gap: 4px 10px; }
 @media (min-width: 601px) {
   .siyam-attendance-status-control select, .siyam-attendance-row-date > time, .siyam-attendance-saved > strong { min-height: 32px; }
+}
+
+/* Create bill: resizable catalogue folder pane with a separate ledger workspace. */
+.catalogue-billing-shell .sidebar.catalogue-sidebar { width: var(--catalogue-width,280px); padding: 0; }
+.catalogue-billing-shell > .workspace { margin-left: var(--catalogue-width,280px); min-width: 0; container: bill-workspace / inline-size; }
+.catalogue-sidebar-heading { padding: 20px 16px 14px; border-bottom: 1px solid var(--border); }
+.catalogue-sidebar-heading > button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; font-size: 12px; }
+.catalogue-sidebar-heading h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.catalogue-sidebar-content { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0; scrollbar-width: thin; }
+.catalogue-resize-handle { position: absolute; inset: 0 -4px 0 auto; width: 8px; z-index: 2; cursor: col-resize; touch-action: none; }
+.catalogue-resize-handle:hover, .catalogue-resize-handle:focus-visible { background: var(--accent); opacity: .6; outline: none; }
+.catalogue-tree { min-width: 0; color: var(--ink); font-size: 13px; }
+.catalogue-tree > p { padding: 10px 16px; }
+.catalogue-tree-category > summary { display: flex; gap: 9px; align-items: center; padding: 11px 16px; cursor: pointer; list-style: none; font-weight: 550; overflow-wrap: anywhere; }
+.catalogue-tree-category > summary::-webkit-details-marker { display: none; }
+.catalogue-tree-category > summary:hover { background: var(--soft); }
+.catalogue-tree-toggle { flex: 0 0 16px; width: 16px; height: 16px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 3px; font-size: 13px; font-weight: 400; line-height: 1; color: var(--muted); }
+.catalogue-tree-toggle::before { content: '+'; }
+.catalogue-tree-category[open] > summary .catalogue-tree-toggle::before { content: '−'; }
+.catalogue-tree-item { display: block; width: 100%; padding: 9px 16px 9px 41px; color: var(--ink); text-align: left; font-size: 12px; overflow-wrap: anywhere; }
+.catalogue-tree-item:hover, .catalogue-tree-item:focus-visible { background: var(--soft); outline-offset: -2px; }
+.catalogue-tree-item:disabled { opacity: .5; cursor: wait; }
+.catalogue-tree-empty { padding: 10px 16px 10px 41px; color: var(--muted); font-size: 12px; }
+.catalogue-tree-category > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bill-builder.siyam-bill.siyam-ledger .bill-work-area.has-catalogue-fallback { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 12px; }
+.has-catalogue-fallback > .catalogue-tree { overflow-y: auto; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.siyam-lines-table tr[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.siyam-lines-table .siyam-line-selected > td:first-child { box-shadow: inset 3px 0 var(--accent); }
+@container bill-workspace (max-width: 1000px) {
+  .siyam-new-bill .bill-builder.siyam-bill.siyam-ledger .billing-toolbar-fields { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .siyam-new-bill .bill-builder.siyam-bill .siyam-checkout { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; }
+  .siyam-new-bill .siyam-checkout-inputs { grid-column: 1 / -1; }
+  .siyam-new-bill .bill-builder.siyam-bill .siyam-checkout-totals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 20px; }
+  .siyam-new-bill .bill-builder.siyam-bill .siyam-checkout-totals > div { display: block; }
+}
+@container bill-workspace (max-width: 600px) {
+  .siyam-new-bill .bill-builder.siyam-bill.siyam-ledger .billing-toolbar-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .siyam-new-bill .bill-builder.siyam-bill .siyam-checkout { grid-template-columns: minmax(0,1fr); }
+  .siyam-new-bill .siyam-checkout > button { width: 100%; }
+}
+@media (max-width: 767px) {
+  .catalogue-billing-shell > .workspace { margin-left: 0; }
+  .catalogue-billing-shell .sidebar.catalogue-sidebar { width: min(var(--catalogue-width,280px),90vw); }
+  .catalogue-resize-handle { display: none; }
+  .catalogue-sidebar .sidebar-close { color: var(--ink); top: 16px; right: 12px; }
+  .bill-builder.siyam-bill.siyam-ledger .bill-work-area.has-catalogue-fallback { grid-template-columns: minmax(0,1fr); }
+  .has-catalogue-fallback > .catalogue-tree { max-height: 35dvh; }
+}
+
+/* Keep Save with guest/check entry; totals are a compact, borderless strip. */
+.siyam-toolbar-save { order: 7; align-self: end; justify-self: end; }
+.siyam-toolbar-save > button { min-height: 42px; min-width: 84px; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout { position: static; display: flex; flex-wrap: wrap; gap: 16px; min-height: 0; padding: 8px 2px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-inputs { flex: 0 1 220px; gap: 10px; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-inputs label { font-size: 11px; font-weight: 500; margin-bottom: 4px; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-inputs input { height: 32px; min-height: 32px; padding: 5px 8px; font-size: 12px; }
+.siyam-checkout #checkout-discount-error:empty { display: none; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-totals { display: flex; flex: 1 1 360px; min-width: 0; gap: 16px; align-items: center; justify-content: space-between; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-totals > div { display: block; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-totals dt { font-size: 10px; margin-bottom: 4px; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-checkout-totals dd { font-size: 13px; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-grand-total dd { font-size: 18px; }
+@container bill-workspace (max-width: 1000px) {
+  .siyam-toolbar-save { grid-column: -2 / -1; }
+}
+@media (max-width: 1199px) {
+  .siyam-toolbar-save { grid-column: -2 / -1; }
+}
+@media (max-width: 600px) {
+  .bill-builder.siyam-bill.siyam-ledger .siyam-checkout-inputs { flex-basis: 100%; }
+  .bill-builder.siyam-bill.siyam-ledger .siyam-checkout-totals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); flex-basis: 100%; gap: 10px 16px; }
+  .siyam-toolbar-save > button { min-height: 44px; }
+}
+
+/* Siyam World uses open page sections; only navigation retains its framed shell. */
+.app-shell.siyam-flat-workspace > .workspace { background: var(--surface); }
+.app-shell.siyam-flat-workspace .main-content :is(
+  .surface, .metric-grid, .attention-grid, .metric-card, .attention-card,
+  .billing-toolbar, .bill-draft-card, .bill-line, .catalogue-panel, .catalogue-item,
+  .catalogue-tree, .catalogue-table-region, .catalogue-transfer-card, .catalogue-transfer-tools,
+  .catalogue-import-help, .import-review-table, .payroll-breakdown-list > li,
+  .payroll-breakdown-total, .ws-panel, .ws-success, .dc-summary > div,
+  div.rounded-2xl, section.rounded-2xl, article.rounded-2xl, fieldset.rounded-2xl,
+  div.rounded-xl, section.rounded-xl, article.rounded-xl, details.rounded-xl,
+  div.bg-white, section.bg-white
+):not(.notice):not([role="alert"]):not([role="status"]) {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.app-shell.siyam-flat-workspace .main-content :is(
+  .surface, .billing-toolbar, .catalogue-transfer-card, .ws-panel,
+  div.rounded-2xl, section.rounded-2xl, article.rounded-2xl
+):not(.notice):not([role="alert"]):not([role="status"]) { padding-inline: 0; }
+.app-shell.siyam-flat-workspace .main-content :is(.metric-grid,.attention-grid) { gap: 20px; }
+.app-shell.siyam-flat-workspace .main-content :is(.metric-card,.attention-card) { padding: 16px 0; }
+.app-shell.siyam-flat-workspace .main-content .attention-card:hover { background: var(--soft) !important; }
+.app-shell.siyam-flat-workspace .main-content :is(.section-heading,.recent-bills > .section-heading) { padding-inline: 0; }
+.app-shell.siyam-flat-workspace .main-content .siyam-attendance-roster { gap: 12px 24px; }
+.app-shell.siyam-flat-workspace .main-content .siyam-attendance .attendance-row { padding-inline: 0; border: 0; background: transparent; }
+.app-shell.siyam-flat-workspace .main-content .siyam-attendance .attendance-row.is-dirty { background: var(--soft); }
+
+/* Siyam World Bills: selection list on the left, receipt reading pane on the right. */
+.siyam-bills-split { display: grid; grid-template-columns: minmax(260px,.8fr) minmax(0,1.8fr); height: calc(100dvh - 340px); min-height: 440px; border-top: 1px solid var(--border); }
+.bill-list-pane { min-width: 0; overflow-y: auto; border-right: 1px solid var(--border); scrollbar-width: thin; }
+.bill-selection-list { list-style: none; padding: 0; margin: 0; }
+.bill-selection-row { display: grid; width: 100%; gap: 4px; padding: 8px 12px; min-height: 48px; text-align: left; border-bottom: 1px solid var(--border); color: var(--ink); }
+.bill-selection-row:hover { background: var(--canvas); }
+.bill-selection-row[aria-pressed=true] { background: var(--soft); box-shadow: inset 3px 0 var(--accent); }
+.bill-selection-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bill-selection-row:disabled { opacity: .6; cursor: wait; }
+.bill-list-title, .bill-list-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.bill-list-title { flex-wrap: nowrap; gap: 8px; }
+.bill-list-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.bill-list-heading > strong { flex-shrink: 0; font-size: 12px; }
+.bill-list-guest { font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bill-selection-row .status-badge { flex-shrink: 0; padding: 1px 6px; font-size: 9px; line-height: 1.4; }
+.bill-list-meta { font-size: 10px; color: var(--muted); gap: 3px 8px; }
+.bill-list-meta > strong { font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bill-list-empty { display: grid; gap: 12px; padding: 28px 16px; color: var(--muted); font-size: 13px; }
+.bill-reading-pane { min-width: 0; overflow-y: auto; scrollbar-width: thin; scroll-margin-top: 80px; }
+.bill-reading-content { padding: 24px; }
+.bill-reading-empty { min-height: 300px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; color: var(--muted); font-size: 13px; text-align: center; }
+.bill-reading-empty h2 { font-size: 17px; font-weight: 500; color: var(--ink); }
+.bill-reading-content .bill-receipt-actions > div { flex-wrap: wrap; gap: 8px; }
+.bill-reading-content .bill-receipt-actions > div > * { margin: 0; }
+@media (max-width: 900px) {
+  .siyam-bills-split { grid-template-columns: minmax(0,1fr); height: auto; min-height: 0; }
+  .bill-list-pane { max-height: 40dvh; border-right: 0; border-bottom: 1px solid var(--border); }
+  .bill-reading-pane { overflow: visible; }
+  .bill-reading-content { padding: 20px 0; }
+}
+@media print {
+  .siyam-bills-filters, .siyam-bills-view > .notice, .siyam-bills-split .bill-list-pane, .bill-receipt-actions, .bill-reading-content button[aria-label="Close bill details"] { display: none !important; }
+  .siyam-bills-split { display: block; height: auto; min-height: 0; border: 0; }
+  .bill-reading-pane { overflow: visible; }
+  .bill-reading-content { padding: 0; }
+}
+
+/* Compact bill filters leave more room for the selected receipt. */
+.siyam-flat-workspace .main-content.view-bills { padding-top: 16px; }
+.bills-header-summary { display: grid; gap: 2px; padding-left: 16px; border-left: 1px solid var(--border); white-space: nowrap; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.bills-header-summary strong { font-size: 12px; font-weight: 500; color: var(--ink); }
+.bill-filter-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 12px; padding: 6px 0; }
+.bill-filter-toolbar .bill-search-form { flex: 1 1 230px; min-width: 180px; gap: 6px; }
+.bill-filter-toolbar .bill-search-form > div { flex: 1; min-width: 0; }
+.bill-filter-toolbar .bill-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.bill-filter-toolbar :is(input,select) { min-width: 0; width: 100%; height: 34px; min-height: 34px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.bill-filter-toolbar input[type=search] { padding-left: 32px; }
+.bill-filter-toolbar .primary-button { min-height: 34px; height: 34px; padding: 5px 12px; }
+.bill-filter-date, .bill-filter-status { display: grid; gap: 3px; flex: 0 1 138px; font-size: 10px; color: var(--muted); }
+.bill-filter-status { flex-basis: 105px; }
+.bill-date-presets { display: flex; align-items: center; gap: 12px; height: 34px; font-size: 11px; }
+.bill-filter-toolbar > .icon-button { height: 34px; min-width: 34px; display: grid; place-items: center; }
+.bill-filter-toolbar > .bills-header-summary { align-self: center; margin-left: auto; }
+.siyam-bills-split { height: auto; min-height: calc(100dvh - 210px); align-items: start; }
+.bill-list-pane { max-height: calc(100dvh - 210px); position: sticky; top: 78px; }
+.bill-reading-pane { overflow: visible; }
+.bill-reading-content { padding: 16px 20px; }
+.bill-reading-content > :not([hidden]) ~ :not([hidden]) { margin-block-start: 12px; margin-block-end: 0; }
+.bill-reading-content h3 { font-size: 18px; }
+.bill-reading-content .bill-receipt-guest { padding: 8px 0; font-size: 12px; }
+.bill-reading-content .receipt-lines-table { font-size: 12px; }
+.bill-reading-content .receipt-lines-table :is(th,td) { padding: 7px 8px; }
+.bill-reading-content .bill-receipt-totals { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px 16px; padding: 10px 0; }
+.bill-reading-content .bill-receipt-totals > div { display: grid; gap: 3px; margin: 0; padding: 0; border: 0; font-size: 11px; }
+.bill-reading-content .bill-receipt-totals > div > span:last-child { font-size: 13px; }
+.bill-reading-content .bill-receipt-totals > div:last-child > span:last-child { font-size: 18px; }
+.bill-reading-content .bill-receipt-actions button { min-height: 32px; padding: 6px 10px; font-size: 11px; }
+@media (max-width: 900px) {
+  .siyam-bills-split { min-height: 0; }
+  .bill-list-pane { position: static; max-height: 35dvh; }
+  .bill-reading-content { padding: 16px 0; }
+}
+@media (max-width: 767px) {
+  .bills-header-summary { padding-left: 8px; }
+  .bills-header-date-range { display: none; }
+  .bill-filter-date { flex: 1 1 125px; }
+  .bill-reading-content .bill-receipt-totals { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media print {
+  .siyam-bills-split { min-height: 0; }
+  .bill-reading-content { padding: 0; }
 }

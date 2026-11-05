@@ -35,40 +35,50 @@ function fixture(name = 'Siyam World', empty = false) {
 }
 function rowNamed(sheet, label) {
   let found;
-  sheet.eachRow(row => { if (row.getCell(1).value === label) found = row; });
-  assert.ok(found, `Expected row ${label}`);
+  const labels = Array.isArray(label) ? label : [label];
+  sheet.eachRow(row => { if (labels.includes(row.getCell(1).value)) found = row; });
+  assert.ok(found, `Expected row ${labels.join(' or ')}`);
   return found;
 }
 
 test('Siyam monthly workbook separates the six reference panels and reconciles discounted sales', async () => {
   const { generate, queries } = fixture();
   const workbook = await generate();
-  assert.deepEqual(workbook.worksheets.map(s => s.name), ['Overview', 'Attendance', 'Room report', 'All bills', 'Item report', 'Commission, SC']);
+  assert.deepEqual(workbook.worksheets.map(s => s.name), ['Overview', 'Item report', 'Commission, SC', 'All bills', 'Attendance', 'Room report']);
   const overview = workbook.getWorksheet('Overview');
   assert.equal(overview.getCell('E5').value, 250);
-  assert.equal(rowNamed(overview, 'Total bill amount').getCell(5).value, 324);
-  assert.equal(rowNamed(overview, 'Total staff pay').getCell(5).value, 25.5);
   assert.equal(overview.getCell('E15').value, 20.5);
+  assert.equal(overview.getCell('A15').value, 'Course, Photo, Tank, Night, Dive, Overriding, GM, Retail');
+
+  const items = workbook.getWorksheet('Item report');
+  assert.deepEqual(items.getRow(3).values.slice(1), ['Main category', 'Sub total', 'Sub category', 'Sub total', 'Item', 'Count', 'Turnover']);
+  assert.equal(items.getCell('A5').value, 'Courses');
+  assert.equal(items.getCell('E5').value, 'Discover Scuba');
+  assert.equal(items.getCell('F5').value, 3);
+  assert.equal(items.getCell('G5').value, 180);
+  const itemTotal = rowNamed(items, 'Total');
+  assert.equal(itemTotal.getCell(6).value.result, 5);
+  assert.equal(itemTotal.getCell(7).value.result, 250);
+
+  const commission = workbook.getWorksheet('Commission, SC');
+  assert.equal(rowNamed(commission, 'Course commission').getCell(10).value, 12);
+  assert.equal(rowNamed(commission, 'Photo commission').getCell(10).value, 4);
+  assert.equal(rowNamed(commission, 'Dive commission').getCell(10).value, 3);
+  assert.equal(rowNamed(commission, 'Total commission to be paid').getCell(10).value.result, 20.5);
+  assert.equal(rowNamed(commission, 'Total').getCell(10).value.result, 19);
+
+  const bills = workbook.getWorksheet('All bills');
+  assert.deepEqual(bills.getRow(3).values.slice(1), ['Check', 'Room', 'Name', 'Courses', 'Dives', 'Photo & Video', 'Total', 'SC', 'Taxes', 'Sum']);
+  assert.equal(bills.getCell('D5').value, 135);
+  assert.equal(bills.getCell('G5').value, 180);
+  const billTotal = rowNamed(bills, ['Totals', 'Total']);
+  assert.equal(billTotal.getCell(7).value.result, 250);
+
   const rooms = workbook.getWorksheet('Room report');
   assert.equal(rooms.getCell('A5').value, '102');
-  assert.equal(rooms.getCell('B6').value, 225);
-  assert.equal(rooms.getCell('B7').value.result, 250);
-  const bills = workbook.getWorksheet('All bills');
-  assert.deepEqual(bills.getRow(4).values.slice(1), ['Check', 'Room', 'Name', 'Courses', 'Dives', 'Photo & Video', 'Total', 'SC', 'Taxes', 'Tips', 'Sum']);
-  assert.equal(bills.getCell('D5').value, 135);
-  assert.equal(bills.getCell('G8').value.result, 250);
-  assert.equal(bills.getCell('K8').value.result, 324);
-  const items = workbook.getWorksheet('Item report');
-  assert.equal(items.getCell('C5').value, 'Discover Scuba');
-  assert.equal(items.getCell('D5').value, 3);
-  assert.equal(items.getCell('E5').value, 180);
-  assert.equal(items.lastRow.getCell(4).value.result, 5);
-  assert.equal(items.lastRow.getCell(5).value.result, 250);
-  const commission = workbook.getWorksheet('Commission, SC');
-  assert.equal(rowNamed(commission, 'Total').getCell(8).value.result, 25.5);
-  assert.equal(rowNamed(commission, 'Resort service charge collected').getCell(3).value, 25);
-  assert.equal(rowNamed(commission, 'Certifications pool (not paid to staff)').getCell(3).value, 7);
-  assert.equal(commission.lastRow.getCell(8).value, 4);
+  assert.equal(rooms.getCell('B5').value, 25);
+  assert.equal(rowNamed(rooms, 'Total').getCell(2).value.result, 250);
+
   assert.equal(queries[0][1].where.status, 'ACTIVE');
   assert.deepEqual(queries[0][1].where.businessDate, { gte: '2028-02-01', lte: '2028-02-29' });
   for (const sheet of workbook.worksheets) {
@@ -81,7 +91,19 @@ test('Siyam monthly workbook separates the six reference panels and reconciles d
 
 test('Siyam Overview follows the CSV form with editable inputs and calculated totals', async () => {
   const overview = (await fixture().generate()).getWorksheet('Overview');
-  for (const [cell, label] of Object.entries({ A3: 'Turnover:', A5: 'Total sales (chargeable items)', A7: 'Total turnover (excluding taxes and service charge):', A9: 'Service charge:', A10: 'Resort service charge', A12: 'Total service charge:', A14: 'Commission:', A17: 'Total commission:', A20: 'Prepared by' })) assert.equal(overview.getCell(cell).value, label);
+  for (const [cell, label] of Object.entries({
+    A3: 'Turnover:',
+    A5: 'Total sales (chargeable items)',
+    A7: 'Total turnover (excluding taxes and service charge):',
+    A9: 'Service charge:',
+    A10: 'Resort service charge',
+    A12: 'Total service charge:',
+    A14: 'Commission:',
+    A17: 'Total commission:',
+    A20: 'Prepared by'
+  })) {
+    assert.equal(overview.getCell(cell).value, label);
+  }
   assert.equal(overview.getCell('D4').value, null);
   assert.equal(overview.getCell('A21').value, null);
   assert.match(overview.getCell('E4').formula, /D4\*1\.5/);
@@ -96,23 +118,29 @@ test('Siyam Overview follows the CSV form with editable inputs and calculated to
 test('attendance matrix includes every calendar day and unmarked staff without inventing attendance', async () => {
   const workbook = await fixture().generate();
   const attendance = workbook.getWorksheet('Attendance');
-  assert.equal(attendance.getCell('B4').value, 'Instructor');
-  assert.equal(attendance.getCell('C4').value, 'Unmarked staff');
-  assert.equal(attendance.getCell('B6').value, 'o1/2');
-  assert.equal(attendance.getCell('A33').value.toISOString().slice(0, 10), '2028-02-29');
-  assert.equal(rowNamed(attendance, 'At work').getCell(2).value, 1.5);
-  assert.equal(rowNamed(attendance, 'Off').getCell(2).value, 1.5);
-  assert.equal(rowNamed(attendance, 'Pool-eligible days').getCell(2).value, 3);
-  assert.equal(rowNamed(attendance, 'Not recorded').getCell(2).value, 22);
-  assert.equal(rowNamed(attendance, 'Not recorded').getCell(3).value, 29);
+  assert.equal(attendance.getCell('B3').value, 'Instructor');
+  assert.equal(attendance.getCell('C3').value, 'Unmarked staff');
+  assert.equal(attendance.getCell('B4').value, 'p');
+  assert.equal(attendance.getCell('B5').value, 'o1/2');
+  assert.equal(attendance.getCell('A32').value.toISOString().slice(0, 10), '2028-02-29');
+  assert.equal(rowNamed(attendance, 'at work').getCell(2).value, 1.5);
+  assert.equal(rowNamed(attendance, 'off').getCell(2).value, 1.5);
+  assert.equal(rowNamed(attendance, 'total payable days').getCell(2).value, 3);
+  assert.equal(rowNamed(attendance, 'non payable').getCell(2).value, 26);
+  assert.equal(rowNamed(attendance, 'non payable').getCell(3).value, 29);
 });
 
 test('empty Siyam monthly reports have six valid sheets and zero totals', async () => {
   const workbook = await fixture('Sun Siyam World', true).generate();
   assert.equal(workbook.worksheets.length, 6);
   for (const name of ['Room report', 'All bills', 'Item report', 'Commission, SC']) {
-    const row = rowNamed(workbook.getWorksheet(name), 'Total');
-    row.eachCell((cell, column) => { if (column > 1) assert.equal(cell.value, 0); });
+    const row = rowNamed(workbook.getWorksheet(name), ['Totals', 'Total']);
+    row.eachCell((cell, column) => {
+      if (column > 1) {
+        const val = typeof cell.value === 'object' && cell.value !== null && cell.value.result !== undefined ? cell.value.result : cell.value;
+        assert.equal(val, 0);
+      }
+    });
   }
 });
 

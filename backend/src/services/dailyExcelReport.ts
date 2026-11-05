@@ -13,7 +13,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     orderBy: { checkNumber: 'asc' },
   });
 
-  const { staffResults, certificationPoolTotal } = await calculateCommissionForPeriod(propertyId, date, date);
+  const { staffResults, certificationPoolTotal, storeAttendantPoolTotal, unallocatedStoreAttendantPoolTotal } = await calculateCommissionForPeriod(propertyId, date, date);
 
   const workbook = createReportWorkbook();
 
@@ -112,5 +112,13 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
   poolSheet.addRow({ metric: `Certifications Pool (${currency})`, value: certificationPoolTotal.toFixed(2) });
   poolSheet.addRow({ metric: 'Distribution', value: 'No staff commission or base-leader override' });
 
+  if (storeAttendantPoolTotal > 0) {
+    const retailSheet = workbook.addWorksheet('Store attendant pool');
+    retailSheet.columns = [{ header: 'Metric', key: 'metric', width: 42 }, { header: `Amount (${currency})`, key: 'amount', width: 22 }];
+    styleReportHeader(retailSheet);
+    retailSheet.addRow({ metric: 'Retail pool (5% after discounts)', amount: storeAttendantPoolTotal });
+    retailSheet.addRow({ metric: 'Unallocated (no eligible Store attendants)', amount: unallocatedStoreAttendantPoolTotal });
+    retailSheet.getColumn(2).numFmt = '#,##0.00';
+  }
   return workbook.xlsx.writeBuffer();
 };

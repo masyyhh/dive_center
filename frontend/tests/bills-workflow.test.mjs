@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,nodes,button,sampleBill} from './helpers/bills-fixture.mjs';
+import {fixture,nodes,button,sampleBill,text} from './helpers/bills-fixture.mjs';
 async function open(options={}){
  const f=fixture(options);f.render();await f.flush();
  nodes(f.render()).find(node=>node.props?.['aria-label']==='View bill 101').props.onClick({stopPropagation(){}});
@@ -48,4 +48,83 @@ test('older detail responses cannot replace a newer selection',async()=>{
  f.pendingDetails[0]({bill:{...sampleBill,guestName:'Stale selection'}});await f.flush();
  assert.ok(nodes(f.render()).some(node=>node.props?.children==='Latest selection'));
  assert.equal(nodes(f.render()).some(node=>node.props?.children==='Stale selection'),false);
+});
+
+test('Siyam World opens selected bills in the reading pane while other properties keep the modal',async()=>{
+ for(const propertyName of ['Siyam World','Sun Siyam World','Iru Fushi']){
+  const f=fixture({propertyName});f.render();await f.flush();
+  const split=propertyName.includes('World');
+  assert.equal(nodes(f.render()).some(node=>node.props?.className==='siyam-bills-split'),split);
+  if(split)assert.match(text(nodes(f.render()).find(node=>node.props?.id==='bill-reading-pane')),/Select a bill/);
+  nodes(f.render()).find(node=>node.props?.['aria-label']==='View bill 101').props.onClick({stopPropagation(){}});
+  await f.flush();const tree=f.render();
+  assert.equal(nodes(tree).some(node=>node.props?.label==='Bill details'),!split);
+  if(split){
+   const pane=nodes(tree).find(node=>node.props?.id==='bill-reading-pane');
+   assert.match(text(pane),/Check #101/);
+   assert.ok(button(pane,'Edit bill'));assert.ok(button(pane,'Rebate'));assert.ok(button(pane,'Print Bill'));
+   assert.equal(nodes(tree).find(node=>node.props?.['aria-label']==='View bill 101').props['aria-pressed'],true);
+   nodes(pane).find(node=>node.props?.['aria-label']==='Close bill details').props.onClick();
+   assert.match(text(nodes(f.render()).find(node=>node.props?.id==='bill-reading-pane')),/Select a bill/);
+  }
+ }
+});
+
+test('Siyam reading pane does not display old bill details while a different selection loads',async()=>{
+ const second={...sampleBill,id:'bill-2',checkNumber:102,guestName:'Second guest'};
+ const f=fixture({propertyName:'Siyam World',bills:[sampleBill,second],deferDetails:true});
+ f.render();await f.flush();
+ const select=check=>nodes(f.render()).find(node=>node.props?.['aria-label']===`View bill ${check}`).props.onClick();
+ const pane=()=>nodes(f.render()).find(node=>node.props?.id==='bill-reading-pane');
+ select(101);select(102);
+ assert.equal(pane().props['aria-busy'],true);
+ f.pendingDetails[0]({bill:sampleBill});await f.flush();
+ assert.equal(pane().props['aria-busy'],true);
+ assert.doesNotMatch(text(pane()),/Check #101/);
+ f.pendingDetails[1]({bill:second});await f.flush();
+ assert.equal(pane().props['aria-busy'],false);
+ assert.match(text(pane()),/Check #102/);
+ assert.equal(nodes(f.render()).find(node=>node.props?.['aria-label']==='View bill 102').props['aria-pressed'],true);
+ select(101);
+ assert.doesNotMatch(text(pane()),/Check #102/);
+ assert.match(text(pane()),/Loading bill details/);
+});
+
+test('Siyam detail failures can be retried from the reading pane',async()=>{
+ const options={propertyName:'Siyam World',detailError:'Detail service unavailable'};
+ const f=await open(options);
+ const pane=()=>nodes(f.render()).find(node=>node.props?.id==='bill-reading-pane');
+ assert.match(text(pane()),/Detail service unavailable/);
+ assert.equal(pane().props['aria-busy'],false);
+ options.detailError='';
+ await button(pane(),'Retry bill details').props.onClick();await f.flush();
+ assert.match(text(pane()),/Check #101/);
+ assert.equal(button(pane(),'Retry bill details'),undefined);
+});
+
+test('Siyam filters clear the reading pane when the selected bill is no longer in the list',async()=>{
+ const options={propertyName:'Siyam World',bills:[sampleBill]};
+ const f=await open(options);
+ options.bills=[];
+ nodes(f.render()).find(node=>node.type==='form').props.onSubmit({preventDefault(){}});
+ await f.flush();f.render();await f.flush();
+ const tree=f.render();
+ assert.match(text(nodes(tree).find(node=>node.props?.id==='bill-reading-pane')),/Select a bill/);
+ assert.equal(nodes(tree).some(node=>node.props?.['aria-label']==='View bill 101'),false);
+});
+
+test('Siyam uses compact filters without a hidden discount-only restriction',async()=>{
+ const fullPrice={...sampleBill,id:'full-price',checkNumber:102,discountAmount:0};
+ for(const propertyName of ['Siyam World','Iru Fushi']){
+  const f=fixture({propertyName,bills:[sampleBill,fullPrice],section:'range?startDate=2026-11-01&endDate=2026-11-05&discounted=true'});
+  f.render();await f.flush();const tree=f.render();const compact=propertyName==='Siyam World';
+  assert.equal(text(tree).includes('Only bills with discounts'),!compact);
+  assert.equal(nodes(tree).some(node=>node.props?.className==='results-toolbar'),!compact);
+  assert.equal(nodes(tree).some(node=>node.props?.['aria-label']==='View bill 102'),compact);
+  if(compact){
+   assert.match(text(tree),/2 bills found/);
+   assert.equal(nodes(tree).find(node=>node.props?.['aria-label']==='Bills from date').props.value,'2026-11-01');
+   assert.ok(nodes(tree).find(node=>node.props?.['aria-label']==='Bill status'));
+  }
+ }
 });

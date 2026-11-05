@@ -30,7 +30,7 @@ function fixture(options={}){
  };
  const component=options.sidebar?'SubNav':'Navbar';
  const exports=loadSource(`../src/components/${component}.tsx`,stubs,options);
- const tree=exports[component]({currentTab:options.currentTab??'new-bill',open:false,onClose:()=>calls.push('close'),onTabChange:tab=>calls.push(tab),onMenu:()=>calls.push('menu'),onSecurity:()=>calls.push('security'),onShortcuts:()=>calls.push('shortcuts')});
+ const tree=exports[component]({currentTab:options.currentTab??'new-bill',open:false,onClose:()=>calls.push('close'),onTabChange:tab=>calls.push(tab),onMenu:()=>calls.push('menu'),onSecurity:()=>calls.push('security'),onShortcuts:()=>calls.push('shortcuts'),catalogue:options.catalogue?{width:280,onResize:width=>calls.push(['resize',width])}:undefined});
  return{tree,calls};
 }
 const nodes=node=>Array.isArray(node)?node.flatMap(nodes):!React.isValidElement(node)?[]:[node,...nodes(node.props.children)];
@@ -45,6 +45,30 @@ test('navbar workspace actions invoke their existing callbacks in live and testi
   assert.deepEqual(f.calls,['menu','shortcuts','security','theme']);
  }
 });
+test('catalogue sidebar replaces navigation and supports bounded pointer and keyboard resizing',()=>{
+ const f=fixture({sidebar:true,propertyName:'Siyam World',catalogue:true});
+ assert.ok(nodes(f.tree).some(node=>node.props.id==='bill-catalogue-sidebar'));
+ assert.equal(nodes(f.tree).some(node=>node.props.className==='sidebar-links'),false);
+ const handle=byLabel(f.tree,'Resize catalogue');
+ assert.equal(handle.props.role,'separator');
+ let captured=false;
+ const target={setPointerCapture(){captured=true;},hasPointerCapture(){return captured;},releasePointerCapture(){captured=false;}};
+ handle.props.onPointerDown({button:0,clientX:280,pointerId:1,currentTarget:target,preventDefault(){}});
+ handle.props.onPointerMove({clientX:380,pointerId:1,currentTarget:target});
+ assert.deepEqual(f.calls.at(-1),['resize',380]);
+ handle.props.onPointerMove({clientX:900,pointerId:1,currentTarget:target});
+ assert.deepEqual(f.calls.at(-1),['resize',480]);
+ handle.props.onPointerMove({clientX:0,pointerId:1,currentTarget:target});
+ assert.deepEqual(f.calls.at(-1),['resize',220]);
+ handle.props.onPointerUp({pointerId:1,currentTarget:target});
+ const count=f.calls.length;
+ handle.props.onPointerMove({clientX:400,pointerId:1,currentTarget:target});
+ assert.equal(f.calls.length,count);
+ for(const [key,width] of [['ArrowRight',300],['ArrowLeft',260],['Home',220],['End',480]]){
+  handle.props.onKeyDown({key,preventDefault(){}});assert.deepEqual(f.calls.at(-1),['resize',width]);
+ }
+ handle.props.onDoubleClick();assert.deepEqual(f.calls.at(-1),['resize',280]);
+});
 test('property switching and logout retain the unsaved-work guard',()=>{
  const f=fixture();const select=byLabel(f.tree,'Active property');
  select.props.onChange({target:{value:'a'}});assert.deepEqual(f.calls,[]);
@@ -54,6 +78,12 @@ test('property switching and logout retain the unsaved-work guard',()=>{
 test('property selection and sign-out retain their disabled states',()=>{
  assert.equal(byLabel(fixture({canSwitch:false}).tree,'Active property').props.disabled,true);
  assert.equal(byLabel(fixture({signingOut:true}).tree,'Sign out').props.disabled,true);
+});
+test('Siyam Bills has a navbar slot for the result count and date range',()=>{
+ const siyam=fixture({propertyName:'Siyam World',currentTab:'bills'});
+ assert.ok(nodes(siyam.tree).some(node=>node.props.id==='bills-header-summary'));
+ const other=fixture({propertyName:'Iru Fushi',currentTab:'bills'});
+ assert.equal(nodes(other.tree).some(node=>node.props.id==='bills-header-summary'),false);
 });
 test('Siyam World header keeps theme and guarded sign-out without profile or extra actions',()=>{
  for(const propertyName of ['Siyam World','Sun Siyam World']){

@@ -5,7 +5,7 @@ import { calculateCommissionPreview } from '../utils/commissionCalculator';
 import { formatMoney } from '../utils/format';
 
 export const CommissionCalculator: React.FC<{
-  price: number; poolType: string; poolRate: number; selections: CommissionSelection[]; combinedMedia: boolean; currencySymbol: string; autoPhotoPrice?: number; autoPhotoCommission?: number;
+  price: number; poolType: string; poolRate: number; selections: CommissionSelection[]; combinedMedia: boolean; currencySymbol: string; autoPhotoPrice?: number; autoPhotoCommission?: number; storeAttendantPool?: boolean;
 }> = props => {
   const [quantity, setQuantity] = useState('1');
   const [discount, setDiscount] = useState('0');
@@ -28,7 +28,7 @@ export const CommissionCalculator: React.FC<{
         {result.percentage && <small>The pool is shared among eligible employees. This is not a payment to one employee.</small>}
       </div>
       <div className="calculator-allocation"><h4>Employee commissions after discounts</h4><strong>{money(result.employeeTotal)}</strong>
-        {result.payments.length ? <dl>{result.payments.map(payment => <div key={payment.role}><dt>{payment.role === 'media' ? 'Each selected Photo staff member' : payment.role === 'instructor' ? 'Each selected instructor' : payment.role === 'photo' ? 'Each selected photographer' : commissionRoles.find(role => role.id === payment.role)?.label}<small>{money(payment.unitRate)} × {quantity} unit(s){payment.role !== 'media' ? ` × ${100 - Number(discount)}%` : ' · no Photo discount'}</small></dt><dd>{money(payment.amount)}</dd></div>)}</dl> : <p>No employee payments configured.</p>}
+        {result.payments.length ? <dl>{result.payments.map(payment => <div key={payment.role}><dt>{payment.role === 'storeAttendantPool' ? 'Store attendants · 5% shared pool' : payment.role === 'media' ? 'Each selected Photo staff member' : payment.role === 'instructor' ? 'Each selected instructor' : payment.role === 'photo' ? 'Each selected photographer' : commissionRoles.find(role => role.id === payment.role)?.label}<small>{money(payment.unitRate)} × {quantity} unit(s){payment.role !== 'media' ? ` × ${100 - Number(discount)}%` : ' · no Photo discount'}</small></dt><dd>{money(payment.amount)}</dd></div>)}</dl> : <p>No employee payments configured.</p>}
         <small>Assumes one employee per configured role. Every additional instructor or Photo staff member receives their role’s full amount. A 100% line discount pays no personal commission on that line. Added Photo lines have their own discount.</small>
       </div>
     </div> : <p role="status">Enter a whole-number quantity of 1 or more, a discount from 0–100%, and valid employee payment amounts.</p>}

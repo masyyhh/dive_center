@@ -42,6 +42,8 @@ export const AppContent: React.FC = () => {
   const [securityCodesVisible, setSecurityCodesVisible] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [catalogueWidth, setCatalogueWidth] = useState(280);
+  const catalogueMode = isSiyamWorld(activeProperty) && currentTab === 'new-bill';
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
@@ -112,17 +114,17 @@ export const AppContent: React.FC = () => {
   if (loading) return <div className="app-loading" role="status"><Waves size={32} /><span>Opening your workspace…</span></div>;
   if (!user) return import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? <TestingLoginView /> : <LoginView />;
   if (!user.authenticatorEnabled) return <div className="signin-page"><AuthenticatorSetupView onComplete={() => { void refreshUser(); }} /></div>;
-  return <div className="app-shell">
+  return <div className={`app-shell${isSiyamWorld(activeProperty) ? ' siyam-flat-workspace' : ''}${catalogueMode ? ' catalogue-billing-shell' : ''}`} style={catalogueMode ? { '--catalogue-width': `${catalogueWidth}px` } as React.CSSProperties : undefined}>
     {shortcutsOpen && <KeyboardShortcuts canAdmin={canAdmin} onClose={() => setShortcutsOpen(false)} />}
     {securityOpen && <Modal label="Personal authenticator" busy={securityCodesVisible} onClose={() => { if (!securityCodesVisible) setSecurityOpen(false); }}><AuthenticatorSetupView onCodesVisible={setSecurityCodesVisible} onCancel={() => setSecurityOpen(false)} onComplete={() => { setSecurityOpen(false); void refreshUser(); }} /></Modal>}
     <a href="#main-content" className="skip-link" onClick={e => { e.preventDefault(); mainRef.current?.focus(); }}>Skip to content</a>
-    <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} onShortcuts={() => setShortcutsOpen(true)} />
+    <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} onShortcuts={() => setShortcutsOpen(true)} catalogue={catalogueMode ? { width: catalogueWidth, onResize: setCatalogueWidth } : undefined} />
     <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => { if (import.meta.env.VITE_DEPLOYMENT_MODE === 'testing') window.location.assign('/'); else setSecurityOpen(true); })} onShortcuts={() => setShortcutsOpen(true)} />
       <main id="main-content" className={`main-content view-${currentTab}${isSiyamWorld(activeProperty) && currentTab === 'new-bill' ? ' siyam-new-bill' : ''}`} ref={mainRef} tabIndex={-1}>
         {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' && !(currentTab === 'home' && user.role === 'GLOBAL_ADMIN') ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
           {waterSportsEnabled && currentTab === 'dive-centre' && <DisclaimerView />}
           {currentTab === 'home' && (user.role === 'GLOBAL_ADMIN' && section !== 'property' ? <GlobalDashboard onNavigate={navigate} /> : <HomeDashboard onNavigate={navigate} />)}
-          {currentTab === 'new-bill' && <>{!isSiyamWorld(activeProperty) && <div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1></div>}<NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { setSavedBill(check); commitRoute('bills'); }} /></>}
+          {currentTab === 'new-bill' && <>{!isSiyamWorld(activeProperty) && <div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1></div>}<NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { if (!isSiyamWorld(activeProperty)) { setSavedBill(check); commitRoute('bills'); } }} /></>}
           {currentTab === 'bills' && <BillsView onSetup={() => navigate('admin', 'items')} section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
           {currentTab === 'presence' && <PresenceView initialDate={section} onSetup={() => navigate('admin', 'staff')} onPayroll={() => navigate('reporting', 'exports')} />}
           {currentTab === 'reporting' && <ReportingView section={section} onSectionChange={value => navigate('reporting', value)} />}

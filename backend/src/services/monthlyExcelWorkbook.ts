@@ -25,7 +25,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     orderBy: { businessDate: 'asc' },
   });
 
-  const { staffResults, personalDetails, certificationPoolTotal } = await calculateCommissionForPeriod(
+  const { staffResults, personalDetails, certificationPoolTotal, unallocatedStoreAttendantPoolTotal } = await calculateCommissionForPeriod(
     propertyId,
     startDate,
     endDate
@@ -47,7 +47,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
       where: { propertyId, hireDate: { lte: endDate }, OR: [{ leavingDate: null }, { leavingDate: { gte: startDate } }] },
       orderBy: { name: 'asc' },
     });
-    return createSiyamMonthlyWorkbook({ property, yearMonth, bills, staff, attendances, staffResults, personalDetails, certificationPoolTotal }).xlsx.writeBuffer();
+    return createSiyamMonthlyWorkbook({ property, yearMonth, bills, staff, attendances, staffResults, personalDetails, certificationPoolTotal, unallocatedStoreAttendantPoolTotal }).xlsx.writeBuffer();
   }
 
   const workbook = createReportWorkbook();

@@ -12,6 +12,7 @@ import { requireAuth } from '../middleware/auth';
 import { requireRole, requirePropertyAccess } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 import { poolContributionAmount } from '../utils/poolRates';
+import { STORE_ATTENDANT_RETAIL_RATE, usesStoreAttendantPool } from '../utils/storeAttendantPool';
 import { isMonthLocked } from './bill.payroll';
 import { createBillSchema } from './bill.validation';
 
@@ -148,6 +149,9 @@ export function registerBillSaveRoutes(billsRouter: Router) {
           const lineGross = line.unitPrice * line.quantity;
           const discount = (lineGross * line.discountPercent) / 100;
           const lineTotal = lineGross - discount;
+          const storeAttendantRate = savedLine ? savedLine.storeAttendantRateSnapshot ?? 0
+            : usesStoreAttendantPool(property.name, item.category.name) ? STORE_ATTENDANT_RETAIL_RATE : 0;
+          const storeAttendantPoolAmount = Math.round(lineTotal * storeAttendantRate) / 100;
 
           grossAmount += lineGross;
           totalDiscount += discount;
@@ -163,6 +167,8 @@ export function registerBillSaveRoutes(billsRouter: Router) {
             unitPrice: line.unitPrice,
             discountPercent: line.discountPercent,
             lineTotal,
+            storeAttendantRateSnapshot: storeAttendantRate,
+            storeAttendantPoolAmount,
             poolTypeSnapshot: savedLine?.poolTypeSnapshot ?? item.poolType,
             poolRateSnapshot: savedLine?.poolRateSnapshot ?? (savedLine && savedLine.poolContributionAmount != null
               ? ['COURSE_POOL', 'DIVE_POOL'].includes(savedLine.poolTypeSnapshot || '') && savedLine.lineTotal > 0 ? savedLine.poolContributionAmount / savedLine.lineTotal * 100
@@ -179,7 +185,7 @@ export function registerBillSaveRoutes(billsRouter: Router) {
             videoStaffId: included ? null : line.videoStaffId || null,
             includesComplimentaryMedia: included,
             personalCommissionsJson: JSON.stringify(rates),
-            totalPersonalCommission,
+            totalPersonalCommission: totalPersonalCommission + storeAttendantPoolAmount,
           });
           const savedData = lineItemsData[lineItemsData.length - 1];
           savedData.poolContributionAmount = poolContributionAmount(savedData.poolTypeSnapshot!, savedData.poolRateSnapshot!, line.quantity, lineTotal);
@@ -211,7 +217,7 @@ export function registerBillSaveRoutes(billsRouter: Router) {
         const tipAmount = data.tipAmount || 0;
         const netAmount = netBeforeCharges + serviceChargeAmount + taxAmount + tipAmount;
         const amounts = [grossAmount, totalDiscount, serviceChargeAmount, taxAmount, tipAmount, netAmount,
-          ...lineItemsData.flatMap(line => [line.lineTotal, line.poolContributionAmount, line.totalPersonalCommission])];
+          ...lineItemsData.flatMap(line => [line.lineTotal, line.poolContributionAmount, line.totalPersonalCommission, line.storeAttendantPoolAmount ?? 0])];
         if(amounts.some(amount => typeof amount !== 'number' || !Number.isFinite(amount * 100))) return payrollReply(400, { error: 'The bill total or commission is too large. Check prices and quantities.' });
 
         const billData = {

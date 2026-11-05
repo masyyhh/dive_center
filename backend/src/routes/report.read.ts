@@ -87,7 +87,7 @@ export function registerReportReadRoutes(reportsRouter: Router) {
       const isLocked = locks.length > 0;
 
       // Calculate Commissions
-      const { staffResults, personalDetails, certificationPoolTotal, grandTotal: totalCommission } =
+      const { staffResults, personalDetails, certificationPoolTotal, storeAttendantPoolTotal, unallocatedStoreAttendantPoolTotal, grandTotal: totalCommission } =
         await calculateCommissionForPeriod(propId, start, end);
 
       // Headline metrics
@@ -199,6 +199,8 @@ export function registerReportReadRoutes(reportsRouter: Router) {
           averageBill: Math.round(averageBill * 100) / 100,
           totalCommission,
           certificationPoolTotal,
+          storeAttendantPoolTotal,
+          unallocatedStoreAttendantPoolTotal,
           netRevenue: Math.round(netRevenue * 100) / 100,
         },
         charts,

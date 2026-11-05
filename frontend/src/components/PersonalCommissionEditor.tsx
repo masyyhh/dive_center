@@ -4,10 +4,10 @@ import { commissionRoles, CommissionSelection } from '../utils/commissionEditor'
 import { formatMoney, formatUnitPrice } from '../utils/format';
 import { billPersonalRates } from '../utils/personalRates';
 
-export const PersonalCommissionSummary: React.FC<{ item: { personalRatesJson?: string | null; includesComplimentaryMedia: boolean }; currencySymbol: string; autoPhotoCommission?: number }> = ({ item, currencySymbol, autoPhotoCommission = 4.5 }) => {
+export const PersonalCommissionSummary: React.FC<{ item: { personalRatesJson?: string | null; includesComplimentaryMedia: boolean }; currencySymbol: string; autoPhotoCommission?: number; storeAttendantPool?: boolean }> = ({ item, currencySymbol, autoPhotoCommission = 4.5, storeAttendantPool = false }) => {
   const payments = Object.entries(JSON.parse(billPersonalRates(item)) as Record<string, number>);
   if (item.includesComplimentaryMedia) payments.push(['automaticPhoto', autoPhotoCommission]);
-  return payments.length ? <div className="space-y-1">{payments.map(([role, amount]) => <div key={role} className="text-xs">
+  return payments.length || storeAttendantPool ? <div className="space-y-1">{storeAttendantPool && <div className="text-xs"><strong>Store attendant</strong><span className="text-slate-500"> · 5% after discounts, shared pool</span></div>}{payments.map(([role, amount]) => <div key={role} className="text-xs">
     <span className="font-semibold">{role === 'automaticPhoto' ? 'Added Photo employee' : commissionRoles.find(option => option.id === role)?.label}</span>
     <span className="text-slate-500"> · {formatMoney(amount, currencySymbol)} / unit</span>
   </div>)}</div> : <span className="text-xs text-slate-500">No employee payments</span>;
@@ -20,9 +20,10 @@ export const PersonalCommissionEditor: React.FC<{
   currencySymbol: string;
   showPreview?: boolean;
   autoPhotoPrice?: number; autoPhotoCommission?: number;
-}> = ({ value, onChange, combinedMedia, currencySymbol, showPreview = true, autoPhotoPrice = 41.975, autoPhotoCommission = 4.5 }) => {
+  storeAttendantPool?: boolean; onlyStorePool?: boolean;
+}> = ({ value, onChange, combinedMedia, currencySymbol, showPreview = true, autoPhotoPrice = 41.975, autoPhotoCommission = 4.5, storeAttendantPool = false, onlyStorePool = false }) => {
   const id = useId();
-  const visible = value.filter(row => !combinedMedia || !['photo', 'video'].includes(row.role));
+  const visible = onlyStorePool ? [] : value.filter(row => !combinedMedia || !['photo', 'video'].includes(row.role));
   const payments: { label: string; amount: number }[] = visible.filter(row => row.enabled && row.amount.trim() !== '' && Number.isFinite(Number(row.amount)) && Number(row.amount) >= 0)
     .map(row => ({ label: commissionRoles.find(role => role.id === row.role)!.label, amount: Number(row.amount) }));
   if (combinedMedia) payments.push({ label: 'Photo line employee', amount: autoPhotoCommission });
@@ -31,8 +32,9 @@ export const PersonalCommissionEditor: React.FC<{
   const update = (role: CommissionSelection['role'], patch: Partial<CommissionSelection>) => onChange(value.map(row => row.role === role ? { ...row, ...patch } : row));
   return <fieldset className="commission-editor" aria-describedby={`${id}-help`}>
     <legend>Employee payments</legend>
-    <p id={`${id}-help`} className="commission-intro">Choose which roles earn a fixed payment for each service unit. You’ll select the employees when creating a bill.</p>
+    <p id={`${id}-help`} className="commission-intro">{onlyStorePool ? 'Retail employee payments apply automatically.' : 'Choose which roles earn a fixed payment for each service unit. You’ll select the employees when creating a bill.'}</p>
     <div className="commission-role-list">
+      {storeAttendantPool && <div className="commission-role-row is-enabled"><div className="commission-role-choice"><input type="checkbox" checked disabled aria-label="Store attendant shared Retail pool" /><span><strong>Store attendant</strong><small>Shared equally among eligible staff with the Store Attendant role.</small></span></div><div className="commission-amount-control"><strong>5%</strong><small>Retail sales after discounts, before tax and service charge. Applies to every Retail item on new bills.</small></div></div>}
       {visible.map(row => {
         const role = commissionRoles.find(role => role.id === row.role)!;
         return <div key={row.role} className={`commission-role-row ${row.enabled ? 'is-enabled' : ''}`}>

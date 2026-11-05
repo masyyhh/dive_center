@@ -112,6 +112,8 @@ export interface BillItem {
   photoStaff?: { id: string; name: string };
   videoStaff?: { id: string; name: string };
   personalCommissionsJson?: string | null;
+  storeAttendantRateSnapshot?: number | null;
+  storeAttendantPoolAmount?: number | null;
   totalPersonalCommission?: number;
   includesComplimentaryMedia?: boolean;
 }
@@ -238,6 +240,8 @@ export interface DashboardReport {
     averageBill: number;
     totalCommission: number;
     certificationPoolTotal: number;
+    storeAttendantPoolTotal?: number;
+    unallocatedStoreAttendantPoolTotal?: number;
     netRevenue: number;
   };
   charts: {

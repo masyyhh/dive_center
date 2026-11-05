@@ -1,24 +1,27 @@
+import { useEffect, useRef } from 'react';
 import { TableScroll } from '../TableScroll';
 import { formatMoney, formatUnitPrice } from '../../utils/format';
 import { Modal } from '../Modal';
 import { displayDate } from '../../utils/dates';
 
-import { CalendarDays, RotateCcw, Trash2, Printer } from 'lucide-react';
+import { CalendarDays, RotateCcw, Trash2, Printer, Receipt } from 'lucide-react';
 import type { BillsModel } from './useBillsController';
 
-export function BillDetails({ model }: { model: BillsModel }) {
+export function BillDetails({ model, inline = false }: { model: BillsModel; inline?: boolean }) {
   const {
     actionLoading, canEdit, closeBillDetails, currencySymbol,
     editMonth, errorMsg, selectedBill, setDeleteModalOpen,
     setEditingBill, setErrorMsg, setNewRedateDate, setRebateModalOpen,
     setRedateModalOpen,
   } = model;
-  return (
-    <>
-      {/* Bill Details Modal (Printable receipt + Re-date, Rebate, Delete actions) */}
-      {selectedBill && (
-        <Modal label="Bill details" onClose={() => { if (!actionLoading) { closeBillDetails(); setErrorMsg(null); } }} busy={actionLoading} error={errorMsg}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+  const pane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!inline || !selectedBill || !pane.current) return;
+    pane.current.scrollTop = 0;
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) pane.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [inline, selectedBill?.id]);
+  const content = selectedBill && (
+          <div className={inline ? 'bill-reading-content space-y-5' : 'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto'}>
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <div>
@@ -46,7 +49,7 @@ export function BillDetails({ model }: { model: BillsModel }) {
               </div>
 
               <button
-                onClick={closeBillDetails}
+                type="button" aria-label="Close bill details" disabled={actionLoading} onClick={closeBillDetails}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-lg"
               >
                 ✕
@@ -61,7 +64,7 @@ export function BillDetails({ model }: { model: BillsModel }) {
             )}
 
             {/* Guest Summary Card */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl text-sm">
+            <div className="bill-receipt-guest grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl text-sm">
               <div>
                 <span className="text-slate-400 block font-medium">Room #</span>
                 <span className="font-bold text-slate-900 dark:text-white">
@@ -118,6 +121,7 @@ export function BillDetails({ model }: { model: BillsModel }) {
                             {line.instructorCredits?.length ? line.instructorCredits.map(credit => credit.staff && <span key={credit.staffId}>Inst: {credit.staff.name}</span>) : line.instructorStaff && <span>Inst: {line.instructorStaff.name}</span>}
                             {line.photoCredits?.length ? line.photoCredits.map(credit => credit.staff && <span key={credit.staffId}>Photo: {credit.staff.name}</span>) : line.photoStaff && <span>{line.includesComplimentaryMedia ? 'Photo / video' : 'Photo'}: {line.photoStaff.name}</span>}
                             {line.videoStaff && <span>Video: {line.videoStaff.name}</span>}
+                            {(line.storeAttendantPoolAmount ?? 0) > 0 && <span>Store attendants · 5% shared: {formatMoney(line.storeAttendantPoolAmount!, currencySymbol)}</span>}
                           </div>
                         </td>
                         <td className="py-2.5 px-3 font-mono">{line.quantity}</td>
@@ -136,7 +140,7 @@ export function BillDetails({ model }: { model: BillsModel }) {
             </div>
 
             {/* Calculations Breakdown */}
-            <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl space-y-1.5 text-sm">
+            <div className="bill-receipt-totals bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl space-y-1.5 text-sm">
               <div className="flex justify-between text-slate-500">
                 <span>Gross:</span>
                 <span className="font-mono font-semibold">{formatMoney(selectedBill.grossAmount, currencySymbol)}</span>
@@ -166,7 +170,7 @@ export function BillDetails({ model }: { model: BillsModel }) {
             </div>
 
             {/* Actions Toolbar per PDF Page 4: Re-date, Rebate, Delete */}
-            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 justify-between items-center">
+            <div className="bill-receipt-actions pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 justify-between items-center">
               <div className="flex space-x-2">
                 {selectedBill.status === 'ACTIVE' && (
                   <>
@@ -214,9 +218,9 @@ export function BillDetails({ model }: { model: BillsModel }) {
               </button>
             </div>
           </div>
-        </Modal>
-      )}
-
-    </>
   );
+  if (inline) return <section id="bill-reading-pane" ref={pane} className="bill-reading-pane" aria-label="Selected bill details" aria-busy={model.detailLoading}>
+    {model.detailLoading ? <div className="bill-reading-empty" role="status">Loading bill details…</div> : model.detailError ? <div className="bill-reading-empty" role="alert"><p>{model.detailError}</p><button type="button" className="text-button" onClick={() => model.selectedBillId && model.openBillDetails(model.selectedBillId)}>Retry bill details</button></div> : content || <div className="bill-reading-empty"><Receipt size={32} /><h2>Select a bill</h2><p>Choose a bill from the list to view its items, totals and actions.</p></div>}
+  </section>;
+  return selectedBill ? <Modal label="Bill details" onClose={() => { if (!actionLoading) { closeBillDetails(); setErrorMsg(null); } }} busy={actionLoading} error={errorMsg}>{content}</Modal> : null;
 }

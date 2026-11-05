@@ -90,6 +90,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
   const [saving, setSaving] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const [saveNotice, setSaveNotice] = useState('');
   const saveInFlight = useRef(false);
 
   const dirty = checkoutDiscountValue !== '' || billLines.length > 0 || Boolean(roomNumber || guestName || departureDate || notes) || nationality !== 'Other' || tipAmount > 0 || tipStaffIds.length > 0 || checkEdited || businessDate !== businessToday();
@@ -107,7 +108,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     if (editingBill) { try { sessionStorage.removeItem(draftKey); } catch {} releaseGuard(); onCancel?.(); return; }
     setBillLines([]); setRoomNumber(''); setGuestName(''); setDepartureDate(''); setNationality('Other');
     setCheckoutDiscountValue(''); setTipAmount(0); setTipStaffIds([]); setNotes(''); setBusinessDate(businessToday()); setCheckNumber(nextCheck);
-    setCheckEdited(false); setRestored(false); setAttemptedReview(false); setErrorMsg(null); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); cancelPmsLookup(); setDiscardOpen(false);
+    setCheckEdited(false); setRestored(false); setAttemptedReview(false); setPartialDiscount(null); setErrorMsg(null); setPmsGuests([]); setPmsMessage(''); setPmsError(''); setGuestPickerOpen(false); cancelPmsLookup(); setDiscardOpen(false);
   };
   // Load the catalogue and next check number
   useEffect(() => {
@@ -354,7 +355,25 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
       setShowConfirmModal(false);
       try { sessionStorage.removeItem(draftKey); } catch { /* Form remains saved on the server. */ }
       releaseGuard();
+      if (compactBilling && !editingBill) {
+        discardDraft();
+        setBusinessDate(businessDate);
+        setCheckNumber(checkNumber < 2147483647 ? checkNumber + 1 : 0);
+        setSaveNotice(`Bill #${checkNumber} saved successfully. Ready for the next bill.`);
+      }
       onBillSaved(checkNumber);
+      if (compactBilling && !editingBill) {
+        // A failed sequence lookup must never report the already-posted bill as failed.
+        try {
+          const next = await apiFetch<{ nextCheckNumber: number }>(`/bills/next-check?propertyId=${activeProperty.id}`);
+          const number = Math.max(next.nextCheckNumber, checkNumber + 1);
+          if (!isPositiveInt(number)) throw new Error('No valid next check number.');
+          setNextCheck(number); setCheckNumber(number);
+        } catch {
+          setCheckNumber(0);
+          setSaveNotice(`Bill #${checkNumber} saved successfully. Enter the next check number manually.`);
+        }
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save bill.');
     } finally {
@@ -365,6 +384,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
 
   const reviewBill = () => {
     if (saving || saveInFlight.current) return;
+    setSaveNotice('');
     if (partialDiscount) { setErrorMsg('Apply or cancel the selected-unit discount before reviewing the bill.'); return; }
     if (editingBill && editReason.trim().length < 5) { setErrorMsg('Enter a reason for editing this posted bill (at least 5 characters).'); document.getElementById('bill-edit-reason')?.focus(); return; }
     setAttemptedReview(true); setErrorMsg(null);
@@ -434,6 +454,8 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     reviewBill,
     roomNumber,
     saving,
+    saveNotice,
+    setSaveNotice,
     scRate,
     searchQuery,
     selectedCategory,

@@ -245,6 +245,8 @@ model BillItem {
   poolRateSnapshot        Float?
   poolTypeSnapshot        String?
   poolContributionAmount  Float?       // Saved currency amount, after discounts and before service charge/tax.
+  storeAttendantRateSnapshot Float?    // Retail shared employee payment percentage; null on historical bills.
+  storeAttendantPoolAmount Float?      // Saved 5% of discounted retail sales, rounded to cents.
   linePosition            Int          @default(0)
   autoPhotoForLineId      String?      @unique
   autoPhotoForLine        BillItem?    @relation("AutomaticPhoto", fields: [autoPhotoForLineId], references: [id], onDelete: Cascade)

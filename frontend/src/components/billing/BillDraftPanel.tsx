@@ -6,6 +6,7 @@ import { instructorIds } from '../../utils/instructorCredits';
 import { InstructorPicker } from '../InstructorPicker';
 import { discountSelectedQuantity } from '../../utils/automaticPhotos';
 import { adjustBillLine, type PriceAdjustment } from '../../utils/billPricing';
+import { usesStoreAttendantPool } from '../../utils/storeAttendantPool';
 import { formatMoney, formatUnitPrice } from '../../utils/format';
 
 import { Trash2, Info } from 'lucide-react';
@@ -53,8 +54,8 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
             {compactBilling ? `Choose activities to add to check #${checkNumber}.` : `No items added yet. Click an item in the catalogue on the left to add to check #${checkNumber}.`}
           </div>
         ) : (
-          <LineList compact={compactBilling} selectionHeader={<input type="checkbox" aria-label="Select all products" disabled={saving || !billLines.length} checked={billLines.length > 0 && selected.length === billLines.length} onChange={event => setSelectedKeys(event.target.checked ? billLines.map(keyFor) : [])} />}>
-            {compactBilling && !billLines.length && <tr><td colSpan={8} className="siyam-empty-lines">Add an activity to start this bill.</td></tr>}
+          <LineList compact={compactBilling}>
+            {compactBilling && !billLines.length && <tr><td colSpan={7} className="siyam-empty-lines">Add an activity to start this bill.</td></tr>}
             {billLines.map((line, idx) => {
               let personalRoles: string[] = [];
               let personalRates: Record<string, number> = {};
@@ -69,6 +70,8 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
               }
 
               const lineKey = line.clientLineId || String(idx);
+              const storeAttendantPool = line.sourceLineId ? line.storeAttendantRateSnapshot === 5 : usesStoreAttendantPool(activeProperty, line.categoryName);
+              const storePoolPreview = Math.round((checkoutPreview.lines[idx]?.lineTotal ?? line.lineTotal) * 5) / 100;
               const partialDiscountControls = (partialDiscount && partialDiscount.lineId === line.clientLineId && <div className="surface p-3 space-y-2" role="group" aria-label={`Discount selected units of ${line.itemName}`}><div className="flex flex-wrap items-end gap-3"><label>Units to discount<input type="number" min={1} max={line.quantity} step={1} value={partialDiscount.quantity} onChange={event => setPartialDiscount({ ...partialDiscount, quantity: event.target.value })} /></label><label>Discount (%)<input type="number" min={0} max={100} step="0.01" value={partialDiscount.percent} onChange={event => setPartialDiscount({ ...partialDiscount, percent: event.target.value })} /></label><button type="button" className="secondary-button" disabled={saving} onClick={() => { try { if (partialDiscount.quantity === '' || partialDiscount.percent === '') throw new Error('Enter a quantity and discount percentage.'); setBillLines(discountSelectedQuantity(billLines, billLines.findIndex(value => value.clientLineId === partialDiscount.lineId), Number(partialDiscount.quantity), Number(partialDiscount.percent))); setPartialDiscount(null); setErrorMsg(null); } catch (error) { setErrorMsg((error as Error).message); } }}>Apply to selected units</button><button type="button" className="text-button" onClick={() => setPartialDiscount(null)}>Cancel</button></div><p className="text-xs text-slate-500">Discounted units and remaining units appear as separate bill lines. Personal commission reduces by the same discount percentage.</p></div>);
               const editor = (
                 <div
@@ -253,14 +256,25 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                 </div>
               );
               if (!compactBilling) return editor;
-              return <tr key={lineKey} className={selectedKeys.includes(lineKey) ? 'siyam-line-selected' : ''}>
-                  <td className="siyam-select-cell"><input type="checkbox" aria-label={`Select ${line.itemName}`} disabled={saving} checked={selectedKeys.includes(lineKey)} onChange={event => setSelectedKeys(keys => event.target.checked ? [...keys, lineKey] : keys.filter(key => key !== lineKey))} /></td>
+              return <tr key={lineKey} data-bill-line={lineKey} tabIndex={0} aria-selected={selectedKeys.includes(lineKey)} title="Click to select; Ctrl/⌘-click to select multiple services" className={selectedKeys.includes(lineKey) ? 'siyam-line-selected' : ''}
+                  onClick={event => {
+                    if (saving || (event.target as HTMLElement).closest?.('button,input,select,textarea,label,a')) return;
+                    setSelectedKeys(keys => event.ctrlKey || event.metaKey ? keys.includes(lineKey) ? keys.filter(key => key !== lineKey) : [...keys, lineKey] : [lineKey]);
+                  }}
+                  onKeyDown={event => {
+                    if (saving || event.target !== event.currentTarget) return;
+                    if (event.key === 'Escape') { event.preventDefault(); setSelectedKeys([]); }
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') { event.preventDefault(); setSelectedKeys(billLines.map(keyFor)); }
+                    if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); setSelectedKeys(keys => event.ctrlKey || event.metaKey ? keys.includes(lineKey) ? keys.filter(key => key !== lineKey) : [...keys, lineKey] : [lineKey]); }
+                  }}>
+
                   <td><div className="siyam-row-quantity"><button type="button" aria-label={`Decrease quantity for ${line.itemName}`} disabled={saving || Boolean(line.autoPhotoFor)} onClick={() => updateQuantity(idx, -1)}>−</button><span>{line.quantity}</span><button type="button" aria-label={`Increase quantity for ${line.itemName}`} disabled={saving || Boolean(line.autoPhotoFor)} onClick={() => updateQuantity(idx, 1)}>+</button></div></td>
                   <td className="siyam-description-cell"><strong>{line.itemName}</strong>{line.autoPhotoFor && <small>Linked Photo</small>}{line.quantity > 1 && <button type="button" className="text-button siyam-partial-discount" disabled={saving} onClick={() => setPartialDiscount({ lineId: line.clientLineId!, quantity: '1', percent: String(line.discountPercent) })}>Discount only some units</button>}{partialDiscountControls}</td>
                   <td className="siyam-money">{line.autoPhotoFor ? formatUnitPrice(line.unitPrice, currencySymbol) : <input className="siyam-price-input" aria-label={`Unit price for ${line.itemName}`} type="number" min="0" step="any" disabled={saving} value={line.unitPrice} onChange={event => applyAdjustment([lineKey], 'unitPrice', event.target.value)} />}</td>
                   <td className="siyam-discount-cell"><input aria-label={`Discount percentage for ${line.itemName}`} type="number" min="0" max="100" disabled={saving} value={line.discountPercent} onChange={event => updateDiscount(idx, Number(event.target.value) || 0)} /></td>
                   <td className="siyam-money">{line.autoPhotoFor ? <strong>{formatMoney(line.lineTotal, currencySymbol)}</strong> : <input className="siyam-price-input siyam-final-price" aria-label={`Final price for ${line.itemName}`} title="Line total after line discount, before checkout discount, service charge and tax" type="number" min="0" step="any" disabled={saving} value={Number(line.lineTotal.toFixed(4))} onChange={event => applyAdjustment([lineKey], 'lineTotal', event.target.value)} />}</td>
                   <td className="siyam-staff-cell"><div className="siyam-inline-staff">
+                    {storeAttendantPool && <span className="text-xs text-slate-500">Store attendants · 5% shared ({formatMoney(storePoolPreview, currencySymbol)})</span>}
                     {(['seller', 'guide', 'video'] as const).filter(role => personalRoles.includes(role)).map(role => {
                       const label = role === 'seller' ? 'Seller' : role === 'guide' ? 'Guide' : 'Video';
                       return <label key={role}><span>{label}</span><select aria-label={`${label} for ${line.itemName}`} disabled={!staffReady || saving} value={line[`${role}StaffId`] || ''} onChange={event => updateStaffAssignment(idx, role, event.target.value)}><option value="">Select {label.toLowerCase()}…</option>{staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></label>;
@@ -273,7 +287,7 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                         setBillLines(lines => lines.map((value, index) => index === idx ? role === 'photo' ? { ...value, photoStaffIds: selectedIds, photoStaffId: selectedIds[0] || null } : { ...value, instructorStaffIds: selectedIds, instructorStaffId: selectedIds[0] || null } : value));
                       }}>{staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></label>;
                     })}
-                    {!personalRoles.length && <span className="text-slate-400">—</span>}
+                    {!personalRoles.length && !storeAttendantPool && <span className="text-slate-400">—</span>}
                   </div></td>
                   <td className="siyam-remove-cell"><button type="button" className="line-remove-button" aria-label={line.autoPhotoFor ? 'Photo is linked to its activity' : `Remove ${line.itemName}`} disabled={saving || Boolean(line.autoPhotoFor)} onClick={() => removeLine(idx)}><Trash2 size={15} /></button></td>
                 </tr>;
@@ -283,7 +297,6 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
 
         {compactBilling && selected.length > 0 && <div className="siyam-selection-toolbar" role="group" aria-label="Adjust selected products">
           <span aria-live="polite">{selected.length} selected</span>
-          <button type="button" className="text-button" disabled={saving} onClick={() => setSelectedKeys(billLines.map(keyFor))}>Select all</button>
           <button type="button" className="text-button" disabled={saving || !selected.length} onClick={() => setSelectedKeys([])}>Clear selection</button>
           <label>Change<select aria-label="Selected product adjustment" value={adjustmentKind} disabled={saving} onChange={event => setAdjustmentKind(event.target.value as PriceAdjustment)}><option value="discountPercent">Discount (%)</option><option value="unitPrice" disabled={selectedPhoto}>Unit price ({currencySymbol})</option><option value="lineTotal" disabled={selectedPhoto}>Final line price ({currencySymbol})</option></select></label>
           <label>Value<input aria-label="Selected product value" type="number" min="0" max={adjustmentKind === 'discountPercent' ? 100 : undefined} step="any" value={adjustmentValue} disabled={saving} onChange={event => setAdjustmentValue(event.target.value)} /></label>
@@ -322,6 +335,6 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
   );
 }
 
-function LineList({ compact, selectionHeader, children }: { compact: boolean; selectionHeader: ReactNode; children: ReactNode }) {
-  return compact ? <div className="siyam-table-scroll" role="region" aria-label="Bill lines" tabIndex={0}><p className="siyam-table-cue">Scroll horizontally for totals and staff <span aria-hidden="true">→</span></p><table className="siyam-lines-table"><colgroup><col style={{ width: 42 }} /><col style={{ width: 140 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 105 }} /><col style={{ width: 125 }} /><col style={{ width: 260 }} /><col style={{ width: 44 }} /></colgroup><thead><tr><th scope="col" className="siyam-select-cell">{selectionHeader}</th><th scope="col">Qty</th><th scope="col">Description</th><th scope="col" className="siyam-money">Unit price</th><th scope="col" className="siyam-discount-cell">Discount %</th><th scope="col" className="siyam-money">Total</th><th scope="col">Commission staff</th><th scope="col"><span className="sr-only">Remove</span></th></tr></thead><tbody>{children}</tbody></table></div> : <div className="space-y-3 bill-lines">{children}</div>;
+function LineList({ compact, children }: { compact: boolean; children: ReactNode }) {
+  return compact ? <div className="siyam-table-scroll" role="region" aria-label="Bill lines" tabIndex={0}><p className="siyam-table-cue">Scroll horizontally for totals and staff <span aria-hidden="true">→</span></p><table className="siyam-lines-table"><caption className="sr-only">Click a service row to select it. Ctrl-click or Command-click selects multiple services. Use Enter or Space on a focused row to select it.</caption><colgroup><col style={{ width: 140 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 105 }} /><col style={{ width: 125 }} /><col style={{ width: 260 }} /><col style={{ width: 44 }} /></colgroup><thead><tr><th scope="col">Qty</th><th scope="col">Description</th><th scope="col" className="siyam-money">Unit price</th><th scope="col" className="siyam-discount-cell">Discount %</th><th scope="col" className="siyam-money">Total</th><th scope="col">Commission staff</th><th scope="col"><span className="sr-only">Remove</span></th></tr></thead><tbody>{children}</tbody></table></div> : <div className="space-y-3 bill-lines">{children}</div>;
 }

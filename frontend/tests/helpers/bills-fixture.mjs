@@ -9,7 +9,7 @@ export function fixture(options={}){
  const values=[],refs=[],effects=[],calls=[],pendingDetails=[];let state=0,ref=0,effect=0,pending=[];
  let bill={...sampleBill,...options.bill};
  const hooks={...React,useState(initial){const index=state++;if(!(index in values))values[index]=typeof initial==='function'?initial():initial;return[values[index],value=>{values[index]=typeof value==='function'?value(values[index]):value;}];},useRef(initial){const index=ref++;return refs[index]??={current:initial};},useEffect(callback,deps){const index=effect++;if(!effects[index]||deps.some((value,i)=>!Object.is(value,effects[index][i]))){effects[index]=deps;pending.push(callback);}}};
- const property={id:'a',name:'Test Property',currencySymbol:'$'};
+ const property={id:'a',name:options.propertyName??'Test Property',currencySymbol:'$'};
  const api=async(url,request={})=>{
   calls.push({url,...request});
   if(request.method==='DELETE')return{};
@@ -20,7 +20,7 @@ export function fixture(options={}){
    return{bill};
   }
   if(url.startsWith('/bills?'))return{bills:options.bills??[bill]};
-  if(url.startsWith('/bills/'))return options.deferDetails?new Promise(resolve=>pendingDetails.push(resolve)):{bill};
+  if(url.startsWith('/bills/')){if(options.detailError)throw Error(options.detailError);return options.deferDetails?new Promise(resolve=>pendingDetails.push(resolve)):{bill};}
   throw Error('Unexpected request '+url);
  };
  const stubs={
@@ -61,5 +61,5 @@ export function fixture(options={}){
  return{render,flush,calls,pendingDetails};
 }
 export const nodes=node=>node==null||typeof node==='boolean'?[]:Array.isArray(node)?node.flatMap(nodes):!React.isValidElement(node)?[]:[node,...nodes(node.props.children)];
-export const text=node=>typeof node==='string'?node:Array.isArray(node)?node.map(text).join(''):React.isValidElement(node)?text(node.props.children):'';
+export const text=node=>typeof node==='string'||typeof node==='number'?String(node):Array.isArray(node)?node.map(text).join(''):React.isValidElement(node)?text(node.props.children):'';
 export const button=(tree,name)=>nodes(tree).find(node=>node.type==='button'&&text(node)===name);

@@ -1,14 +1,12 @@
 import { formatMoney } from '../../utils/format';
 
-import { ChevronRight } from 'lucide-react';
 import { TipControl, DiscountControl } from './CheckoutFields';
 import type { BillModel } from './useBillController';
 
 export function BillCheckout({ model }: { model: BillModel }) {
   const {
     compactBilling, currencySymbol, netBeforeCharges, netTotal,
-    reviewBill, saving, scRate, serviceChargeAmount,
-    setupLoading, taxAmount, taxRate,
+    scRate, serviceChargeAmount, taxAmount, taxRate,
   } = model;
   return (
     <>
@@ -20,7 +18,6 @@ export function BillCheckout({ model }: { model: BillModel }) {
           <div><dt>T-GST ({taxRate}%)</dt><dd>{formatMoney(taxAmount, currencySymbol)}</dd></div>
           <div className="siyam-grand-total"><dt>Grand total</dt><dd aria-live="polite">{formatMoney(netTotal, currencySymbol)}</dd></div>
         </dl>
-        <button type="button" className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>{saving ? 'Saving…' : 'Save'}<ChevronRight size={16} /></button>
       </section>}
 
     </>

@@ -27,6 +27,8 @@ test('compact billing is confined to Siyam World and mounts a single copy of eac
     const tree = fixture(name).render();
     const compact = name.includes('World');
     assert.equal(descendants(tree, node => node.props.className === 'siyam-checkout').length, compact ? 1 : 0);
+    assert.equal(descendants(tree, node => node.props.className === 'billing-toolbar-top').length, compact ? 0 : 1);
+    assert.equal(descendants(tree, node => node.props.className === 'billing-draft-status').length, compact ? 0 : 1);
     for (const id of ['bill-room', 'bill-guest', 'bill-check-number', 'bill-business-date', 'checkout-discount', 'newbillview-field-10']) {
       assert.equal(descendants(tree, node => node.props.id === id).length, 1, `${name}: ${id}`);
     }
@@ -43,6 +45,9 @@ test('Siyam World footer updates the same bill discount and tip state and retain
   assert.match(text(footer), /\$349.52/); // 270 + 27 service + 47.52 tax + 5 tip
   assert.ok(f.button(tree, 'Discount only some units'));
   assert.ok(f.button(tree, 'Save'));
+  assert.equal(descendants(footer, node => node.type === 'button' && text(node) === 'Save').length, 0);
+  const toolbar = descendants(tree, node => node.props.className === 'billing-toolbar')[0];
+  assert.equal(descendants(toolbar, node => node.type === 'button' && text(node) === 'Save').length, 1);
 });
 
 test('guest controls keep leading zeros and update the guest on both bill layouts', () => {
@@ -73,44 +78,14 @@ test('invalid checkout discount remains an inline error after moving the shared 
   }
 });
 
-test('opening the activity picker preserves the draft and guest fields', () => {
+test('Siyam catalogue stays available beside the draft without the old activity popover', () => {
   const f = fixture('Siyam World');
-  let tree = f.render();
-  assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.open, false);
-  descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.onToggle({ currentTarget: { open: true } });
-  tree = f.render();
-  assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker')[0].props.open, true);
+  const tree = f.render();
+  assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker').length, 0);
+  assert.equal(descendants(tree, node => node.props.className === 'catalogue-tree').length, 1);
   assert.equal(descendants(tree, node => node.props.id === 'bill-room')[0].props.value, '0012');
   assert.equal(descendants(tree, node => node.props.id === 'bill-guest')[0].props.value, 'Test Guest');
-  assert.match(text(tree), /Dive/);
-});
-
-test('Siyam catalogue dismisses on outside pointer clicks, keeps inside clicks open, and cleans up its listener', () => {
-  class Target {}
-  const inside = new Target(), outside = new Target();
-  const listeners = new Set();
-  const document = {
-    querySelector: () => null,
-    getElementById: () => null,
-    addEventListener(type, callback, capture) { assert.equal(type, 'pointerdown'); assert.equal(capture, true); listeners.add(callback); },
-    removeEventListener(type, callback, capture) { assert.equal(type, 'pointerdown'); assert.equal(capture, true); listeners.delete(callback); },
-  };
-  const f = fixture('Siyam World', { document, Node: Target });
-  descendants(f.render(), node => node.props.className === 'siyam-activity-picker')[0].props.onToggle({ currentTarget: { open: true } });
-  const tree = f.render();
-  const picker = descendants(tree, node => node.props.className === 'siyam-activity-picker')[0];
-  picker.ref.current = { contains: node => node === inside, querySelector: () => null };
-  const cleanups = f.effects.map(effect => effect()).filter(Boolean);
-  assert.equal(listeners.size, 1);
-  for (const callback of listeners) callback({ target: inside });
-  assert.equal(descendants(f.render(), node => node.props.className === 'siyam-activity-picker')[0].props.open, true);
-  for (const callback of listeners) callback({ target: outside });
-  const closed = f.render();
-  assert.equal(descendants(closed, node => node.props.className === 'siyam-activity-picker')[0].props.open, false);
-  assert.equal(descendants(closed, node => node.props.id === 'bill-room')[0].props.value, '0012');
-  assert.equal(descendants(closed, node => node.type === 'button' && text(node).startsWith('Done')).length, 0);
-  cleanups.forEach(cleanup => cleanup());
-  assert.equal(listeners.size, 0);
+  assert.equal(f.button(tree, 'Save').type, 'button');
 });
 
 test('Siyam activity and package entries show only names and retain their add actions', () => {
@@ -128,6 +103,24 @@ test('Siyam activity and package entries show only names and retain their add ac
   const standard = catalogue({ ...model, compactBilling: false });
   assert.match(text(standard), /CRS-01/);
   assert.match(text(standard), /Course Pool/);
+});
+
+test('Siyam catalogue presents collapsed category folders and keeps items under their own category', () => {
+  const categories = [{ id: 'dives', name: 'Diving' }, { id: 'courses', name: 'Courses' }];
+  const items = [
+    { id: 'dive', categoryId: 'dives', name: 'Single Dive', isActive: true },
+    { id: 'course', categoryId: 'courses', name: 'Open Water', isActive: true },
+    { id: 'archived', categoryId: 'dives', name: 'Archived Dive', isActive: false },
+  ];
+  const tree = catalogue({ compactBilling: true, categories, items, packages: [], setupLoading: false, handleAddItem() {} });
+  const folders = descendants(tree, node => node.type === 'details');
+  assert.equal(folders.length, 2);
+  assert.ok(folders.every(folder => !folder.props.open));
+  assert.deepEqual(folders.map(folder => text(descendants(folder, node => node.type === 'summary')[0])), ['Diving', 'Courses']);
+  assert.equal(text(descendants(folders[0], node => node.type === 'button')[0]), 'Single Dive');
+  assert.equal(text(descendants(folders[1], node => node.type === 'button')[0]), 'Open Water');
+  assert.equal(descendants(tree, node => node.type === 'input').length, 0);
+  assert.doesNotMatch(text(tree), /Archived Dive/);
 });
 
 test('Siyam World guest fields remain visible and invalid discounts expose their controls', () => {
@@ -177,7 +170,7 @@ test('the redesigned workspace is exclusive to Siyam World; other properties kee
     const tree = fixture(name).render();
     const compact = name.endsWith('World');
     assert.equal(descendants(tree, node => node.props.className === 'bill-builder siyam-bill siyam-ledger').length, compact ? 1 : 0);
-    assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker').length, compact ? 1 : 0);
+    assert.equal(descendants(tree, node => node.props.className === 'catalogue-tree').length, compact ? 1 : 0);
     assert.equal(descendants(tree, node => node.props.id === 'bill-guest-details')[0].type, 'div');
     assert.equal(descendants(tree, node => node.props.className === 'billing-toolbar-total').length, compact ? 0 : 1);
     assert.equal(descendants(tree, node => node.props.className === 'bill-breakdown').length, 0);
@@ -219,14 +212,13 @@ test('selected product changes affect only checked rows and keep other product p
     { clientLineId: 'fins', itemId: 'fins', itemName: 'Fins', quantity: 1, unitPrice: 20, discountPercent: 0, lineTotal: 20 },
   ];
   const f = fixture('Siyam World', { draft: { billLines: lines } });
-  const field = label => {
-    const tree = f.render();
-    return descendants(tree, node => node.props['aria-label'] === label)[0] || descendants(tree, node => node.props.selectionHeader?.props?.['aria-label'] === label)[0]?.props.selectionHeader;
-  };
+  const field = label => descendants(f.render(), node => node.props['aria-label'] === label)[0];
   assert.equal(f.button(f.render(), 'Select products'), undefined);
-  assert.equal(field('Select Dive').props.checked, false);
-  assert.equal(field('Select Fins').props.checked, false);
-  field('Select Dive').props.onChange({ target: { checked: true } });
+  const row = id => descendants(f.render(), node => node.props['data-bill-line'] === id)[0];
+  const click = (id, modifiers = {}) => row(id).props.onClick({ target: { closest: () => null }, ...modifiers });
+  assert.equal(field('Select Dive'), undefined);
+  assert.equal(row('dive').props['aria-selected'], false);
+  click('dive', { ctrlKey: true });
   field('Selected product value').props.onChange({ target: { value: '25' } });
   f.button(f.render(), 'Apply to selected').props.onClick();
   assert.equal(field('Final price for Dive').props.value, 225);
@@ -239,12 +231,23 @@ test('selected product changes affect only checked rows and keep other product p
   assert.equal(field('Unit price for Fins').props.value, 20);
   f.button(f.render(), 'Clear selection').props.onClick();
   assert.equal(f.button(f.render(), 'Apply to selected'), undefined);
-  assert.equal(field('Select Dive').props.checked, false);
-  field('Select all products').props.onChange({ target: { checked: true } });
-  assert.equal(field('Select Dive').props.checked, true);
-  assert.equal(field('Select Fins').props.checked, true);
-  field('Select all products').props.onChange({ target: { checked: false } });
-  assert.equal(field('Select Dive').props.checked, false);
+  assert.equal(row('dive').props['aria-selected'], false);
+  click('dive');
+  click('fins', { ctrlKey: true });
+  assert.equal(row('dive').props['aria-selected'], true);
+  assert.equal(row('fins').props['aria-selected'], true);
+  click('dive', { metaKey: true });
+  assert.equal(row('dive').props['aria-selected'], false);
+  assert.equal(row('fins').props['aria-selected'], true);
+  row('dive').props.onClick({ ctrlKey: true, target: { closest: () => ({}) } });
+  assert.equal(row('dive').props['aria-selected'], false);
+  const keyboardRow = row('dive');
+  const target = {};
+  keyboardRow.props.onKeyDown({ key: 'a', ctrlKey: true, target, currentTarget: target, preventDefault() {} });
+  assert.equal(row('dive').props['aria-selected'], true);
+  row('dive').props.onKeyDown({ key: 'Escape', target, currentTarget: target, preventDefault() {} });
+  assert.equal(row('dive').props['aria-selected'], false);
+  assert.equal(row('fins').props['aria-selected'], false);
 });
 
 test('Siyam Save posts once without confirmation, retains failed drafts and permits retry', async () => {
@@ -282,5 +285,12 @@ test('Siyam Save posts once without confirmation, retains failed drafts and perm
   finish.resolve({});
   await retry;
   assert.deepEqual(saved, [1001]);
+  const next = f.render();
+  assert.match(text(next), /Bill #1001 saved successfully/);
+  assert.equal(descendants(next, node => node.props.id === 'bill-room')[0].props.value, '');
+  assert.equal(descendants(next, node => node.props.id === 'bill-guest')[0].props.value, '');
+  assert.equal(descendants(next, node => node.props.id === 'bill-check-number')[0].props.value, 1002);
+  assert.equal(descendants(next, node => node.props['aria-label'] === 'Final price for Dive').length, 0);
+  assert.ok(f.button(next, 'Save'));
   cleanup.forEach(dispose => dispose());
 });

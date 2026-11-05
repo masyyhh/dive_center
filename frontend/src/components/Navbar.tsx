@@ -31,7 +31,7 @@ export const Navbar: React.FC<{
         <button
           className="mobile-menu icon-button p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           onClick={onMenu}
-          aria-label="Open navigation"
+          aria-label={siyamWorld && currentTab === 'new-bill' ? 'Open catalogue' : 'Open navigation'}
         >
           <Menu size={20} className="text-gray-600 dark:text-gray-300" />
         </button>
@@ -72,11 +72,11 @@ export const Navbar: React.FC<{
         <span className="breadcrumb text-sm font-semibold text-gray-700 dark:text-gray-200">
           {navLabels[currentTab]}
         </span>
+        {siyamWorld && currentTab === 'bills' && <div id="bills-header-summary" />}
       </div>
 
       {/* Right Actions & User Profile */}
       <div className="topbar-actions flex items-center gap-2 sm:gap-3">
-        {siyamWorld && currentTab === 'new-bill' && <div id="bill-header-actions" />}
         {logoutError && (
           <span role="alert" className="text-sm text-red-600 dark:text-red-400 font-medium px-2">
             {logoutError}

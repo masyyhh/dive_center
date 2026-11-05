@@ -1,5 +1,6 @@
 import { TableScroll } from '../TableScroll';
 import { PersonalCommissionSummary } from '../PersonalCommissionEditor';
+import { usesStoreAttendantPool } from '../../utils/storeAttendantPool';
 import { CatalogueFilters, emptyCatalogueFilters } from '../../utils/catalogueFilters';
 import { CatalogueTransferPanel } from '../CatalogueTransferPanel';
 import { CatalogueImportReview } from '../CatalogueImportReview';
@@ -137,7 +138,7 @@ export function CatalogueSection({ model }: { model: AdminModel }) {
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <PersonalCommissionSummary autoPhotoCommission={photoSettings.autoPhotoCommission} item={it} currencySymbol={activeProperty?.currencySymbol || '$'} />
+                      <PersonalCommissionSummary storeAttendantPool={usesStoreAttendantPool(activeProperty, it.category?.name)} autoPhotoCommission={photoSettings.autoPhotoCommission} item={it} currencySymbol={activeProperty?.currencySymbol || '$'} />
                     </td>
                     <td className="py-3 px-4"><label className="flex items-start gap-2">
                       <input type="checkbox" checked={it.includesComplimentaryMedia} disabled={itemBusy || bulkBusy || !it.isActive}

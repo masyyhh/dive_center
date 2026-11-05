@@ -10,6 +10,29 @@ export function ActivityCatalogue({ model }: { model: BillModel }) {
     onSetup, packages, photoRates, searchQuery,
     selectedCategory, setSearchQuery, setSelectedCategory, setupLoading,
   } = model;
+  if (compactBilling) {
+    const groups = new Map(categories.map(category => [category.id, { id: category.id, name: category.name, items: [] as typeof items }]));
+    for (const item of items.filter(item => item.isActive !== false)) {
+      const id = item.categoryId || 'uncategorized';
+      const group = groups.get(id) || { id, name: item.category?.name || 'Other activities', items: [] };
+      group.items.push(item);
+      groups.set(id, group);
+    }
+    const activePackages = packages.filter(pkg => pkg.isActive !== false);
+    return <div id="bill-activities" className="catalogue-tree" aria-label="Activity categories">
+      {setupLoading ? <p role="status">Loading catalogue…</p> : <>
+        {[...groups.values()].map(category => <details className="catalogue-tree-category" key={category.id}>
+          <summary><span className="catalogue-tree-toggle" aria-hidden="true" /><span>{category.name}</span></summary>
+          <div className="catalogue-tree-items" role="group" aria-label={category.name}>
+            {category.items.map(item => <button type="button" className="catalogue-tree-item" key={item.id} disabled={model.saving} aria-label={`Add ${item.name} to bill`} onClick={() => handleAddItem(item)}>{item.name}</button>)}
+            {!category.items.length && <p className="catalogue-tree-empty">No activities in this category.</p>}
+          </div>
+        </details>)}
+        {activePackages.length > 0 && <details className="catalogue-tree-category"><summary><span className="catalogue-tree-toggle" aria-hidden="true" /><span>Dive packages</span></summary><div className="catalogue-tree-items" role="group" aria-label="Dive packages">{activePackages.map(pkg => <button type="button" className="catalogue-tree-item" key={pkg.id} disabled={model.saving} aria-label={`Add ${pkg.name} to bill`} onClick={() => handleAddPackage(pkg)}>{pkg.name}</button>)}</div></details>}
+        {!groups.size && !activePackages.length && <div className="catalogue-tree-empty"><p>No activities available.</p>{canManage && <button type="button" className="text-button" onClick={onSetup}>Set up catalogue</button>}</div>}
+      </>}
+    </div>;
+  }
   return (
     <div id="bill-activities" className="xl:col-span-5 space-y-4 bill-activities">
       <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 catalogue-panel">

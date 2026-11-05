@@ -1,15 +1,31 @@
 import { businessToday, displayDate } from '../../utils/dates';
 
-import { Search, AlertTriangle, Receipt } from 'lucide-react';
+import { Search, AlertTriangle, Receipt, RotateCcw } from 'lucide-react';
 import type { BillsModel } from './useBillsController';
 
-export function BillsFilters({ model }: { model: BillsModel }) {
+export function BillResultsSummary({ model }: { model: BillsModel }) {
+  return <div className="bills-header-summary" role="status"><strong>{model.loading ? 'Finding bills…' : `${model.visibleBills.length} ${model.visibleBills.length === 1 ? 'bill' : 'bills'} found`}</strong><span className="bills-header-date-range">{model.startDate && model.endDate ? `${displayDate(model.startDate)} – ${displayDate(model.endDate)}` : 'Select dates'}</span></div>;
+}
+
+export function BillsFilters({ model, summaryInHeader = false }: { model: BillsModel; summaryInHeader?: boolean }) {
   const {
     discountedOnly, endDate, errorMsg, fetchBills,
     handleSearchSubmit, loading, resetFilters, search,
     setDiscountedOnly, setEndDate, setSearch, setStartDate,
     setStatusFilter, startDate, statusFilter, visibleBills,
   } = model;
+  if (model.splitView) return <>
+    <div className="bill-filter-toolbar" role="group" aria-label="Bill filters">
+      <form onSubmit={handleSearchSubmit} className="bill-search-form"><div className="relative"><Search size={15} className="bill-search-icon" /><input type="search" aria-label="Search bills" placeholder="Check, guest or room" value={search} onChange={event => setSearch(event.target.value)} /></div><button type="submit" className="primary-button" disabled={loading}>Search</button></form>
+      <label className="bill-filter-date"><span>From</span><input type="date" aria-label="Bills from date" value={startDate} onChange={event => setStartDate(event.target.value)} /></label>
+      <label className="bill-filter-date"><span>To</span><input type="date" aria-label="Bills to date" value={endDate} onChange={event => setEndDate(event.target.value)} /></label>
+      <label className="bill-filter-status"><span>Status</span><select aria-label="Bill status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)}><option value="ALL">All</option><option value="ACTIVE">Active</option><option value="REBATED">Rebated</option><option value="DELETED">Deleted</option></select></label>
+      <div className="bill-date-presets"><button type="button" className="text-button" onClick={() => { const today = businessToday(); setStartDate(today); setEndDate(today); }}>Today</button><button type="button" className="text-button" onClick={() => { const today = businessToday(); setStartDate(`${today.slice(0, 7)}-01`); setEndDate(today); }}>This month</button></div>
+      <button type="button" className="icon-button" aria-label="Reset filters" title="Reset filters" onClick={resetFilters}><RotateCcw size={16} /></button>
+      {!summaryInHeader && <BillResultsSummary model={model} />}
+    </div>
+    {errorMsg && <div role="alert" className="notice notice-error"><AlertTriangle size={18} /><span>{errorMsg}</span><button onClick={fetchBills}>Try again</button></div>}
+  </>;
   return (
     <>
       {/* Top Filter Card */}
