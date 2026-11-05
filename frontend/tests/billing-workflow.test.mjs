@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { fixture, descendants, text } from './helpers/billing-fixture.mjs';
+import { fixture, descendants, text, catalogue } from './helpers/billing-fixture.mjs';
 test('the actual selected-unit discount controls split the chosen quantity and leave remaining units at full price', () => {
   const f = fixture();
   f.button(f.render(), 'Discount only some units').props.onClick();
@@ -42,7 +42,7 @@ test('Siyam World footer updates the same bill discount and tip state and retain
   assert.match(text(footer), /\$270.00/);
   assert.match(text(footer), /\$349.52/); // 270 + 27 service + 47.52 tax + 5 tip
   assert.ok(f.button(tree, 'Discount only some units'));
-  assert.ok(f.button(tree, 'Review & save'));
+  assert.ok(f.button(tree, 'Save'));
 });
 
 test('guest controls keep leading zeros and update the guest on both bill layouts', () => {
@@ -58,7 +58,7 @@ test('guest controls keep leading zeros and update the guest on both bill layout
 test('locked payroll blocks bill review in both layouts', () => {
   for (const property of ['Iru Fushi', 'Siyam World']) {
     const f = fixture(property, { locked: true });
-    f.button(f.render(), property === 'Siyam World' ? 'Review & save' : 'Review bill').props.onClick();
+    f.button(f.render(), property === 'Siyam World' ? 'Save' : 'Review bill').props.onClick();
     assert.match(renderToStaticMarkup(f.render()), /Choose a business date in an open month before saving/);
     assert.equal(f.button(f.render(), 'Confirm & Save'), undefined);
   }
@@ -85,6 +85,51 @@ test('opening the activity picker preserves the draft and guest fields', () => {
   assert.match(text(tree), /Dive/);
 });
 
+test('Siyam catalogue dismisses on outside pointer clicks, keeps inside clicks open, and cleans up its listener', () => {
+  class Target {}
+  const inside = new Target(), outside = new Target();
+  const listeners = new Set();
+  const document = {
+    querySelector: () => null,
+    getElementById: () => null,
+    addEventListener(type, callback, capture) { assert.equal(type, 'pointerdown'); assert.equal(capture, true); listeners.add(callback); },
+    removeEventListener(type, callback, capture) { assert.equal(type, 'pointerdown'); assert.equal(capture, true); listeners.delete(callback); },
+  };
+  const f = fixture('Siyam World', { document, Node: Target });
+  descendants(f.render(), node => node.props.className === 'siyam-activity-picker')[0].props.onToggle({ currentTarget: { open: true } });
+  const tree = f.render();
+  const picker = descendants(tree, node => node.props.className === 'siyam-activity-picker')[0];
+  picker.ref.current = { contains: node => node === inside, querySelector: () => null };
+  const cleanups = f.effects.map(effect => effect()).filter(Boolean);
+  assert.equal(listeners.size, 1);
+  for (const callback of listeners) callback({ target: inside });
+  assert.equal(descendants(f.render(), node => node.props.className === 'siyam-activity-picker')[0].props.open, true);
+  for (const callback of listeners) callback({ target: outside });
+  const closed = f.render();
+  assert.equal(descendants(closed, node => node.props.className === 'siyam-activity-picker')[0].props.open, false);
+  assert.equal(descendants(closed, node => node.props.id === 'bill-room')[0].props.value, '0012');
+  assert.equal(descendants(closed, node => node.type === 'button' && text(node).startsWith('Done')).length, 0);
+  cleanups.forEach(cleanup => cleanup());
+  assert.equal(listeners.size, 0);
+});
+
+test('Siyam activity and package entries show only names and retain their add actions', () => {
+  const item = { id: 'course', name: 'Discover Scuba', code: 'CRS-01', price: 100, poolType: 'COURSE_POOL', poolContribution: 10, includesComplimentaryMedia: true };
+  const pkg = { id: 'package', name: 'Five dives', code: 'PKG-5', description: 'Package description', items: [{ itemId: 'course', quantity: 5 }] };
+  const added = [];
+  const model = { compactBilling: true, canManage: true, currencySymbol: '$', filteredItems: [item], filteredPackages: [pkg], items: [item], packages: [pkg], categories: [], photoRates: {}, searchQuery: '', selectedCategory: 'ALL', setSearchQuery() {}, setSelectedCategory() {}, handleAddItem: value => added.push(value.id), handleAddPackage: value => added.push(value.id) };
+  for (const [selectedCategory, name, id] of [['ALL', item.name, item.id], ['PACKAGES', pkg.name, pkg.id]]) {
+    const tree = catalogue({ ...model, selectedCategory });
+    const button = descendants(tree, node => node.props['aria-label'] === `Add ${name} to bill`)[0];
+    assert.equal(text(button), name);
+    button.props.onClick();
+    assert.equal(added.at(-1), id);
+  }
+  const standard = catalogue({ ...model, compactBilling: false });
+  assert.match(text(standard), /CRS-01/);
+  assert.match(text(standard), /Course Pool/);
+});
+
 test('Siyam World guest fields remain visible and invalid discounts expose their controls', () => {
   const f = fixture('Siyam World', { draft: { roomNumber: '', guestName: '' } });
   const tree = f.render();
@@ -94,14 +139,37 @@ test('Siyam World guest fields remain visible and invalid discounts expose their
   assert.equal(descendants(f.render(), node => node.props.id === 'checkout-discount')[0].props['aria-invalid'], true);
 });
 
-test('Siyam World line options expand without changing quantities or prices', () => {
-  const f = fixture('Siyam World');
-  let tree = f.render();
-  assert.equal(descendants(tree, node => node.props.id === 'siyam-line-details-0')[0].props.hidden, true);
-  descendants(tree, node => node.props['aria-controls'] === 'siyam-line-details-0')[0].props.onClick();
-  tree = f.render();
-  assert.equal(descendants(tree, node => node.props.id === 'siyam-line-details-0')[0].props.hidden, false);
-  assert.match(renderToStaticMarkup(tree), /€?300.00|\$300.00/);
+test('Siyam World assigns every commission role in the service row without opening a detail row', async () => {
+  const f = fixture('Siyam World', { runControllerEffects: true, draft: { billLines: [{ clientLineId: 'root', itemId: 'dive', itemName: 'Dive', quantity: 1, unitPrice: 100, discountPercent: 0, lineTotal: 100, personalCommissionsJson: JSON.stringify({ seller: 10, guide: 5, instructor: 20, photo: 4.5, video: 4 }) }] }, apiFetch: async url => {
+    if (url.startsWith('/items')) return { items: [], categories: [] };
+    if (url.startsWith('/staff')) return { staff: [{ id: 'one', name: 'First', roleTitle: 'Instructor' }, { id: 'two', name: 'Second', roleTitle: 'Instructor' }] };
+    if (url.startsWith('/packages')) return { packages: [] };
+    return { nextCheckNumber: 1001 };
+  } });
+  f.render();
+  const cleanup = f.controllerEffects.map(effect => effect()).filter(Boolean);
+  await new Promise(resolve => setImmediate(resolve));
+  const field = label => descendants(f.render(), node => node.props['aria-label'] === `${label} for Dive`)[0];
+  assert.equal(field('Seller').props.disabled, false);
+  field('Seller').props.onChange({ target: { value: 'one' } });
+  field('Guide').props.onChange({ target: { value: 'two' } });
+  field('Video').props.onChange({ target: { value: 'two' } });
+  field('Instructors').props.onChange({ target: { selectedOptions: [{ value: 'one' }, { value: 'two' }] } });
+  field('Photo staff').props.onChange({ target: { selectedOptions: [{ value: 'one' }, { value: 'two' }] } });
+  assert.equal(field('Seller').props.value, 'one');
+  assert.equal(field('Guide').props.value, 'two');
+  assert.equal(field('Video').props.value, 'two');
+  assert.deepEqual(field('Instructors').props.value, ['one', 'two']);
+  assert.deepEqual(field('Photo staff').props.value, ['one', 'two']);
+  field('Instructors').props.onChange({ target: { selectedOptions: [] } });
+  assert.deepEqual(field('Instructors').props.value, []);
+  assert.deepEqual(field('Photo staff').props.value, ['one', 'two']);
+  const tree = f.render();
+  assert.equal(descendants(tree, node => node.props.id?.startsWith('siyam-line-details')).length, 0);
+  assert.equal(descendants(tree, node => node.props.className === 'siyam-staff-cell').length, 1);
+  assert.equal(field('Unit price').props.value, 100);
+  assert.equal(field('Final price').props.value, 100);
+  cleanup.forEach(dispose => dispose());
 });
 
 test('the redesigned workspace is exclusive to Siyam World; other properties keep the original view', () => {
@@ -112,7 +180,8 @@ test('the redesigned workspace is exclusive to Siyam World; other properties kee
     assert.equal(descendants(tree, node => node.props.className === 'siyam-activity-picker').length, compact ? 1 : 0);
     assert.equal(descendants(tree, node => node.props.id === 'bill-guest-details')[0].type, 'div');
     assert.equal(descendants(tree, node => node.props.className === 'billing-toolbar-total').length, compact ? 0 : 1);
-    assert.equal(descendants(tree, node => node.props.className === 'bill-breakdown').length, compact ? 1 : 0);
+    assert.equal(descendants(tree, node => node.props.className === 'bill-breakdown').length, 0);
+    assert.equal(descendants(tree, node => node.props.id === 'bill-notes').length, compact ? 0 : 1);
     assert.equal(/siyam-lines-table/.test(renderToStaticMarkup(tree)), compact);
   }
 });
@@ -125,4 +194,93 @@ test('Siyam World ledger quantity and discount cells use the existing bill calcu
   assert.equal(lines[0].quantity, 4);
   assert.equal(lines[0].discountPercent, 20);
   assert.equal(lines[0].lineTotal, 320);
+});
+
+test('editing individual unit and final prices recalculates discounted lines and checkout charges', () => {
+  const f = fixture('Siyam World');
+  const field = label => descendants(f.render(), node => node.props['aria-label'] === label)[0];
+  field('Unit price for Dive').props.onChange({ target: { value: '80' } });
+  assert.equal(field('Final price for Dive').props.value, 240);
+  field('Discount percentage for Dive').props.onChange({ target: { value: '20' } });
+  field('Final price for Dive').props.onChange({ target: { value: '150' } });
+  assert.equal(field('Unit price for Dive').props.value, 62.5);
+  assert.equal(field('Discount percentage for Dive').props.value, 20);
+  const footer = descendants(f.render(), node => node.props.className === 'siyam-checkout')[0];
+  assert.match(text(footer), /\$150.00/);
+  assert.match(text(footer), /\$191.40/);
+  field('Unit price for Dive').props.onChange({ target: { value: '-10' } });
+  assert.equal(field('Unit price for Dive').props.value, 62.5);
+  assert.match(text(f.render()), /Enter a valid price/);
+});
+
+test('selected product changes affect only checked rows and keep other product prices intact', () => {
+  const lines = [
+    { clientLineId: 'dive', itemId: 'dive', itemName: 'Dive', quantity: 3, unitPrice: 100, discountPercent: 0, lineTotal: 300 },
+    { clientLineId: 'fins', itemId: 'fins', itemName: 'Fins', quantity: 1, unitPrice: 20, discountPercent: 0, lineTotal: 20 },
+  ];
+  const f = fixture('Siyam World', { draft: { billLines: lines } });
+  const field = label => {
+    const tree = f.render();
+    return descendants(tree, node => node.props['aria-label'] === label)[0] || descendants(tree, node => node.props.selectionHeader?.props?.['aria-label'] === label)[0]?.props.selectionHeader;
+  };
+  assert.equal(f.button(f.render(), 'Select products'), undefined);
+  assert.equal(field('Select Dive').props.checked, false);
+  assert.equal(field('Select Fins').props.checked, false);
+  field('Select Dive').props.onChange({ target: { checked: true } });
+  field('Selected product value').props.onChange({ target: { value: '25' } });
+  f.button(f.render(), 'Apply to selected').props.onClick();
+  assert.equal(field('Final price for Dive').props.value, 225);
+  assert.equal(field('Final price for Fins').props.value, 20);
+  field('Selected product adjustment').props.onChange({ target: { value: 'unitPrice' } });
+  field('Selected product value').props.onChange({ target: { value: '80' } });
+  f.button(f.render(), 'Apply to selected').props.onClick();
+  assert.equal(field('Unit price for Dive').props.value, 80);
+  assert.equal(field('Final price for Dive').props.value, 180);
+  assert.equal(field('Unit price for Fins').props.value, 20);
+  f.button(f.render(), 'Clear selection').props.onClick();
+  assert.equal(f.button(f.render(), 'Apply to selected'), undefined);
+  assert.equal(field('Select Dive').props.checked, false);
+  field('Select all products').props.onChange({ target: { checked: true } });
+  assert.equal(field('Select Dive').props.checked, true);
+  assert.equal(field('Select Fins').props.checked, true);
+  field('Select all products').props.onChange({ target: { checked: false } });
+  assert.equal(field('Select Dive').props.checked, false);
+});
+
+test('Siyam Save posts once without confirmation, retains failed drafts and permits retry', async () => {
+  const calls = [], saved = [];
+  let finish;
+  const document = { getElementById: () => ({ focus() {}, scrollIntoView() {} }) };
+  const f = fixture('Siyam World', { runControllerEffects: true, document, onBillSaved: check => saved.push(check), apiFetch: async (url, options = {}) => {
+    if (options.method) { calls.push({ url, ...options }); return new Promise((resolve, reject) => { finish = { resolve, reject }; }); }
+    if (url.startsWith('/items')) return { items: [], categories: [] };
+    if (url.startsWith('/staff')) return { staff: [] };
+    if (url.startsWith('/packages')) return { packages: [] };
+    if (url.startsWith('/bills/next-check')) return { nextCheckNumber: 1001 };
+    throw Error(`Unexpected request ${url}`);
+  } });
+  f.render();
+  const cleanup = f.controllerEffects.map(effect => effect()).filter(Boolean);
+  await new Promise(resolve => setImmediate(resolve));
+  const button = f.button(f.render(), 'Save');
+  assert.equal(button.props.disabled, false);
+  const pending = button.props.onClick();
+  button.props.onClick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/bills');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(JSON.parse(calls[0].body).items[0].lineTotal, 300);
+  assert.equal(f.button(f.render(), 'Confirm & Save'), undefined);
+  assert.equal(f.button(f.render(), 'Saving…').props.disabled, true);
+  finish.reject(new Error('Connection failed'));
+  await pending;
+  assert.match(text(f.render()), /Connection failed/);
+  assert.equal(descendants(f.render(), node => node.props.id === 'bill-guest')[0].props.value, 'Test Guest');
+  assert.deepEqual(saved, []);
+  const retry = f.button(f.render(), 'Save').props.onClick();
+  assert.equal(calls.length, 2);
+  finish.resolve({});
+  await retry;
+  assert.deepEqual(saved, [1001]);
+  cleanup.forEach(dispose => dispose());
 });

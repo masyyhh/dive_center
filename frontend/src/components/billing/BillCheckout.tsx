@@ -20,7 +20,7 @@ export function BillCheckout({ model }: { model: BillModel }) {
           <div><dt>T-GST ({taxRate}%)</dt><dd>{formatMoney(taxAmount, currencySymbol)}</dd></div>
           <div className="siyam-grand-total"><dt>Grand total</dt><dd aria-live="polite">{formatMoney(netTotal, currencySymbol)}</dd></div>
         </dl>
-        <button type="button" className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>{saving ? 'Saving…' : 'Review & save'}<ChevronRight size={16} /></button>
+        <button type="button" className="primary-button" onClick={reviewBill} disabled={saving || setupLoading}>{saving ? 'Saving…' : 'Save'}<ChevronRight size={16} /></button>
       </section>}
 
     </>

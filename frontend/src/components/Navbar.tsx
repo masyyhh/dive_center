@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { Moon, Sun, LogOut, Building2, LockKeyhole, ChevronDown, Menu, ChevronRight, Loader2, Keyboard } from 'lucide-react';
 import { useNavigation } from '../context/NavigationContext';
 import { NavTab, navLabels } from './SubNav';
+import { isSiyamWorld } from '../utils/propertyPresentation';
 
 export const Navbar: React.FC<{
   currentTab: NavTab;
@@ -16,6 +17,7 @@ export const Navbar: React.FC<{
   const { user, logout, signingOut, logoutError } = useAuth();
   const { activeProperty, properties, canSwitchProperty, setActiveProperty } = useProperty();
   const { theme, toggleTheme } = useTheme();
+  const siyamWorld = isSiyamWorld(activeProperty);
 
   const role =
     user?.role === 'GLOBAL_ADMIN' ? 'Global administrator' :
@@ -74,6 +76,7 @@ export const Navbar: React.FC<{
 
       {/* Right Actions & User Profile */}
       <div className="topbar-actions flex items-center gap-2 sm:gap-3">
+        {siyamWorld && currentTab === 'new-bill' && <div id="bill-header-actions" />}
         {logoutError && (
           <span role="alert" className="text-sm text-red-600 dark:text-red-400 font-medium px-2">
             {logoutError}
@@ -82,8 +85,10 @@ export const Navbar: React.FC<{
 
         {/* Workspace actions */}
         <div className="flex items-center gap-1 border-r border-gray-200 dark:border-gray-800 pr-2 sm:pr-3">
-          <button type="button" onClick={onShortcuts} className="icon-button shortcuts-trigger" aria-label="Keyboard shortcuts" aria-keyshortcuts="Alt+Shift+K" title="Keyboard shortcuts (Alt + Shift + K)"><Keyboard size={18} /></button>
-          <button type="button" onClick={onSecurity} className="icon-button" aria-label={import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? 'Manage authenticator in live version' : 'Personal authenticator'} title={import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? 'Manage authenticator in live version' : 'Personal authenticator'}><LockKeyhole size={18} /></button>
+          {!siyamWorld && <>
+            <button type="button" onClick={onShortcuts} className="icon-button shortcuts-trigger" aria-label="Keyboard shortcuts" aria-keyshortcuts="Alt+Shift+K" title="Keyboard shortcuts (Alt + Shift + K)"><Keyboard size={18} /></button>
+            <button type="button" onClick={onSecurity} className="icon-button" aria-label={import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? 'Manage authenticator in live version' : 'Personal authenticator'} title={import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? 'Manage authenticator in live version' : 'Personal authenticator'}><LockKeyhole size={18} /></button>
+          </>}
           <button
             onClick={toggleTheme}
             className="icon-button p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -96,7 +101,7 @@ export const Navbar: React.FC<{
 
         {/* User Profile Info */}
         <div className="flex items-center gap-3 pl-1">
-          <div className="profile-copy hidden md:flex flex-col text-right">
+          {!siyamWorld && <><div className="profile-copy hidden md:flex flex-col text-right">
             <strong className="text-sm font-semibold text-gray-900 dark:text-gray-100 leading-tight">
               {user?.name}
             </strong>
@@ -110,7 +115,7 @@ export const Navbar: React.FC<{
             aria-hidden="true"
           >
             {user?.name?.split(' ').map(n => n[0]).slice(0, 2).join('')}
-          </span>
+          </span></>}
 
           <button
             disabled={signingOut}

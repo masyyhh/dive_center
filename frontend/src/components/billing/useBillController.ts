@@ -90,6 +90,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
   const [saving, setSaving] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const saveInFlight = useRef(false);
 
   const dirty = checkoutDiscountValue !== '' || billLines.length > 0 || Boolean(roomNumber || guestName || departureDate || notes) || nationality !== 'Other' || tipAmount > 0 || tipStaffIds.length > 0 || checkEdited || businessDate !== businessToday();
   const releaseGuard = useUnsavedChanges(dirty, saving ? 'Your bill is being saved. Please wait for confirmation.' : draftError ? 'Your bill has unsaved changes. Draft storage is unavailable; leaving will lose this work.' : 'This bill has not been submitted. Its draft is kept in this browser tab for this account and property.', saving);
@@ -309,6 +310,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
   });
 
   const handleSaveBill = async () => {
+    if (saving || saveInFlight.current) return;
     if (!activeProperty || monthLock.locked !== false) return;
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); return; }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before saving.'); return; }
@@ -327,6 +329,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
       return;
     }
 
+    saveInFlight.current = true;
     try {
       setSaving(true);
       await apiFetch(editingBill ? `/bills/${editingBill.id}` : '/bills', {
@@ -355,11 +358,13 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save bill.');
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   };
 
   const reviewBill = () => {
+    if (saving || saveInFlight.current) return;
     if (partialDiscount) { setErrorMsg('Apply or cancel the selected-unit discount before reviewing the bill.'); return; }
     if (editingBill && editReason.trim().length < 5) { setErrorMsg('Enter a reason for editing this posted bill (at least 5 characters).'); document.getElementById('bill-edit-reason')?.focus(); return; }
     setAttemptedReview(true); setErrorMsg(null);
@@ -374,6 +379,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     if (!billLines.length) { document.getElementById('bill-activities')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     if (monthLock.locked !== false) { setErrorMsg(monthLock.locked ? 'Choose a business date in an open month before saving.' : 'Please wait for payroll status to load, or retry if it failed.'); return; }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before reviewing.'); return; }
+    if (compactBilling) return handleSaveBill();
     setShowConfirmModal(true);
   };
   return {

@@ -82,6 +82,7 @@ export function ActivityCatalogue({ model }: { model: BillModel }) {
               </div>
             ) : (
               filteredPackages.map((pkg) => {
+                if (compactBilling) return <button type="button" key={pkg.id} aria-label={`Add ${pkg.name} to bill`} className="catalogue-item p-3 rounded-xl border border-slate-200 dark:border-slate-800/80 hover:border-sky-400 dark:hover:border-sky-500 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-sky-50/40 dark:hover:bg-sky-950/30 transition w-full text-left" onClick={() => handleAddPackage(pkg)}><span className="catalogue-item-title text-sm font-bold text-slate-900 dark:text-white">{pkg.name}</span></button>;
                 const totalStandard = pkg.items.reduce((sum, pi) => {
                   const it = items.find(i => i.id === pi.itemId) || pi.item;
                   return sum + (it?.price || 0) * pi.quantity;
@@ -169,7 +170,7 @@ export function ActivityCatalogue({ model }: { model: BillModel }) {
                       <div className="text-sm font-bold text-slate-900 dark:text-white catalogue-item-title group-hover:text-sky-600 dark:group-hover:text-sky-400 transition">
                         {item.name}
                       </div>
-                      <div className="catalogue-item-meta">
+                      {!compactBilling && <div className="catalogue-item-meta">
                         <span className="font-mono text-xs text-slate-400 font-semibold">
                           {item.code}
                         </span>
@@ -183,18 +184,18 @@ export function ActivityCatalogue({ model }: { model: BillModel }) {
                             {item.poolType === 'COURSE_POOL' ? `Course Pool ${item.poolContribution}%` : item.poolType === 'CERTIFICATION_POOL' ? 'Certifications Pool' : `Dive Pool ${item.poolContribution}%`}
                           </span>
                         )}
-                      </div>
+                      </div>}
 
                     </div>
 
-                    <div className="catalogue-item-price text-right flex items-center space-x-2">
+                    {!compactBilling && <div className="catalogue-item-price text-right flex items-center space-x-2">
                       <span className="text-sm font-semibold text-slate-900 dark:text-white">
                         {formatMoney(item.price, currencySymbol)}
                       </span>
                       <div className="w-6 h-6 rounded-lg bg-sky-100 dark:bg-sky-900/60 text-sky-600 dark:text-sky-400 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                         <Plus className="w-3.5 h-3.5" />
                       </div>
-                    </div>
+                    </div>}
                   </button>
                 );
               })}

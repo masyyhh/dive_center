@@ -169,8 +169,8 @@
 .bill-builder.siyam-bill #bill-guest-details .field-help { font-size: 11px; margin-top: 4px; }
 .bill-builder.siyam-bill .bill-work-area { min-height: 0; gap: 12px; }
 .bill-builder.siyam-bill .catalogue-panel { position: static; padding: 14px; }
-.siyam-bill .bill-category-list { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
-.siyam-bill .bill-category-list button { flex-shrink: 0; }
+.siyam-bill .bill-category-list { flex-wrap: wrap; overflow: visible; padding-bottom: 4px; }
+.siyam-bill .bill-category-list button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .siyam-bill .bill-draft-panel, .siyam-bill .bill-activities { min-width: 0; }
 .bill-builder.siyam-bill .bill-draft-card { padding: 14px; }
 .siyam-bill .bill-line { min-width: 0; }
@@ -271,14 +271,13 @@
 .bill-builder.siyam-bill.siyam-ledger .bill-work-area { display: block; flex: 1 1 0; min-height: 200px; }
 .bill-builder.siyam-bill.siyam-ledger .bill-draft-panel { height: 100%; }
 .bill-builder.siyam-bill.siyam-ledger .bill-draft-card { height: 100%; padding: 0; display: flex; flex-direction: column; overflow: auto; }
-.bill-builder.siyam-bill.siyam-ledger .bill-draft-card > div:first-child { padding: 12px 14px; }
 .bill-builder.siyam-bill.siyam-ledger .bill-draft-card > :not([hidden]) ~ :not([hidden]) { margin-block-start: 0; }
 .siyam-table-scroll { flex: 1; min-height: 180px; overflow: auto; }
-.siyam-lines-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 12px; }
+.siyam-lines-table { width: 100%; min-width: 1040px; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
 .siyam-lines-table thead { position: sticky; top: 0; z-index: 1; background: var(--soft); }
 .siyam-lines-table th { font-size: 11px; color: var(--muted); text-align: left; white-space: nowrap; }
 .bill-builder.siyam-bill.siyam-ledger .siyam-lines-table :is(th,td) { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.siyam-lines-table td:nth-child(2) { width: 30%; min-width: 150px; }
+.siyam-lines-table .siyam-description-cell { overflow-wrap: anywhere; }
 .siyam-lines-table td small { display: block; color: var(--muted); font-size: 10px; }
 .bill-builder.siyam-bill.siyam-ledger .siyam-lines-table .siyam-money { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .siyam-lines-table input { width: 64px; min-height: 32px; padding: 4px 6px; border: 1px solid var(--border); background: var(--surface); border-radius: 5px; }
@@ -304,6 +303,57 @@
 }
 .siyam-activity-popover { width: min(540px,calc(100vw - 280px)); }
 .siyam-table-cue { display: none; }
+
+/* Siyam World check entry: header actions, full-height ledger and quiet editable prices. */
+.main-content.siyam-new-bill { max-width: none; padding: 14px 36px 28px; }
+.siyam-new-bill .bill-builder.siyam-bill.siyam-ledger { height: calc(100dvh - 106px); min-height: 580px; }
+.siyam-new-bill .siyam-ledger .siyam-checkout { min-height: 106px; box-shadow: 0 1px 4px #00000006; }
+.siyam-new-bill .billing-draft-status { font-size: 10px; padding-top: 6px; }
+#bill-header-actions .siyam-activity-picker > summary { min-height: 38px; display: flex; align-items: center; }
+#bill-header-actions .siyam-activity-popover { left: auto; right: 0; width: min(440px,calc(100vw - 40px)); font-size: 13px; }
+#bill-header-actions .catalogue-panel { padding: 0; border: 0; box-shadow: none; background: var(--surface); }
+#bill-header-actions .bill-catalogue-items { max-height: 42dvh; }
+#bill-header-actions .bill-category-list { flex-wrap: wrap; overflow: visible; padding-bottom: 4px; }
+#bill-header-actions .bill-category-list button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+#bill-header-actions .catalogue-item-title { font-weight: 500; }
+.siyam-lines-table .siyam-price-input { width: 100%; max-width: 110px; padding-inline: 0; text-align: right; font-variant-numeric: tabular-nums; border-color: transparent; background: transparent; }
+.siyam-lines-table .siyam-price-input:hover, .siyam-lines-table .siyam-price-input:focus { border-color: var(--border); background: var(--surface); }
+.siyam-lines-table .siyam-final-price { font-weight: 600; }
+.siyam-lines-table input[type=number] { appearance: textfield; }
+.siyam-lines-table input[type=number]::-webkit-inner-spin-button, .siyam-lines-table input[type=number]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.siyam-lines-table .siyam-select-cell { width: 42px; min-width: 42px; text-align: center; }
+.bill-builder.siyam-bill.siyam-ledger .siyam-lines-table .siyam-select-cell input { width: 16px; height: 16px; min-height: 16px; accent-color: var(--action); }
+.bill-builder.siyam-bill.siyam-ledger .siyam-lines-table .siyam-discount-cell { text-align: center; }
+.siyam-lines-table .siyam-discount-cell input { max-width: 100%; text-align: center; }
+.siyam-lines-table .siyam-remove-cell { text-align: center; }
+.siyam-lines-table .siyam-row-quantity { justify-content: flex-start; }
+.siyam-lines-table .siyam-credit-button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.siyam-inline-staff { display: grid; grid-template-columns: repeat(auto-fit,minmax(100px,1fr)); gap: 8px; align-items: start; }
+.siyam-inline-staff label { display: grid; gap: 3px; min-width: 0; font-size: 10px; color: var(--muted); }
+.siyam-inline-staff select { width: 100%; min-width: 0; min-height: 32px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.siyam-lines-table .siyam-partial-discount { display: block; margin-top: 4px; font-size: 10px; }
+.siyam-selection-toolbar { display: flex; flex-shrink: 0; align-items: end; flex-wrap: wrap; gap: 12px; padding: 12px 14px; border-block: 1px solid var(--border); background: var(--canvas); font-size: 12px; }
+.siyam-selection-toolbar label { display: grid; gap: 4px; color: var(--muted); }
+.siyam-selection-toolbar :is(input,select) { border: 1px solid var(--border); background: var(--surface); padding: 6px 8px; min-height: 36px; color: var(--ink); }
+.siyam-selection-toolbar input { width: 110px; }
+.siyam-selection-toolbar > span { align-self: center; }
+.siyam-selection-toolbar small { width: 100%; color: var(--muted); }
+@media screen and (max-width: 1099px) {
+  .main-content.siyam-new-bill { padding: 14px 18px 24px; }
+  .siyam-new-bill .bill-builder.siyam-bill.siyam-ledger { height: auto; min-height: 0; }
+  .siyam-new-bill .siyam-lines-table { min-width: 1040px; }
+  .siyam-new-bill .siyam-ledger .siyam-checkout-totals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 20px; }
+  .siyam-new-bill .siyam-ledger .siyam-checkout-totals > div { display: block; }
+}
+@media screen and (max-width: 600px) {
+  .main-content.siyam-new-bill { padding: 12px; }
+  #bill-header-actions .siyam-activity-picker > summary { padding-inline: 10px; font-size: 11px; }
+  .siyam-new-bill .siyam-ledger .siyam-checkout { grid-template-columns: 1fr; }
+  .siyam-new-bill .siyam-ledger .siyam-checkout > button { width: 100%; }
+}
+@media print {
+  .siyam-new-bill .bill-builder.siyam-bill.siyam-ledger { height: auto; min-height: 0; }
+}
 @media screen and (max-width: 1099px) {
   .siyam-table-cue { display: block; position: sticky; left: 0; padding: 8px 12px; font-size: 11px; color: var(--muted); }
 }

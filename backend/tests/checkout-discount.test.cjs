@@ -55,3 +55,14 @@ test('invalid checkout percentages reject the bill without writing any records',
   for(const value of [-1,100.01,'10',null]) assert.equal((await save([line('dive',1,100)],value)).status,400);
   assert.equal(await prisma.bill.count(),count);
 });
+test('individual product price overrides persist with existing discounts and leave other products and catalogue prices intact',async()=>{
+  const result=await save([{...line('dive',3,62.5,20),sellerStaffId:'seller'},line('rental',1,50)],0);
+  assert.equal(result.status,201,JSON.stringify(result.body));
+  const saved=await prisma.bill.findUnique({where:{id:result.body.bill.id},include:{items:true}});
+  const dive=saved.items.find(row=>row.itemId==='dive');
+  assert.equal(dive.unitPrice,62.5); assert.equal(dive.lineTotal,150); assert.equal(dive.discountPercent,20);
+  assert.equal(dive.poolContributionAmount,15); assert.equal(dive.totalPersonalCommission,12);
+  assert.equal(saved.items.find(row=>row.itemId==='rental').unitPrice,50);
+  assert.equal(saved.serviceChargeAmount,20); assert.equal(saved.taxAmount,35.2); assert.equal(saved.netAmount,255.2);
+  assert.equal((await prisma.item.findUnique({where:{id:'dive'}})).price,100);
+});

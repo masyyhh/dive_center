@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useProperty } from '../context/PropertyContext';
+import { isSiyamWorld } from '../utils/propertyPresentation';
 import { waterSportsEnabled } from '../features';
 import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X, Keyboard } from 'lucide-react';
 
@@ -27,6 +29,8 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
     return () => { document.removeEventListener('keydown', trap); if (workspace) workspace.inert = false; previous?.focus(); };
   }, [open]);
   const { user } = useAuth();
+  const { activeProperty } = useProperty();
+  const siyamWorld = isSiyamWorld(activeProperty);
   const canAdmin = user?.role === 'GLOBAL_ADMIN' || user?.role === 'PROPERTY_MANAGER';
   const items = [
     { id: 'home' as NavTab, icon: LayoutDashboard }, { id: 'bills' as NavTab, icon: Receipt },
@@ -34,6 +38,7 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
     { id: 'presence' as NavTab, icon: CalendarCheck }, { id: 'reporting' as NavTab, icon: BarChart3 },
   ];
   const navigate = (tab: NavTab) => { onTabChange(tab); onClose(); };
+  const administration = canAdmin && <nav className="sidebar-links" aria-label="Administration"><button className={currentTab === 'admin' ? 'active' : ''} aria-current={currentTab === 'admin' ? 'page' : undefined} onClick={() => navigate('admin')}><Settings size={19} /><span>Administration</span></button></nav>;
   return <>
     {open && <button className="sidebar-scrim" aria-label="Close navigation" onClick={onClose} />}
     <aside ref={sidebarRef} className={`sidebar ${open ? 'is-open' : ''}`} aria-label="Workspace navigation">
@@ -42,8 +47,8 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
       <button className={`sidebar-create ${currentTab === 'new-bill' ? 'selected' : ''}`} aria-current={currentTab === 'new-bill' ? 'page' : undefined} onClick={() => navigate('new-bill')}><Plus size={18} />New bill</button>
       <span className="eyebrow nav-caption">Workspace</span>
       <nav className="sidebar-links">{items.map(({ id, icon: Icon }) => <button key={id} onClick={() => navigate(id)} aria-current={currentTab === id ? 'page' : undefined} className={currentTab === id ? 'active' : ''}><Icon size={19} /><span>{navLabels[id]}</span>{currentTab === id && <span className="nav-dot" />}</button>)}</nav>
-      {canAdmin && <><span className="eyebrow nav-caption">Settings</span><nav className="sidebar-links"><button className={currentTab === 'admin' ? 'active' : ''} aria-current={currentTab === 'admin' ? 'page' : undefined} onClick={() => navigate('admin')}><Settings size={19} /><span>Administration</span></button></nav></>}
-      <div className="sidebar-bottom"><button type="button" className="sidebar-shortcuts" onClick={() => { onClose(); onShortcuts(); }}><Keyboard size={16} /><span>Keyboard shortcuts</span></button><a href="mailto:mohamed.maseeh@sunsiyam.com"><span>Help & support</span><ArrowUpRight size={16} /></a><span className="sidebar-signature">Sun Diving</span></div>
+      {!siyamWorld && canAdmin && <><span className="eyebrow nav-caption">Settings</span>{administration}</>}
+      {siyamWorld ? canAdmin && <div className="sidebar-bottom">{administration}</div> : <div className="sidebar-bottom"><button type="button" className="sidebar-shortcuts" onClick={() => { onClose(); onShortcuts(); }}><Keyboard size={16} /><span>Keyboard shortcuts</span></button><a href="mailto:mohamed.maseeh@sunsiyam.com"><span>Help & support</span><ArrowUpRight size={16} /></a><span className="sidebar-signature">Sun Diving</span></div>}
     </aside>
   </>;
 };
