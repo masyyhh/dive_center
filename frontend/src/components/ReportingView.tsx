@@ -145,22 +145,22 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
     }
   };
 
-  // Daily XLSX Download (PDF Page 6)
+  // Daily PDF download
   const handleDownloadDaily = async () => {
     if (!activeProperty) return;
     try { await downloadFile(
       `/reports/export/daily?propertyId=${activeProperty.id}&date=${exportDate}`,
-      `Daily_Report_${exportDate}.xlsx`
+      `Daily_Report_${exportDate}.pdf`
     ); } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not download the daily report.'); }
   };
 
-  // Monthly XLSX Workbook Download (PDF Page 6)
+  // Monthly PDF download
   const handleDownloadMonthly = async () => {
     if (!activeProperty) return;
     try { await downloadFile(
       `/reports/export/monthly?propertyId=${activeProperty.id}&yearMonth=${exportMonth}`,
-      `Monthly_Payroll_Workbook_${exportMonth}.xlsx`
-    ); } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not download the monthly workbook.'); }
+      `Monthly_Report_${exportMonth}.pdf`
+    ); } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not download the monthly report.'); }
   };
 
   // Quick CSV Chart Exporter

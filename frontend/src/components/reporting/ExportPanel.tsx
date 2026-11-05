@@ -1,4 +1,4 @@
-import { Download, FileSpreadsheet } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 
 interface ExportPanelProps {
   exportDate: string;
@@ -24,11 +24,11 @@ export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportM
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm export-card flex flex-col items-stretch justify-between gap-4">
           <div>
             <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-1.5">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-              <span>Daily Report (.xlsx)</span>
+              <FileText className="w-4 h-4 text-emerald-500" />
+              <span>Daily Report (.pdf)</span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Bills and commissions.
+              Printable bills, totals and commissions.
             </p>
           </div>
 
@@ -41,6 +41,7 @@ export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportM
               className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white"
             />
             <button
+              aria-label="Download daily PDF"
               onClick={handleDownloadDaily}
               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition flex items-center space-x-1 shadow-xs"
             >
@@ -50,33 +51,34 @@ export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportM
           </div>
         </div>
 
-        {/* Monthly Payroll Workbook Download */}
+        {/* Monthly Report Download */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm export-card flex flex-col items-stretch justify-between gap-4">
           <div>
             <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-1.5">
-              <FileSpreadsheet className="w-4 h-4 text-sky-500" />
-              <span>Monthly Workbook (.xlsx)</span>
+              <FileText className="w-4 h-4 text-sky-500" />
+              <span>Monthly Report (.pdf)</span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Summary, bills, attendance and staff.
+              Summary, items, commissions, bills, attendance and rooms.
             </p>
           </div>
 
           <div className="flex items-center space-x-2">
             <input
               type="month"
-              aria-label="Payroll workbook month"
+              aria-label="Monthly report month"
               value={exportMonth}
               disabled={lockLoading}
               onChange={(e) => setExportMonth(e.target.value)}
               className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white"
             />
             <button
+              aria-label="Download monthly PDF"
               onClick={handleDownloadMonthly}
               className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm transition flex items-center space-x-1 shadow-xs"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Workbook</span>
+              <span>Download</span>
             </button>
           </div>
         </div>

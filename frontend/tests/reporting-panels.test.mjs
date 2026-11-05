@@ -58,7 +58,13 @@ test('export dates, downloads and payroll actions remain separate; staff cannot 
   const calls = [];
   const props = { exportDate: '2026-11-04', exportMonth: '2026-10', payrollLocked: false, payrollLoading: false, payrollError: '', lockLoading: false, canManageLocks: true, setExportDate: date => calls.push(['date', date]), setExportMonth: month => calls.push(['month', month]), handleDownloadDaily: () => calls.push('daily'), handleDownloadMonthly: () => calls.push('monthly'), onConfirmLock: () => calls.push('confirm') };
   const tree = ExportPanel(props);
-  button(tree, 'Download').props.onClick(); button(tree, 'Workbook').props.onClick(); button(tree, 'Lock month').props.onClick();
+  find(tree, node => node.props?.['aria-label'] === 'Download daily PDF').props.onClick();
+  find(tree, node => node.props?.['aria-label'] === 'Download monthly PDF').props.onClick();
+  button(tree, 'Lock month').props.onClick();
+  const html = renderToStaticMarkup(tree);
+  assert.match(html, /Daily Report \(.pdf\)/);
+  assert.match(html, /Monthly Report \(.pdf\)/);
+  assert.doesNotMatch(html, /xlsx|Workbook/);
   find(tree, node => node.props?.['aria-label'] === 'Daily report date').props.onChange({ target: { value: '2026-11-03' } });
   assert.deepEqual(calls, ['daily', 'monthly', 'confirm', ['date', '2026-11-03']]);
   assert.equal(button(ExportPanel({ ...props, canManageLocks: false }), 'Lock month'), undefined);

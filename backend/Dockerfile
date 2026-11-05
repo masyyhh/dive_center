@@ -15,6 +15,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/prisma ./prisma
+COPY --chown=node:node assets ./assets
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node tools ./tools
 COPY --chown=node:node entrypoint.sh ./entrypoint.sh
