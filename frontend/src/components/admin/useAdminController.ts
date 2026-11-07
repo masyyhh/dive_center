@@ -98,6 +98,7 @@ export function useAdminController({ section, onSectionChange }: AdminViewProps)
   const [staffForm, setStaffForm] = useState({
     name: '',
     email: '',
+    erNumber: '',
     isActive: true,
     roleTitle: 'Instructor',
     isDiveStaff: true,
@@ -444,10 +445,10 @@ export function useAdminController({ section, onSectionChange }: AdminViewProps)
   const openStaffEditor = (staff?: StaffMember) => {
     if (!canManageAccounts || !activeProperty || staffBusy || (staff && staff.propertyId !== activeProperty.id)) return;
     setEditingStaff(staff || null); setErrorMsg(null); setGiveStaffLogin(false); setStaffLogin({ username: '', password: '' });
-    setStaffForm(staff ? { name: staff.name, email: staff.email || '', roleTitle: staff.roleTitle, isActive: staff.isActive,
+    setStaffForm(staff ? { name: staff.name, email: staff.email || '', erNumber: staff.erNumber || '', roleTitle: staff.roleTitle, isActive: staff.isActive,
       isDiveStaff: staff.isDiveStaff, isCoursePoolSharing: staff.isCoursePoolSharing, isDivePoolSharing: staff.isDivePoolSharing,
       isBaseLeaderOverride: staff.isBaseLeaderOverride, hireDate: staff.hireDate, leavingDate: staff.leavingDate || '' }
-      : { name: '', email: '', roleTitle: 'Instructor', isActive: true, isDiveStaff: true, isCoursePoolSharing: true,
+      : { name: '', email: '', erNumber: '', roleTitle: 'Instructor', isActive: true, isDiveStaff: true, isCoursePoolSharing: true,
         isDivePoolSharing: true, isBaseLeaderOverride: false, hireDate: businessToday(), leavingDate: '' });
     setShowStaffModal(true);
   };

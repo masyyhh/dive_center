@@ -35,6 +35,7 @@ export function StaffDialog({ model }: { model: AdminModel }) {
                 />
               </div>
 
+              <label className="block font-semibold">ER no. (optional)<input id="staff-er-number" type="text" maxLength={100} value={staffForm.erNumber} onChange={event => setStaffForm({ ...staffForm, erNumber: event.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" /></label>
               <label className="block font-semibold">Email (optional)<input type="email" maxLength={254} value={staffForm.email} onChange={event => setStaffForm({ ...staffForm, email: event.target.value })} className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700" /></label>
               {editingStaff && <label className="flex items-center gap-2"><input type="checkbox" checked={staffForm.isActive} onChange={event => setStaffForm({ ...staffForm, isActive: event.target.checked })} />Active staff member</label>}
               <div>

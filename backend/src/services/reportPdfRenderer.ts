@@ -12,8 +12,13 @@ export interface ReportTable {
   compact?: boolean;
 }
 
+export interface ReportPdfOptions {
+  signOff?: boolean;
+  letterhead?: 'iru-fushi';
+}
+
 /** A print layout with repeated headers, readable column widths and no clipped rows. */
-export function renderReportPdf(title: string, subtitle: string, tables: ReportTable[]): Promise<Buffer> {
+export function renderReportPdf(title: string, subtitle: string, tables: ReportTable[], options: ReportPdfOptions = {}): Promise<Buffer> {
   const doc = new PDFDocument({ autoFirstPage: false, size: 'A4', layout: 'landscape', margin: 32,
     info: { Title: title, Subject: subtitle, Author: 'Dive Centre Manager' } });
   doc.registerFont('Report', path.resolve(__dirname, '../../assets/fonts/DejaVuSans.ttf'));
@@ -25,12 +30,25 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
     doc.on('end', () => resolve(Buffer.concat(chunks)));
   });
   try {
-    const pageWidth = 841.89;
-    const available = pageWidth - 64;
+    const branded = options.letterhead === 'iru-fushi';
+    const pageWidth = branded ? 595.28 : 841.89;
+    const left = branded ? 43.2 : 32;
+    const available = pageWidth - left * 2;
+    const tableTop = branded ? 180 : 98;
     let page = 0;
     let y = 100;
-    const bottom = 550;
+    const bottom = branded ? 730 : 550;
     const lineHeight = 12;
+    const startReportPage = (section: string) => {
+      // Keep every element positioned explicitly, including the supplied footer.
+      doc.addPage({ size: 'A4', layout: branded ? 'portrait' : 'landscape', margin: 0 }); page++;
+      if (branded) doc.image(path.resolve(__dirname, '../../assets/letterheads/iru-fushi.jpg'), 0, 0, { width: 595.28, height: 841.89 });
+      doc.font('ReportBold').fontSize(branded ? 13 : 16).fillColor('#172b3a').text(title, left, branded ? 110 : 25, { width: available, lineBreak: false });
+      doc.font('Report').fontSize(9).fillColor('#536575').text(subtitle, left, branded ? 134 : 49, { width: available, lineBreak: false });
+      doc.font('ReportBold').fontSize(12).fillColor('#172b3a').text(section, left, branded ? 154 : 73, { width: available, lineBreak: false });
+      doc.font('Report').fontSize(7.5).fillColor('#536575').text(`Dive Centre Manager | ${section} | Page ${page}`, left, branded ? 747 : 571, { width: available, lineBreak: false });
+      y = tableTop;
+    };
     // Wrap using the actual embedded font metrics, including long unbroken values.
     const wrap = (text: string, width: number): string[] => {
       const lines: string[] = [];
@@ -77,16 +95,9 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
         const headers = indices.map((index, i) => wrap(table.columns[index].label, colWidths[i] - 14));
         const headerHeight = Math.max(...headers.map(lines => lines.length)) * lineHeight + 14;
         const startPage = () => {
-          // Every element is positioned explicitly; leave the footer inside the page
-          // without PDFKit's flow engine inserting an extra page at the margin.
-          doc.addPage({ size: 'A4', layout: 'landscape', margin: 0 }); page++;
-          doc.font('ReportBold').fontSize(16).fillColor('#172b3a').text(title, 32, 25, { width: available, lineBreak: false });
-          doc.font('Report').fontSize(9).fillColor('#536575').text(subtitle, 32, 49, { width: available, lineBreak: false });
-          doc.font('ReportBold').fontSize(12).fillColor('#172b3a').text(table.title + (groups.length > 1 ? ` - columns ${band + 1}/${groups.length}` : ''), 32, 73, { width: available, lineBreak: false });
-          doc.font('Report').fontSize(7.5).fillColor('#536575').text(`Dive Centre Manager | ${table.title} | Page ${page}`, 32, 571, { width: available, lineBreak: false });
-          y = 98;
-          doc.rect(32, y, totalWidth, headerHeight).fill('#e9eff3');
-          let x = 32;
+          startReportPage(table.title + (groups.length > 1 ? ` - columns ${band + 1}/${groups.length}` : ''));
+          doc.rect(left, y, totalWidth, headerHeight).fill('#e9eff3');
+          let x = left;
           doc.font('ReportBold').fontSize(8.5).fillColor('#172b3a');
           headers.forEach((lines, i) => {
             lines.forEach((line, j) => doc.text(line, x + 7, y + 7 + j * lineHeight, { width: colWidths[i] - 14, lineBreak: false }));
@@ -105,8 +116,8 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
             if (y + padding + lineHeight > bottom) startPage();
             const count = Math.min(maxLines - offset, Math.floor((bottom - y - padding) / lineHeight));
             const height = count * lineHeight + padding;
-            if (rowIndex % 2 === 1) doc.rect(32, y, totalWidth, height).fill('#f5f8fa');
-            let x = 32;
+            if (rowIndex % 2 === 1) doc.rect(left, y, totalWidth, height).fill('#f5f8fa');
+            let x = left;
             doc.font('Report').fontSize(8.5).fillColor('#243744');
             cells.forEach((lines, i) => {
               lines.slice(offset, offset + count).forEach((line, j) => doc.text(line, x + 7, y + padding / 2 + j * lineHeight, {
@@ -115,7 +126,7 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
               x += colWidths[i];
             });
             y += height;
-            doc.moveTo(32, y).lineTo(32 + totalWidth, y).lineWidth(.3).strokeColor('#dce4e9').stroke();
+            doc.moveTo(left, y).lineTo(left + totalWidth, y).lineWidth(.3).strokeColor('#dce4e9').stroke();
             offset += count;
             if (offset < maxLines) startPage();
           }
@@ -124,11 +135,24 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
           doc.font('Report').fontSize(8);
           for (const line of wrap(table.note, totalWidth)) {
             if (y + 20 > bottom) startPage();
-            doc.font('Report').fontSize(8).fillColor('#536575').text(line, 32, y + 8, { lineBreak: false });
+            doc.font('Report').fontSize(8).fillColor('#536575').text(line, left, y + 8, { lineBreak: false });
             y += 13;
           }
         }
       }
+    }
+    if (options.signOff) {
+      if (!page || y + 170 > bottom) startReportPage('Report sign-off');
+      const top = y + 30;
+      const width = (available - 48) / 2;
+      ['PREPARED BY', 'RECEIVED BY'].forEach((label, index) => {
+        const x = left + index * (width + 48);
+        doc.font('ReportBold').fontSize(10).fillColor('#172b3a').text(label, x, top, { width, lineBreak: false });
+        for (const [field, offset] of [['Name', 42], ['Signature', 82], ['Date', 122]] as const) {
+          doc.font('Report').fontSize(8.5).fillColor('#536575').text(`${field}:`, x, top + offset, { lineBreak: false });
+          doc.moveTo(x + 48, top + offset + 12).lineTo(x + width, top + offset + 12).lineWidth(.5).strokeColor('#8393a0').stroke();
+        }
+      });
     }
     doc.end();
   } catch (error) {

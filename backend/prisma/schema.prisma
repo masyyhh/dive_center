@@ -101,6 +101,7 @@ model StaffMember {
   propertyId            String
   name                  String
   email                 String?
+  erNumber              String?
   roleTitle             String        // e.g. "Base Leader", "Assistant Base Leader", "Instructor", "Divemaster", "Photographer"
   isDiveStaff           Boolean       @default(true)  // Only dive staff appear in Presence & share pools
   isCoursePoolSharing   Boolean       @default(false) // e.g. Base Leader, Assistant Base Leader, Instructor

@@ -111,6 +111,7 @@ const staffSchema = z.object({
   propertyId: z.string(),
   name: z.string().trim().min(2).max(200),
   email: z.string().email().optional().or(z.literal('')),
+  erNumber: z.string().trim().max(100).nullish().transform(value => value === '' ? null : value),
   roleTitle: roleTitleSchema,
   isDiveStaff: z.boolean().default(true),
   isCoursePoolSharing: z.boolean().default(false),

@@ -14,3 +14,5 @@
 !assets/
 !assets/fonts/
 !assets/fonts/**
+!assets/letterheads/
+!assets/letterheads/**

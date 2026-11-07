@@ -32,3 +32,34 @@ test('inactive roster editing is available only to managers within their propert
  assert.equal((await call('GET','/',{},manager,{propertyId:'own',includeInactive:'true',creditOnDate:'2026-11-04'})).status,400);
  assert.equal((await call('PUT','/own-staff',{isActive:true,leavingDate:null})).status,200);
 });
+test('optional ER numbers persist across properties, preserve leading zeros and can be cleared',async()=>{
+ const admin={...manager,role:'GLOBAL_ADMIN'};
+ for(const propertyId of ['own','other']){
+  const input={propertyId,name:'Employee with ER',roleTitle:'Instructor',hireDate:'2026-01-01',erNumber:'  0007-AB  '};
+  const created=await call('POST','/',input,admin);
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.staff.id;
+  assert.equal(created.body.staff.erNumber,'0007-AB');
+  assert.equal((await prisma.staffMember.findUnique({where:{id}})).erNumber,'0007-AB');
+  const edited=await call('PUT','/'+id,{name:'Renamed employee'},admin);
+  assert.equal(edited.status,200);assert.equal(edited.body.staff.erNumber,'0007-AB');
+  assert.equal((await call('PUT','/'+id,{erNumber:'  '},admin)).body.staff.erNumber,null);
+  assert.equal((await call('PUT','/'+id,{erNumber:'ER-002'},admin)).body.staff.erNumber,'ER-002');
+  assert.equal((await call('PUT','/'+id,{erNumber:null},admin)).body.staff.erNumber,null);
+  const listed=await call('GET','/',{},admin,{propertyId});
+  assert.equal(listed.body.staff.find(row=>row.id===id).erNumber,null);
+ }
+ for(const erNumber of [undefined,'',null]){
+  const created=await call('POST','/',{propertyId:'own',name:'Without ER',roleTitle:'Instructor',hireDate:'2026-01-01',...(erNumber===undefined?{}:{erNumber})});
+  assert.equal(created.status,201,JSON.stringify(created.body));assert.equal(created.body.staff.erNumber,null);
+ }
+});
+test('ER numbers reject invalid types and lengths and respect staff editing permissions',async()=>{
+ for(const erNumber of [123,{},'x'.repeat(101)]){
+  assert.equal((await call('PUT','/own-staff',{erNumber})).status,400);
+  assert.equal((await call('POST','/',{propertyId:'own',name:'Invalid ER',roleTitle:'Instructor',hireDate:'2026-01-01',erNumber})).status,400);
+ }
+ assert.equal((await call('PUT','/other-staff',{erNumber:'forbidden'})).status,403);
+ assert.equal((await call('PUT','/own-staff',{erNumber:'forbidden'},{...manager,role:'CENTRE_STAFF'})).status,403);
+ assert.equal((await prisma.staffMember.findUnique({where:{id:'other-staff'}})).erNumber,null);
+});

@@ -14,6 +14,18 @@ test('property managers can open a populated staff editor and submit typed chang
 test('ordinary staff have no roster edit action',async()=>{
  const f=fixture('CENTRE_STAFF');f.render();await f.flush();const tree=f.render();assert.equal(nodes(tree).some(node=>node.type==='button'&&node.props['aria-label']==='Edit staff Original Name'),false);
 });
+test('ER number is optional in the shared add form and is submitted with staff edits',async()=>{
+ const f=fixture();f.render();await f.flush();let tree=f.render();
+ nodes(tree).find(node=>node.type==='button'&&nodes(node).some(child=>child.type==='span'&&child.props.children==='Add Staff')).props.onClick();
+ tree=f.render();let input=nodes(tree).find(node=>node.props?.id==='staff-er-number');
+ assert.ok(input);assert.equal(input.props.type,'text');assert.equal(input.props.value,'');assert.ok(!input.props.required);
+ nodes(tree).find(node=>node.type==='button'&&node.props.children==='Cancel').props.onClick();
+ tree=f.render();nodes(tree).find(node=>node.props?.['aria-label']==='Edit staff Original Name').props.onClick();
+ tree=f.render();input=nodes(tree).find(node=>node.props?.id==='staff-er-number');
+ input.props.onChange({target:{value:'0007-AB'}});tree=f.render();
+ await nodes(tree).find(node=>node.type==='form'&&nodes(node).some(child=>child.props?.id==='staff-er-number')).props.onSubmit({preventDefault(){}});
+ assert.equal(JSON.parse(f.calls.find(call=>call.method==='PUT').body).erNumber,'0007-AB');
+});
 
 test('only global administrators can access property creation after section extraction',async()=>{
  const global=fixture('GLOBAL_ADMIN','properties');let tree=global.render();await global.flush();tree=global.render();

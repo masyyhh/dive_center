@@ -66,6 +66,7 @@ export function StaffSection({ model }: { model: AdminModel }) {
                     <td className="py-3 px-4">
                       <div className="font-bold text-slate-900 dark:text-white">{s.name}</div>
                       <div className="text-xs text-slate-400">{s.roleTitle}</div>
+                      {s.erNumber && <div className="text-xs text-slate-500">ER no.: {s.erNumber}</div>}
                       {!s.isActive && <span className="status-badge status-deleted">Inactive</span>}
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">

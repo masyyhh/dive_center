@@ -44,6 +44,7 @@ export interface StaffMember {
   propertyId: string;
   name: string;
   email?: string | null;
+  erNumber?: string | null;
   roleTitle: string;
   isDiveStaff: boolean;
   isCoursePoolSharing: boolean;

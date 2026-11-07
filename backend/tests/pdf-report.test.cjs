@@ -4,15 +4,16 @@ const fs = require('node:fs');
 const { loadTypeScript } = require('./helpers/runtime.cjs');
 const { renderReportPdf } = loadTypeScript('src/services/reportPdfRenderer.ts');
 
-function fixture(empty = false) {
+function fixture(empty = false, propertyName = 'Siyam World') {
   const queries = [];
   let tables;
+  let options;
   const staff = Array.from({ length: 12 }, (_, i) => ({ id: 'staff' + i, name: 'Employee ' + i, hireDate: '2020-01-01', leavingDate: null }));
   const bill = { checkNumber: 1001, roomNumber: '0012', guestName: 'Jürgen Иванов', businessDate: '2028-02-02', nationality: 'Other', grossAmount: 200, discountAmount: 40, serviceChargeAmount: 16, taxAmount: 28.16, tipAmount: 5, netAmount: 209.16,
     items: [{ categoryName: 'Retail', itemName: 'T-shirt', quantity: 2, lineTotal: 160 }] };
   const stubs = {
     '../db': { prisma: {
-      property: { findUnique: async () => ({ id: 'sw', name: 'Siyam World', currency: 'USD' }) },
+      property: { findUnique: async () => ({ id: 'sw', name: propertyName, currency: 'USD' }) },
       bill: { findMany: async query => { queries.push(query); return empty ? [] : [bill]; } },
       staffMember: { findMany: async () => empty ? [] : staff },
       attendance: { findMany: async () => empty ? [] : [{ staffMemberId: 'staff0', date: '2028-02-02', status: 'OFF_HALF' }] },
@@ -21,10 +22,10 @@ function fixture(empty = false) {
       staffResults: empty ? [] : [{ staffName: 'Store employee', roleTitle: 'Store Attendant', courseCommission: 0, diveCommission: 0, overrideCommission: 0, tipsCommission: 5, personalCommission: 8, totalCommission: 13 }],
       personalDetails: empty ? [] : [{ businessDate: bill.businessDate, checkNumber: bill.checkNumber, roomNumber: bill.roomNumber, guestName: bill.guestName, itemName: 'T-shirt', role: 'Store attendant (Retail 5% shared)', staffName: 'Store employee', amount: 8 }],
     }) },
-    './reportPdfRenderer': { renderReportPdf: async (title, subtitle, sections) => { tables = sections; return renderReportPdf(title, subtitle, sections); } },
+    './reportPdfRenderer': { renderReportPdf: async (title, subtitle, sections, config) => { tables = sections; options = config; return renderReportPdf(title, subtitle, sections, config); } },
   };
   const service = loadTypeScript('src/services/pdfReportService.ts', stubs);
-  return { ...service, queries, tables: () => tables };
+  return { ...service, queries, tables: () => tables, options: () => options };
 }
 
 test('monthly PDF preserves discounted financial totals, shared payments, full attendance month and room totals', async () => {
@@ -32,6 +33,7 @@ test('monthly PDF preserves discounted financial totals, shared payments, full a
   const buffer = await f.generateMonthlyPdfReport('sw', '2028-02');
   assert.equal(buffer.subarray(0, 5).toString(), '%PDF-');
   assert.match(buffer.toString('latin1'), /\/MediaBox \[0 0 841\.89 595\.28\]/);
+  assert.deepEqual(f.options(), { signOff: true });
   const tables = f.tables();
   assert.deepEqual(tables.map(t => t.title), ['Overview', 'Item report', 'Commission and staff pay', 'Commission details', 'All bills', 'Attendance', 'Room report']);
   assert.equal(tables[0].rows.find(row => row[0] === 'Sales after discounts')[1], '160.00');
@@ -55,6 +57,7 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
   assert(daily.tables().some(t => t.title === 'Daily bills'));
   assert(!daily.tables().some(t => t.title === 'Attendance'));
+  assert.deepEqual(daily.options(), { signOff: false });
   assert.deepEqual(daily.queries[0].where.businessDate, { gte: '2028-02-02', lte: '2028-02-02' });
   const empty = fixture(true);
   const blank = await empty.generateMonthlyPdfReport('sw', '2028-02');
@@ -62,6 +65,30 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   assert.equal(empty.tables()[0].rows.find(row => row[0] === 'Grand total')[1], '0.00');
   assert.equal(empty.tables().at(-1).rows[0][1], '0.00');
   if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/daily-report.pdf', pdf);
+});
+test('the supplied letterhead applies only to Iru Fushi monthly reports; all monthly reports include sign-off', async () => {
+  for (const name of ['Iru Fushi', 'Irufushi', 'Sun Siyam Iru Fushi']) {
+    const f = fixture(false, name);
+    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02');
+    assert.deepEqual(f.options(), { signOff: true, letterhead: 'iru-fushi' });
+    assert.match(pdf.toString('latin1'), /\/MediaBox \[0 0 595\.28 841\.89\]/);
+    assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
+    if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-monthly-report.pdf', pdf);
+    await f.generateDailyPdfReport('sw', '2028-02-02');
+    assert.deepEqual(f.options(), { signOff: false });
+  }
+  for (const name of ['Siyam World', 'Sun Siyam Vilu Reef', 'Iru Fushi Annex']) {
+    const f = fixture(true, name);
+    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02');
+    assert.deepEqual(f.options(), { signOff: true });
+    assert.doesNotMatch(pdf.toString('latin1'), /\/Subtype \/Image/);
+  }
+});
+test('sign-off fits on the last page or continues onto a new page when the final table fills it', async () => {
+  const pdf = await renderReportPdf('Monthly report', '2028-02 | USD', [{ title: 'Room report', columns: [{ label: 'Room' }, { label: 'Turnover' }],
+    rows: Array.from({ length: 16 }, (_, i) => [String(i), '100.00']) }], { signOff: true });
+  assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length, 2);
+  if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/signoff-overflow.pdf', pdf);
 });
 test('long cells and large tables paginate without losing completion or crashing', async () => {
   const buffer = await renderReportPdf('Test report', 'USD', [{ title: 'Large table', columns: [{ label: 'Name', width: 120 }, { label: 'Description', width: 200 }],
