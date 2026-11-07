@@ -67,7 +67,7 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   assert.equal(empty.tables().at(-1).rows[0][1], '0.00');
   if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/daily-report.pdf', pdf);
 });
-test('the supplied letterhead applies only to Iru Fushi monthly reports; all monthly reports include sign-off', async () => {
+test('the supplied letterhead applies only to Iru Fushi daily and monthly reports; sign-off stays monthly', async () => {
   for (const name of ['Iru Fushi', 'Irufushi', 'Sun Siyam Iru Fushi']) {
     const f = fixture(false, name);
     const pdf = await f.generateMonthlyPdfReport('sw', '2028-02', 'iru.manager');
@@ -75,8 +75,11 @@ test('the supplied letterhead applies only to Iru Fushi monthly reports; all mon
     assert.match(pdf.toString('latin1'), /\/MediaBox \[0 0 595\.28 841\.89\]/);
     assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
     if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-monthly-report.pdf', pdf);
-    await f.generateDailyPdfReport('sw', '2028-02-02');
-    assert.deepEqual(f.options(), { signOff: false });
+    const daily = await f.generateDailyPdfReport('sw', '2028-02-02');
+    assert.deepEqual(f.options(), { signOff: false, letterhead: 'iru-fushi' });
+    assert.match(daily.toString('latin1'), /\/MediaBox \[0 0 595\.28 841\.89\]/);
+    assert.match(daily.toString('latin1'), /\/Subtype \/Image/);
+    if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-daily-report.pdf', daily);
   }
   for (const name of ['Siyam World', 'Sun Siyam Vilu Reef', 'Iru Fushi Annex']) {
     const f = fixture(true, name);

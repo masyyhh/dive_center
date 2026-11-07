@@ -96,7 +96,7 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     tables.push({ title: 'Room report', columns: [column('Room', 200), column('Turnover after discounts', 200, true)],
       rows: [...[...rooms].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([room, turnover]) => [room, money(turnover)]), ['TOTAL', money(sales)]] });
   }
-  const iruFushiLetterhead = monthly && /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
+  const iruFushiLetterhead = /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
   return renderReportPdf(`${property.name} - ${monthly ? 'Monthly' : 'Daily'} report`, `${period} | ${property.currency} | Active bills only`, tables,
     { signOff: monthly, ...(monthly ? { preparedBy: { name: preparedByName, date: businessToday() } } : {}),
       ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : {}) });
