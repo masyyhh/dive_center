@@ -49,11 +49,6 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       doc.font('ReportBold').fontSize(branded ? 13 : 16).fillColor('#172b3a').text(title, left, branded ? 110 : 25, { width: available, lineBreak: false });
       doc.font('Report').fontSize(9).fillColor('#536575').text(subtitle, left, branded ? 134 : 49, { width: available, lineBreak: false });
       doc.font('ReportBold').fontSize(12).fillColor('#172b3a').text(section, left, branded ? 154 : 73, { width: available, lineBreak: false });
-      doc.font('Report').fontSize(7.5).fillColor('#536575');
-      wrap(electronicDocumentNotice, available).forEach((line, index) => {
-        doc.text(line, left, (branded ? 720 : 542) + index * 9, { width: available, lineBreak: false });
-      });
-      doc.font('Report').fontSize(7.5).fillColor('#536575').text(`Dive Centre Manager | ${section} | Page ${page}`, left, branded ? 747 : 571, { width: available, lineBreak: false });
       y = tableTop;
     };
     // Wrap using the actual embedded font metrics, including long unbroken values.
@@ -173,6 +168,11 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
         }
       });
     }
+    if (!page) startReportPage('Report');
+    doc.font('Report').fontSize(7.5).fillColor('#536575');
+    wrap(electronicDocumentNotice, available).forEach((line, index) => {
+      doc.text(line, left, (branded ? 720 : 542) + index * 9, { width: available, lineBreak: false });
+    });
     doc.end();
   } catch (error) {
     doc.emit('error', error instanceof Error ? error : new Error(String(error)));

@@ -38,9 +38,9 @@ export function registerReportExportRoutes(reportsRouter: Router) {
         return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
       }
 
-      const account = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { username: true } });
+      const account = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
       if (!account) return res.status(401).json({ error: 'Your session is no longer valid. Please sign in again.' });
-      const buffer = await generateMonthlyPdfReport(String(propertyId), String(yearMonth), req.testingLiveUsername ?? account.username);
+      const buffer = await generateMonthlyPdfReport(String(propertyId), String(yearMonth), account.name);
 
       res.setHeader(
         'Content-Type',

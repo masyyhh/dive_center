@@ -31,10 +31,10 @@ function fixture(empty = false, propertyName = 'Siyam World') {
 
 test('monthly PDF preserves discounted financial totals, shared payments, full attendance month and room totals', async () => {
   const f = fixture();
-  const buffer = await f.generateMonthlyPdfReport('sw', '2028-02', 'report.manager');
+  const buffer = await f.generateMonthlyPdfReport('sw', '2028-02', 'Report Manager');
   assert.equal(buffer.subarray(0, 5).toString(), '%PDF-');
   assert.match(buffer.toString('latin1'), /\/MediaBox \[0 0 841\.89 595\.28\]/);
-  assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'report.manager', date: '2026-11-07' } });
+  assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'Report Manager', date: '2026-11-07' } });
   const tables = f.tables();
   assert.deepEqual(tables.map(t => t.title), ['Overview', 'Item report', 'Commission and staff pay', 'Commission details', 'All bills', 'Attendance', 'Room report']);
   assert.equal(tables[0].rows.find(row => row[0] === 'Sales after discounts')[1], '160.00');
@@ -70,8 +70,8 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
 test('the supplied letterhead applies only to Iru Fushi daily and monthly reports; sign-off stays monthly', async () => {
   for (const name of ['Iru Fushi', 'Irufushi', 'Sun Siyam Iru Fushi']) {
     const f = fixture(false, name);
-    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02', 'iru.manager');
-    assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'iru.manager', date: '2026-11-07' }, letterhead: 'iru-fushi' });
+    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02', 'Iru Fushi Manager');
+    assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'Iru Fushi Manager', date: '2026-11-07' }, letterhead: 'iru-fushi' });
     assert.match(pdf.toString('latin1'), /\/MediaBox \[0 0 595\.28 841\.89\]/);
     assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
     if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-monthly-report.pdf', pdf);
@@ -106,7 +106,7 @@ test('export endpoints return PDF attachment headers and enforce property access
   const generated = [];
   const { registerReportExportRoutes } = loadTypeScript('src/routes/report.export.ts', {
     '../middleware/auth': { requireAuth: (_req, _res, next) => next() },
-    '../db': { prisma: { user: { findUnique: async ({ where }) => { assert.equal(where.id, 'current-user'); return { username: 'trusted.login' }; } } } },
+    '../db': { prisma: { user: { findUnique: async ({ where, select }) => { assert.equal(where.id, 'current-user'); assert.deepEqual(select, { name: true }); return { name: 'Trusted Full Name', username: 'trusted.login' }; } } } },
     '../services/pdfReportService': { generateDailyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-daily'); }, generateMonthlyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-monthly'); } },
   });
   registerReportExportRoutes(router);
@@ -126,5 +126,5 @@ test('export endpoints return PDF attachment headers and enforce property access
   assert.equal((await call('/export/daily', { propertyId: 'foreign', date: '2028-02-02' })).status, 403);
   assert.equal((await call('/export/monthly', { propertyId: 'sw', yearMonth: '2028-13' })).status, 400);
   assert.equal(generated.length, 2);
-  assert.deepEqual(generated[1], ['sw', '2028-02', 'trusted.login']);
+  assert.deepEqual(generated[1], ['sw', '2028-02', 'Trusted Full Name']);
 });
