@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { loadTypeScript } = require('./helpers/runtime.cjs');
 const { renderReportPdf } = loadTypeScript('src/services/reportPdfRenderer.ts');
+class GeneratedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-11-06T22:15:00.000Z'])); } }
 
 function fixture(empty = false, propertyName = 'Siyam World') {
   const queries = [];
@@ -24,16 +25,16 @@ function fixture(empty = false, propertyName = 'Siyam World') {
     }) },
     './reportPdfRenderer': { renderReportPdf: async (title, subtitle, sections, config) => { tables = sections; options = config; return renderReportPdf(title, subtitle, sections, config); } },
   };
-  const service = loadTypeScript('src/services/pdfReportService.ts', stubs);
+  const service = loadTypeScript('src/services/pdfReportService.ts', stubs, { Date: GeneratedDate });
   return { ...service, queries, tables: () => tables, options: () => options };
 }
 
 test('monthly PDF preserves discounted financial totals, shared payments, full attendance month and room totals', async () => {
   const f = fixture();
-  const buffer = await f.generateMonthlyPdfReport('sw', '2028-02');
+  const buffer = await f.generateMonthlyPdfReport('sw', '2028-02', 'report.manager');
   assert.equal(buffer.subarray(0, 5).toString(), '%PDF-');
   assert.match(buffer.toString('latin1'), /\/MediaBox \[0 0 841\.89 595\.28\]/);
-  assert.deepEqual(f.options(), { signOff: true });
+  assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'report.manager', date: '2026-11-07' } });
   const tables = f.tables();
   assert.deepEqual(tables.map(t => t.title), ['Overview', 'Item report', 'Commission and staff pay', 'Commission details', 'All bills', 'Attendance', 'Room report']);
   assert.equal(tables[0].rows.find(row => row[0] === 'Sales after discounts')[1], '160.00');
@@ -69,8 +70,8 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
 test('the supplied letterhead applies only to Iru Fushi monthly reports; all monthly reports include sign-off', async () => {
   for (const name of ['Iru Fushi', 'Irufushi', 'Sun Siyam Iru Fushi']) {
     const f = fixture(false, name);
-    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02');
-    assert.deepEqual(f.options(), { signOff: true, letterhead: 'iru-fushi' });
+    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02', 'iru.manager');
+    assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'iru.manager', date: '2026-11-07' }, letterhead: 'iru-fushi' });
     assert.match(pdf.toString('latin1'), /\/MediaBox \[0 0 595\.28 841\.89\]/);
     assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
     if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-monthly-report.pdf', pdf);
@@ -80,13 +81,13 @@ test('the supplied letterhead applies only to Iru Fushi monthly reports; all mon
   for (const name of ['Siyam World', 'Sun Siyam Vilu Reef', 'Iru Fushi Annex']) {
     const f = fixture(true, name);
     const pdf = await f.generateMonthlyPdfReport('sw', '2028-02');
-    assert.deepEqual(f.options(), { signOff: true });
+    assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'System generated', date: '2026-11-07' } });
     assert.doesNotMatch(pdf.toString('latin1'), /\/Subtype \/Image/);
   }
 });
 test('sign-off fits on the last page or continues onto a new page when the final table fills it', async () => {
   const pdf = await renderReportPdf('Monthly report', '2028-02 | USD', [{ title: 'Room report', columns: [{ label: 'Room' }, { label: 'Turnover' }],
-    rows: Array.from({ length: 16 }, (_, i) => [String(i), '100.00']) }], { signOff: true });
+    rows: Array.from({ length: 16 }, (_, i) => [String(i), '100.00']) }], { signOff: true, preparedBy: { name: 'System generated', date: '2026-11-07' } });
   assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length, 2);
   if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/signoff-overflow.pdf', pdf);
 });
@@ -102,16 +103,17 @@ test('export endpoints return PDF attachment headers and enforce property access
   const generated = [];
   const { registerReportExportRoutes } = loadTypeScript('src/routes/report.export.ts', {
     '../middleware/auth': { requireAuth: (_req, _res, next) => next() },
+    '../db': { prisma: { user: { findUnique: async ({ where }) => { assert.equal(where.id, 'current-user'); return { username: 'trusted.login' }; } } } },
     '../services/pdfReportService': { generateDailyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-daily'); }, generateMonthlyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-monthly'); } },
   });
   registerReportExportRoutes(router);
   const call = (path, query) => new Promise((resolve, reject) => {
     const headers = {};
-    const req = { method: 'GET', url: path, query, user: { role: 'PROPERTY_MANAGER', assignedPropertyIds: ['sw'] } };
+    const req = { method: 'GET', url: path, query, user: { id: 'current-user', name: 'Display name', role: 'PROPERTY_MANAGER', assignedPropertyIds: ['sw'] } };
     const res = { statusCode: 200, setHeader: (key, value) => { headers[key] = value; }, status(code) { this.statusCode = code; return this; }, json(body) { resolve({ status: this.statusCode, body, headers }); }, send(body) { resolve({ status: this.statusCode, body, headers }); } };
     router.handle(req, res, reject);
   });
-  for (const [path, query, filename] of [['/export/daily', { propertyId: 'sw', date: '2028-02-02' }, 'Daily_Report_2028-02-02.pdf'], ['/export/monthly', { propertyId: 'sw', yearMonth: '2028-02' }, 'Monthly_Report_2028-02.pdf']]) {
+  for (const [path, query, filename] of [['/export/daily', { propertyId: 'sw', date: '2028-02-02' }, 'Daily_Report_2028-02-02.pdf'], ['/export/monthly', { propertyId: 'sw', yearMonth: '2028-02', preparedBy: 'forged.login' }, 'Monthly_Report_2028-02.pdf']]) {
     const response = await call(path, query);
     assert.equal(response.status, 200);
     assert.equal(response.headers['Content-Type'], 'application/pdf');
@@ -121,4 +123,5 @@ test('export endpoints return PDF attachment headers and enforce property access
   assert.equal((await call('/export/daily', { propertyId: 'foreign', date: '2028-02-02' })).status, 403);
   assert.equal((await call('/export/monthly', { propertyId: 'sw', yearMonth: '2028-13' })).status, 400);
   assert.equal(generated.length, 2);
+  assert.deepEqual(generated[1], ['sw', '2028-02', 'trusted.login']);
 });

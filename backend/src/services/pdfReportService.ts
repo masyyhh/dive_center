@@ -1,13 +1,13 @@
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
-import { isBusinessDate, isYearMonth } from '../utils/dates';
+import { businessToday, isBusinessDate, isYearMonth } from '../utils/dates';
 import { renderReportPdf, ReportTable, ReportCell } from './reportPdfRenderer';
 
 const money = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const column = (label: string, width = 78, numeric = false) => ({ label, width, numeric });
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
-export async function generateReportPdf(propertyId: string, period: string, monthly: boolean) {
+export async function generateReportPdf(propertyId: string, period: string, monthly: boolean, preparedByName = 'System generated') {
   if (monthly ? !isYearMonth(period) : !isBusinessDate(period)) throw new Error('Choose a valid report period.');
   const start = monthly ? `${period}-01` : period;
   const end = monthly ? new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0)).toISOString().slice(0, 10) : period;
@@ -98,8 +98,9 @@ export async function generateReportPdf(propertyId: string, period: string, mont
   }
   const iruFushiLetterhead = monthly && /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
   return renderReportPdf(`${property.name} - ${monthly ? 'Monthly' : 'Daily'} report`, `${period} | ${property.currency} | Active bills only`, tables,
-    { signOff: monthly, ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : {}) });
+    { signOff: monthly, ...(monthly ? { preparedBy: { name: preparedByName, date: businessToday() } } : {}),
+      ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : {}) });
 }
 
 export const generateDailyPdfReport = (propertyId: string, date: string) => generateReportPdf(propertyId, date, false);
-export const generateMonthlyPdfReport = (propertyId: string, month: string) => generateReportPdf(propertyId, month, true);
+export const generateMonthlyPdfReport = (propertyId: string, month: string, preparedByName?: string) => generateReportPdf(propertyId, month, true, preparedByName);

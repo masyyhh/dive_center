@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
 import { generateDailyPdfReport, generateMonthlyPdfReport } from '../services/pdfReportService';
 import { isBusinessDate, isYearMonth } from '../utils/dates';
+import { prisma } from '../db';
 
 export function registerReportExportRoutes(reportsRouter: Router) {
   // GET /api/reports/export/daily?propertyId=...&date=...
@@ -37,7 +38,9 @@ export function registerReportExportRoutes(reportsRouter: Router) {
         return res.status(400).json({ error: 'Valid yearMonth (YYYY-MM) is required.' });
       }
 
-      const buffer = await generateMonthlyPdfReport(String(propertyId), String(yearMonth));
+      const account = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { username: true } });
+      if (!account) return res.status(401).json({ error: 'Your session is no longer valid. Please sign in again.' });
+      const buffer = await generateMonthlyPdfReport(String(propertyId), String(yearMonth), req.testingLiveUsername ?? account.username);
 
       res.setHeader(
         'Content-Type',

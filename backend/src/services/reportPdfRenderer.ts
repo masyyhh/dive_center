@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import path from 'node:path';
+import { businessToday } from '../utils/dates';
 
 export type ReportCell = string | number;
 export interface ReportTable {
@@ -15,6 +16,7 @@ export interface ReportTable {
 export interface ReportPdfOptions {
   signOff?: boolean;
   letterhead?: 'iru-fushi';
+  preparedBy?: { name: string; date: string };
 }
 
 /** A print layout with repeated headers, readable column widths and no clipped rows. */
@@ -142,12 +144,24 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       }
     }
     if (options.signOff) {
-      if (!page || y + 170 > bottom) startReportPage('Report sign-off');
-      const top = y + 30;
       const width = (available - 48) / 2;
+      doc.font('Report').fontSize(8.5);
+      const preparedName = wrap(options.preparedBy?.name ?? 'System generated', width - 48);
+      const preparedDateOffset = Math.max(82, 42 + preparedName.length * lineHeight + 12);
+      const signOffHeight = 30 + Math.max(134, preparedDateOffset + lineHeight);
+      if (!page || y + signOffHeight > bottom) startReportPage('Report sign-off');
+      const top = y + 30;
       ['PREPARED BY', 'RECEIVED BY'].forEach((label, index) => {
         const x = left + index * (width + 48);
         doc.font('ReportBold').fontSize(10).fillColor('#172b3a').text(label, x, top, { width, lineBreak: false });
+        if (index === 0) {
+          doc.font('Report').fontSize(8.5).fillColor('#536575').text('Name:', x, top + 42, { lineBreak: false });
+          preparedName.forEach((line, i) => doc.text(line, x + 48, top + 42 + i * lineHeight, { width: width - 48, lineBreak: false }));
+          const dateY = top + preparedDateOffset;
+          doc.text('Date:', x, dateY, { lineBreak: false });
+          doc.text(options.preparedBy?.date ?? businessToday(), x + 48, dateY, { width: width - 48, lineBreak: false });
+          return;
+        }
         for (const [field, offset] of [['Name', 42], ['Signature', 82], ['Date', 122]] as const) {
           doc.font('Report').fontSize(8.5).fillColor('#536575').text(`${field}:`, x, top + offset, { lineBreak: false });
           doc.moveTo(x + 48, top + offset + 12).lineTo(x + width, top + offset + 12).lineWidth(.5).strokeColor('#8393a0').stroke();
