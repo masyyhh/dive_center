@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import path from 'node:path';
 import { businessToday } from '../utils/dates';
+import { electronicDocumentNotice } from '../utils/documentNotice';
 
 export type ReportCell = string | number;
 export interface ReportTable {
@@ -39,7 +40,7 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
     const tableTop = branded ? 180 : 98;
     let page = 0;
     let y = 100;
-    const bottom = branded ? 730 : 550;
+    const bottom = branded ? 710 : 532;
     const lineHeight = 12;
     const startReportPage = (section: string) => {
       // Keep every element positioned explicitly, including the supplied footer.
@@ -48,6 +49,10 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       doc.font('ReportBold').fontSize(branded ? 13 : 16).fillColor('#172b3a').text(title, left, branded ? 110 : 25, { width: available, lineBreak: false });
       doc.font('Report').fontSize(9).fillColor('#536575').text(subtitle, left, branded ? 134 : 49, { width: available, lineBreak: false });
       doc.font('ReportBold').fontSize(12).fillColor('#172b3a').text(section, left, branded ? 154 : 73, { width: available, lineBreak: false });
+      doc.font('Report').fontSize(7.5).fillColor('#536575');
+      wrap(electronicDocumentNotice, available).forEach((line, index) => {
+        doc.text(line, left, (branded ? 720 : 542) + index * 9, { width: available, lineBreak: false });
+      });
       doc.font('Report').fontSize(7.5).fillColor('#536575').text(`Dive Centre Manager | ${section} | Page ${page}`, left, branded ? 747 : 571, { width: available, lineBreak: false });
       y = tableTop;
     };

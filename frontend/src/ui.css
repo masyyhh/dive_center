@@ -725,3 +725,8 @@
   .siyam-bills-split { min-height: 0; }
   .bill-reading-content { padding: 0; }
 }
+.document-generation-notice { margin-top: 16px; font-size: 11px; line-height: 1.5; color: var(--muted); break-inside: avoid; }
+@media print {
+  body:has(.bill-receipt-document) { overflow: visible !important; }
+  .modal-dialog:has(.bill-receipt-document), .bill-receipt-document { position: static; max-height: none !important; overflow: visible !important; }
+}

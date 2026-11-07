@@ -58,6 +58,7 @@ test('Siyam World opens selected bills in the reading pane while other propertie
   if(split)assert.match(text(nodes(f.render()).find(node=>node.props?.id==='bill-reading-pane')),/Select a bill/);
   nodes(f.render()).find(node=>node.props?.['aria-label']==='View bill 101').props.onClick({stopPropagation(){}});
   await f.flush();const tree=f.render();
+  assert.match(text(tree), /This document has been generated electronically by computer and does not require a handwritten signature\./);
   assert.equal(nodes(tree).some(node=>node.props?.label==='Bill details'),!split);
   if(split){
    const pane=nodes(tree).find(node=>node.props?.id==='bill-reading-pane');

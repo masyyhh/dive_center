@@ -3,6 +3,7 @@ import { TableScroll } from '../TableScroll';
 import { formatMoney, formatUnitPrice } from '../../utils/format';
 import { Modal } from '../Modal';
 import { displayDate } from '../../utils/dates';
+import { electronicDocumentNotice } from '../../utils/documentNotice';
 
 import { CalendarDays, RotateCcw, Trash2, Printer, Receipt } from 'lucide-react';
 import type { BillsModel } from './useBillsController';
@@ -21,7 +22,7 @@ export function BillDetails({ model, inline = false }: { model: BillsModel; inli
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) pane.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [inline, selectedBill?.id]);
   const content = selectedBill && (
-          <div className={inline ? 'bill-reading-content space-y-5' : 'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto'}>
+          <div className={`bill-receipt-document ${inline ? 'bill-reading-content space-y-5' : 'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto'}`}>
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
               <div>
@@ -169,6 +170,7 @@ export function BillDetails({ model, inline = false }: { model: BillsModel; inli
               </div>
             </div>
 
+            <p className="document-generation-notice">{electronicDocumentNotice}</p>
             {/* Actions Toolbar per PDF Page 4: Re-date, Rebate, Delete */}
             <div className="bill-receipt-actions pt-2 border-t border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 justify-between items-center">
               <div className="flex space-x-2">

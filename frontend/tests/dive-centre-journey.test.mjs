@@ -5,6 +5,9 @@ import ts from 'typescript';
 const source = await readFile(new URL('../src/utils/diveCentreJourney.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
 const { signatureHasInk, remainingMinutes, guestTokenFromHash, disclaimerReadiness } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const noticeSource = await readFile(new URL('../src/utils/documentNotice.ts', import.meta.url), 'utf8');
+const noticeCompiled = ts.transpileModule(noticeSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { electronicDocumentNotice } = await import(`data:text/javascript;base64,${Buffer.from(noticeCompiled).toString('base64')}`);
 test('guest cannot submit an empty signature or an invisible tap', () => {
   for (const strokes of [[], [[]], [[[10,10]]], [[[10,10],[10,10]]], [[[10,10],[12,12]]]]) assert.equal(signatureHasInk(strokes), false);
   assert.equal(signatureHasInk([[[10,10],[16,10]]]), true);
@@ -55,6 +58,7 @@ test('the rendered Create guest link button follows testing lookup readiness', a
       react: hooks,
       'react/jsx-runtime': jsxRuntime,
       '../utils/diveCentreJourney': { disclaimerReadiness },
+      '../utils/documentNotice': { electronicDocumentNotice },
       '../utils/inputValidation': { isRoomNumber: value => /^[0-9]+$/.test(value), roomNumberHelp: 'Digits only' },
       '../services/api': {},
       '../context/PropertyContext': { useProperty: () => ({ activeProperty: { id: 'test' } }) },
