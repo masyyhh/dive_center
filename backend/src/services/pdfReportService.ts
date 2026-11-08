@@ -12,6 +12,16 @@ const staffBreakdown = (row: { courseCommission: number; diveCommission: number;
   return amounts(components.filter(([, value]) => value !== 0)) || 'No commission';
 };
 
+// Report-only classification: retain the commission engine's saved payments and totals.
+const personalSplit = (staffId: string, total: number, details: { staffId: string; role: string; amount: number }[]) => {
+  const selected = details.filter(detail => detail.staffId === staffId);
+  const cents = (role: (value: string) => boolean) => Math.round(sum(selected.filter(detail => role(detail.role)).map(detail => detail.amount)) * 100);
+  const photo = cents(role => role === 'Photo' || role === 'Photo / Video');
+  const upselling = cents(role => role === 'Seller');
+  const guiding = cents(role => role === 'Guide');
+  return [photo, upselling, guiding, Math.round(total * 100) - photo - upselling - guiding].map(value => value / 100);
+};
+
 export async function generateReportPdf(propertyId: string, period: string, monthly: boolean, preparedByName = 'System generated') {
   if (monthly ? !isYearMonth(period) : !isBusinessDate(period)) throw new Error('Choose a valid report period.');
   const start = monthly ? `${period}-01` : period;
@@ -22,6 +32,29 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     include: { items: true }, orderBy: [{ businessDate: 'asc' }, { checkNumber: 'asc' }] });
   const commission = await calculateCommissionForPeriod(propertyId, start, end);
   const tables: ReportTable[] = [];
+  const iruFushiLetterhead = /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
+  const periodLabel = new Intl.DateTimeFormat('en-GB', { ...(monthly ? {} : { day: '2-digit' as const }), month: 'long', year: 'numeric', timeZone: 'Indian/Maldives' }).format(new Date(`${start}T12:00:00Z`));
+  const preparedBy = { name: preparedByName, date: businessToday() };
+  if (!monthly) {
+    const total = (field: 'grossAmount' | 'discountAmount' | 'serviceChargeAmount' | 'taxAmount' | 'tipAmount' | 'netAmount') => money(sum(bills.map(bill => bill[field])));
+    tables.push({ title: 'Bills', singleTable: true, compact: true,
+      columns: [column('Check #', 55), column('Room #', 48), column('Guest name', 125), column('Nationality', 95), column('Items count', 48, true),
+        column('Gross', 65, true), column('Discount', 65, true), column('Service charge', 70, true), column('Tax', 65, true), column('Tip', 55, true), column('Net total', 82, true)],
+      rows: [...bills.map(bill => [bill.checkNumber, bill.roomNumber, bill.guestName, bill.nationality, bill.items.length,
+        money(bill.grossAmount), money(bill.discountAmount), money(bill.serviceChargeAmount), money(bill.taxAmount), money(bill.tipAmount), money(bill.netAmount)]),
+        ['TOTAL', '', '', '', sum(bills.map(bill => bill.items.length)), total('grossAmount'), total('discountAmount'), total('serviceChargeAmount'), total('taxAmount'), total('tipAmount'), total('netAmount')]],
+      note: `${bills.length} active bill${bills.length === 1 ? '' : 's'}. Items count is the number of saved bill lines. Amounts in ${property.currency}.` });
+    const fields = ['courseCommission', 'diveCommission', 'overrideCommission', 'tipsCommission', 'personalCommission', 'totalCommission'] as const;
+    tables.push({ title: 'Staff Commission', singleTable: true, compact: true,
+      columns: [column('Staff member', 190), column('Role', 120), column('Course pool', 78, true), column('Dive pool', 78, true), column('Base leader override', 90, true), column('Tips', 65, true), column('Personal', 78, true), column('Total pay', 85, true)],
+      rows: [...commission.staffResults.map(row => [row.staffName, row.roleTitle, ...fields.map(field => money(row[field]))]),
+        ['TOTAL', '', ...fields.map(field => money(sum(commission.staffResults.map(row => row[field]))))]] });
+    tables.push({ title: 'Certifications Pool', singleTable: true,
+      columns: [column('Metric', 300), column('Value', 400)],
+      rows: [[`Certifications pool (${property.currency})`, money(commission.certificationPoolTotal)], ['Distribution', 'No staff commission or base-leader override']] });
+    return renderReportPdf(`${property.name} - Daily report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
+      { signOff: true, preparedBy, logo: iruFushiLetterhead ? 'iru-fushi' : 'dive-centre' });
+  }
   const sales = sum(bills.map(bill => bill.grossAmount - bill.discountAmount));
   tables.push({ title: 'Overview', emphasizeRows: [3, 7, 9], columns: [column('Metric', 340), column(`Amount / value (${property.currency})`, 170, true)], rows: [
     ['Active bills', bills.length], ['Gross sales', money(sum(bills.map(bill => bill.grossAmount)))],
@@ -76,6 +109,12 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     rows: [...staffRows.map(row => [`${row.staffName}\n${row.roleTitle}`, staffBreakdown(row), `${money(row.totalCommission)}\nTips: ${money(row.tipsCommission)}`]),
       ['TOTAL', staffBreakdown(staffTotals), `${money(staffTotals.totalCommission)}\nTips: ${money(staffTotals.tipsCommission)}`]],
     note: 'Total pay includes tips. Only non-zero commission components are listed. Personal includes the shared Store attendant Retail allocation and assigned payments. Certifications are excluded from staff pay.' });
+  const splitRows = staffRows.map(row => ({ name: row.staffName, values: personalSplit(row.staffId, row.personalCommission, commission.personalDetails), total: row.personalCommission }));
+  tables.push({ title: 'Personal commission summary', singleTable: true, compact: true,
+    columns: [column('Employee', 180), column('Photo', 75, true), column('Upselling', 75, true), column('Guiding', 75, true), column('Other / rounding', 85, true), column('Personal total', 85, true)],
+    rows: [...splitRows.map(row => [row.name, ...row.values.map(money), money(row.total)]),
+      ['TOTAL', ...[0, 1, 2, 3].map(index => money(sum(splitRows.map(row => row.values[index])))), money(staffTotals.personalCommission)]],
+    note: 'Photo includes Photo and Photo / Video payments. Upselling is Seller commission; Guiding is Guide commission. Other includes instructor, separate video and Retail payments, plus any cent rounding adjustment. These amounts split Personal commission and are already included in Staff payments.' });
   if (commission.personalDetails.length) tables.push({ title: 'Commission details', singleTable: true,
     columns: [column('Bill / guest', 140, false, 115), column('Item / activity', 145, false, 120), column('Employee / payment', 155, false, 130), column('Amount', 80, true, 70)],
     rows: commission.personalDetails.map(row => [`#${row.checkNumber}\n${row.businessDate}\nRoom: ${row.roomNumber}\n${row.guestName}`, row.itemName, `${row.staffName}\n${row.role}`, money(row.amount)]) });
@@ -120,12 +159,9 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     tables.push({ title: 'Room report', columns: [column('Room', 200), column('Turnover after discounts', 200, true)],
       rows: [...[...rooms].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([room, turnover]) => [room, money(turnover)]), ['TOTAL', money(sales)]] });
   }
-  const iruFushiLetterhead = /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
-  const periodLabel = new Intl.DateTimeFormat('en-GB', { ...(monthly ? {} : { day: '2-digit' as const }), month: 'long', year: 'numeric', timeZone: 'Indian/Maldives' }).format(new Date(`${start}T12:00:00Z`));
-  return renderReportPdf(`${property.name} - ${monthly ? 'Monthly' : 'Daily'} report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
-    { signOff: monthly, ...(monthly ? { preparedBy: { name: preparedByName, date: businessToday() } } : {}),
-      ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : {}) });
+  return renderReportPdf(`${property.name} - Monthly report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
+    { signOff: true, preparedBy, ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : { logo: 'dive-centre' as const }) });
 }
 
-export const generateDailyPdfReport = (propertyId: string, date: string) => generateReportPdf(propertyId, date, false);
+export const generateDailyPdfReport = (propertyId: string, date: string, preparedByName?: string) => generateReportPdf(propertyId, date, false, preparedByName);
 export const generateMonthlyPdfReport = (propertyId: string, month: string, preparedByName?: string) => generateReportPdf(propertyId, month, true, preparedByName);

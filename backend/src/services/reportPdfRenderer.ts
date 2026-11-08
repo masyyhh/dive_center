@@ -20,6 +20,7 @@ export interface ReportTable {
 export interface ReportPdfOptions {
   signOff?: boolean;
   letterhead?: 'iru-fushi';
+  logo?: 'iru-fushi' | 'dive-centre';
   preparedBy?: { name: string; date: string };
 }
 
@@ -48,11 +49,20 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       // Keep every element positioned explicitly, including the supplied footer.
       doc.addPage({ size: 'A4', layout: branded ? 'portrait' : 'landscape', margin: 0 }); page++;
       if (branded) doc.image(path.resolve(__dirname, '../../assets/letterheads/iru-fushi.jpg'), 0, 0, { width: 595.28, height: 841.89 });
+      if (!branded && options.logo === 'iru-fushi') {
+        // Reuse the supplied letterhead artwork at its original aspect ratio, clipped to its logo.
+        doc.save().rect(pageWidth - left - 140, 14, 140, 54).clip();
+        doc.image(path.resolve(__dirname, '../../assets/letterheads/iru-fushi.jpg'), pageWidth - left - 140 - 115, 5, { width: 370 });
+        doc.restore();
+      } else if (!branded && options.logo === 'dive-centre') {
+        doc.image(path.resolve(__dirname, '../../assets/branding/dive-centre.png'), pageWidth - left - 54, 24, { width: 54 });
+      }
       const titleY = branded ? 108 : 28;
       const titleLineHeight = branded ? 19 : 22;
       doc.font('ReportBold').fontSize(branded ? 14 : 17).fillColor('#193b47');
-      const titleLines = wrap(title, available);
-      titleLines.forEach((line, index) => doc.text(line, left, titleY + index * titleLineHeight, { width: available, lineBreak: false }));
+      const titleWidth = available - (!branded && options.logo ? 158 : 0);
+      const titleLines = wrap(title, titleWidth);
+      titleLines.forEach((line, index) => doc.text(line, left, titleY + index * titleLineHeight, { width: titleWidth, lineBreak: false }));
       const subtitleY = titleY + titleLines.length * titleLineHeight + 5;
       doc.font('Report').fontSize(8.5).fillColor('#607480').text(subtitle, left, subtitleY, { width: available, lineBreak: false });
       const sectionY = subtitleY + 24;

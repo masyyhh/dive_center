@@ -15,7 +15,9 @@ export function registerReportExportRoutes(reportsRouter: Router) {
         return res.status(400).json({ error: 'Valid date (YYYY-MM-DD) is required.' });
       }
 
-      const buffer = await generateDailyPdfReport(String(propertyId), String(date));
+      const account = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+      if (!account) return res.status(401).json({ error: 'Your session is no longer valid. Please sign in again.' });
+      const buffer = await generateDailyPdfReport(String(propertyId), String(date), account.name);
 
       res.setHeader(
         'Content-Type',
