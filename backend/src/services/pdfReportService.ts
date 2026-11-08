@@ -4,8 +4,13 @@ import { businessToday, isBusinessDate, isYearMonth } from '../utils/dates';
 import { renderReportPdf, ReportTable, ReportCell } from './reportPdfRenderer';
 
 const money = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const column = (label: string, width = 78, numeric = false) => ({ label, width, numeric });
+const column = (label: string, width = 78, numeric = false, minWidth?: number, align?: 'left' | 'center' | 'right') => ({ label, width, numeric, minWidth, align });
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+const amounts = (values: [string, number][]) => values.map(([label, value]) => `${label}: ${money(value)}`).join('\n');
+const staffBreakdown = (row: { courseCommission: number; diveCommission: number; overrideCommission: number; personalCommission: number }) => {
+  const components: [string, number][] = [['Course', row.courseCommission], ['Dive', row.diveCommission], ['Override', row.overrideCommission], ['Personal', row.personalCommission]];
+  return amounts(components.filter(([, value]) => value !== 0)) || 'No commission';
+};
 
 export async function generateReportPdf(propertyId: string, period: string, monthly: boolean, preparedByName = 'System generated') {
   if (monthly ? !isYearMonth(period) : !isBusinessDate(period)) throw new Error('Choose a valid report period.');
@@ -18,7 +23,7 @@ export async function generateReportPdf(propertyId: string, period: string, mont
   const commission = await calculateCommissionForPeriod(propertyId, start, end);
   const tables: ReportTable[] = [];
   const sales = sum(bills.map(bill => bill.grossAmount - bill.discountAmount));
-  tables.push({ title: 'Overview', columns: [column('Metric', 340), column(`Amount / value (${property.currency})`, 170, true)], rows: [
+  tables.push({ title: 'Overview', emphasizeRows: [3, 7, 9], columns: [column('Metric', 340), column(`Amount / value (${property.currency})`, 170, true)], rows: [
     ['Active bills', bills.length], ['Gross sales', money(sum(bills.map(bill => bill.grossAmount)))],
     ['Discounts', money(sum(bills.map(bill => bill.discountAmount)))], ['Sales after discounts', money(sales)],
     ['Service charge', money(sum(bills.map(bill => bill.serviceChargeAmount)))], ['Tax', money(sum(bills.map(bill => bill.taxAmount)))],
@@ -29,6 +34,19 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     ['Store attendant Retail pool (5% shared)', money(commission.storeAttendantPoolTotal)],
     ['Unallocated Retail pool (no eligible attendants)', money(commission.unallocatedStoreAttendantPoolTotal)],
   ], note: 'Only active bills are included. Amounts are in the property currency. Retail payments are included in Personal commission. Free snorkel gear adjustments are not recorded on bills and are not included.' });
+
+  const categories = new Map<string, { quantity: number; turnover: number }>();
+  for (const bill of bills) for (const line of bill.items) {
+    const category = categories.get(line.categoryName) ?? { quantity: 0, turnover: 0 };
+    category.quantity += line.quantity; category.turnover += line.lineTotal;
+    categories.set(line.categoryName, category);
+  }
+  const categoryRows = [...categories].sort(([a], [b]) => a.localeCompare(b));
+  tables.push({ title: 'Category summary', singleTable: true,
+    columns: [column('Category', 290, false, 180), column('Quantity', 90, true, 65), column('Sales after discounts', 140, true, 110)],
+    rows: [...categoryRows.map(([name, value]) => [name, value.quantity, money(value.turnover)]),
+      ['TOTAL', sum(categoryRows.map(([, value]) => value.quantity)), money(sum(categoryRows.map(([, value]) => value.turnover)))]],
+    note: 'Category sales are based on saved bill items after discounts, excluding service charge, tax and tips.' });
 
   if (monthly) {
     const items = new Map<string, { category: string; name: string; quantity: number; turnover: number }>();
@@ -44,30 +62,36 @@ export async function generateReportPdf(propertyId: string, period: string, mont
       itemRows.push(...categoryItems.map(item => [item.category, item.name, item.quantity, money(item.turnover)]),
         [`${category} subtotal`, '', sum(categoryItems.map(item => item.quantity)), money(sum(categoryItems.map(item => item.turnover)))]);
     }
-    tables.push({ title: 'Item report', columns: [column('Category', 135), column('Item / activity', 280), column('Quantity', 90, true), column('Turnover', 110, true)],
+    tables.push({ title: 'Item report', singleTable: true, columns: [column('Category', 135), column('Item / activity', 280), column('Quantity', 90, true), column('Turnover', 110, true)],
       rows: [...itemRows, ['TOTAL', '', sum(sorted.map(item => item.quantity)), money(sum(sorted.map(item => item.turnover)))]] });
   }
   const staffRows = commission.staffResults;
-  tables.push({ title: 'Commission and staff pay', repeatColumns: 1,
-    columns: [column('Staff member', 145), column('Role', 115), ...['Course', 'Dive', 'Override', 'Tips', 'Personal', 'Total pay'].map(label => column(label, 80, true))],
-    rows: [...staffRows.map(row => [row.staffName, row.roleTitle, ...[row.courseCommission, row.diveCommission, row.overrideCommission, row.tipsCommission, row.personalCommission, row.totalCommission].map(money)]),
-      ['TOTAL', '', ...['courseCommission', 'diveCommission', 'overrideCommission', 'tipsCommission', 'personalCommission', 'totalCommission'].map(key => money(sum(staffRows.map(row => row[key as keyof typeof row] as number))))]],
-    note: 'Personal includes the shared Store attendant Retail allocation and assigned employee payments. Certifications are excluded from staff pay.' });
-  if (commission.personalDetails.length) tables.push({ title: 'Commission details', repeatColumns: 2,
-    columns: [column('Date', 80), column('Check', 55), column('Room', 55), column('Guest', 105), column('Item / activity', 135), column('Payment role', 130), column('Employee', 115), column('Amount', 80, true)],
-    rows: commission.personalDetails.map(row => [row.businessDate, row.checkNumber, row.roomNumber, row.guestName, row.itemName, row.role, row.staffName, money(row.amount)]) });
+  const staffTotals = {
+    courseCommission: sum(staffRows.map(row => row.courseCommission)), diveCommission: sum(staffRows.map(row => row.diveCommission)),
+    overrideCommission: sum(staffRows.map(row => row.overrideCommission)), personalCommission: sum(staffRows.map(row => row.personalCommission)),
+    tipsCommission: sum(staffRows.map(row => row.tipsCommission)), totalCommission: sum(staffRows.map(row => row.totalCommission)),
+  };
+  tables.push({ title: 'Staff payments', singleTable: true,
+    columns: [column('Employee', 175, false, 145), column('Commission breakdown', 205, false, 175), column('Total pay / tips', 130, false, 120, 'right')],
+    rows: [...staffRows.map(row => [`${row.staffName}\n${row.roleTitle}`, staffBreakdown(row), `${money(row.totalCommission)}\nTips: ${money(row.tipsCommission)}`]),
+      ['TOTAL', staffBreakdown(staffTotals), `${money(staffTotals.totalCommission)}\nTips: ${money(staffTotals.tipsCommission)}`]],
+    note: 'Total pay includes tips. Only non-zero commission components are listed. Personal includes the shared Store attendant Retail allocation and assigned payments. Certifications are excluded from staff pay.' });
+  if (commission.personalDetails.length) tables.push({ title: 'Commission details', singleTable: true,
+    columns: [column('Bill / guest', 140, false, 115), column('Item / activity', 145, false, 120), column('Employee / payment', 155, false, 130), column('Amount', 80, true, 70)],
+    rows: commission.personalDetails.map(row => [`#${row.checkNumber}\n${row.businessDate}\nRoom: ${row.roomNumber}\n${row.guestName}`, row.itemName, `${row.staffName}\n${row.role}`, money(row.amount)]) });
 
-  const categories = [...new Set(bills.flatMap(bill => bill.items.map(line => line.categoryName)))].sort();
-  const fixedBillColumns = [column('Check', 65), column('Room', 60), column('Guest', 135), column('Date', 85), column('Nationality', 95)];
-  const billColumns = [...fixedBillColumns, ...(monthly ? categories.map(name => column(name, 90, true)) : [column('Items', 60, true)]),
-    ...['Gross', 'Discount', 'Sales', 'Service charge', 'Tax', 'Tip', 'Grand total'].map(label => column(label, 90, true))];
-  const billRows: ReportCell[][] = bills.map(bill => [bill.checkNumber, bill.roomNumber, bill.guestName, bill.businessDate, bill.nationality,
-    ...(monthly ? categories.map(category => money(sum(bill.items.filter(line => line.categoryName === category).map(line => line.lineTotal)))) : [bill.items.length]),
-    ...[bill.grossAmount, bill.discountAmount, bill.grossAmount - bill.discountAmount, bill.serviceChargeAmount, bill.taxAmount, bill.tipAmount, bill.netAmount].map(money)]);
-  billRows.push(['TOTAL', '', '', '', '', ...(monthly ? categories.map(category => money(sum(bills.flatMap(bill => bill.items.filter(line => line.categoryName === category).map(line => line.lineTotal))))) : [sum(bills.map(bill => bill.items.length))]),
-    ...[sum(bills.map(bill => bill.grossAmount)), sum(bills.map(bill => bill.discountAmount)), sales, sum(bills.map(bill => bill.serviceChargeAmount)), sum(bills.map(bill => bill.taxAmount)), sum(bills.map(bill => bill.tipAmount)), sum(bills.map(bill => bill.netAmount))].map(money)]);
-  tables.push({ title: monthly ? 'All bills' : 'Daily bills', repeatColumns: 3, columns: billColumns, rows: billRows,
-    note: 'Wide reports continue in column groups. Check, room and guest repeat in each group.' });
+  const billRows: ReportCell[][] = bills.map(bill => [
+    `#${bill.checkNumber}\n${bill.guestName}\nRoom: ${bill.roomNumber}\nDate: ${bill.businessDate}\nNationality: ${bill.nationality}\nItems: ${bill.items.length}`,
+    `${money(bill.grossAmount - bill.discountAmount)}\n${amounts([['Gross', bill.grossAmount], ['Discount', bill.discountAmount]])}`,
+    amounts([['Service', bill.serviceChargeAmount], ['Tax', bill.taxAmount], ['Tip', bill.tipAmount]]), money(bill.netAmount),
+  ]);
+  billRows.push([`TOTAL\nItems: ${sum(bills.map(bill => bill.items.length))}`,
+    `${money(sales)}\n${amounts([['Gross', sum(bills.map(bill => bill.grossAmount))], ['Discount', sum(bills.map(bill => bill.discountAmount))]])}`,
+    amounts([['Service', sum(bills.map(bill => bill.serviceChargeAmount))], ['Tax', sum(bills.map(bill => bill.taxAmount))], ['Tip', sum(bills.map(bill => bill.tipAmount))]]),
+    money(sum(bills.map(bill => bill.netAmount)))]);
+  tables.push({ title: 'Bill totals', singleTable: true, emphasizeRows: [billRows.length - 1],
+    columns: [column('Bill / guest', 180, false, 140), column('Sales', 110, false, 105, 'right'), column('Charges', 125, false, 115), column('Grand total', 100, true, 95)], rows: billRows,
+    note: 'Sales are after discounts. Charges list service charge, tax and guest tips. Category sales are shown separately in the Category summary.' });
 
   if (monthly) {
     const staff = await prisma.staffMember.findMany({ where: { propertyId, hireDate: { lte: end }, OR: [{ leavingDate: null }, { leavingDate: { gte: start } }] }, orderBy: { name: 'asc' } });
@@ -89,7 +113,7 @@ export async function generateReportPdf(propertyId: string, period: string, mont
       ['Annual leave', ...staff.map(person => count(person.id, 'ANNUAL_LEAVE'))], ['Sick', ...staff.map(person => count(person.id, 'SICK'))],
       ['Absent', ...staff.map(person => count(person.id, 'ABSENT'))], ['Emergency leave', ...staff.map(person => count(person.id, 'EMERGENCY_LEAVE'))],
       ['Payable days', ...staff.map(person => count(person.id, 'PRESENT') + count(person.id, 'OFF') + count(person.id, 'OFF_HALF'))]);
-    tables.push({ title: 'Attendance', compact: true, columns: [column('Date / summary', 105), ...staff.map(person => column(person.name, 100))], rows,
+    tables.push({ title: 'Attendance', compact: true, emphasizeRows: [rows.length - 1], columns: [column('Date / summary', 105, false, 95), ...staff.map(person => column(person.name, 100, false, 90))], rows,
       note: 'P: present | O: off | O 1/2: half off | AL: annual leave | S: sick | A: absent | EL: emergency leave. Blank means no saved attendance; - means outside employment dates. Dates repeat for each staff column group.' });
     const rooms = new Map<string, number>();
     for (const bill of bills) rooms.set(bill.roomNumber, (rooms.get(bill.roomNumber) ?? 0) + bill.grossAmount - bill.discountAmount);
@@ -97,7 +121,8 @@ export async function generateReportPdf(propertyId: string, period: string, mont
       rows: [...[...rooms].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([room, turnover]) => [room, money(turnover)]), ['TOTAL', money(sales)]] });
   }
   const iruFushiLetterhead = /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
-  return renderReportPdf(`${property.name} - ${monthly ? 'Monthly' : 'Daily'} report`, `${period} | ${property.currency} | Active bills only`, tables,
+  const periodLabel = new Intl.DateTimeFormat('en-GB', { ...(monthly ? {} : { day: '2-digit' as const }), month: 'long', year: 'numeric', timeZone: 'Indian/Maldives' }).format(new Date(`${start}T12:00:00Z`));
+  return renderReportPdf(`${property.name} - ${monthly ? 'Monthly' : 'Daily'} report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
     { signOff: monthly, ...(monthly ? { preparedBy: { name: preparedByName, date: businessToday() } } : {}),
       ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : {}) });
 }

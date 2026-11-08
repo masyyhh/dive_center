@@ -5,7 +5,7 @@ const { loadTypeScript } = require('./helpers/runtime.cjs');
 const { renderReportPdf } = loadTypeScript('src/services/reportPdfRenderer.ts');
 class GeneratedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-11-06T22:15:00.000Z'])); } }
 
-function fixture(empty = false, propertyName = 'Siyam World') {
+function fixture(empty = false, propertyName = 'Siyam World', extraBills = []) {
   const queries = [];
   let tables;
   let options;
@@ -15,7 +15,7 @@ function fixture(empty = false, propertyName = 'Siyam World') {
   const stubs = {
     '../db': { prisma: {
       property: { findUnique: async () => ({ id: 'sw', name: propertyName, currency: 'USD' }) },
-      bill: { findMany: async query => { queries.push(query); return empty ? [] : [bill]; } },
+      bill: { findMany: async query => { queries.push(query); return empty ? [] : [bill, ...extraBills]; } },
       staffMember: { findMany: async () => empty ? [] : staff },
       attendance: { findMany: async () => empty ? [] : [{ staffMemberId: 'staff0', date: '2028-02-02', status: 'OFF_HALF' }] },
     } },
@@ -36,11 +36,11 @@ test('monthly PDF preserves discounted financial totals, shared payments, full a
   assert.match(buffer.toString('latin1'), /\/MediaBox \[0 0 841\.89 595\.28\]/);
   assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'Report Manager', date: '2026-11-07' } });
   const tables = f.tables();
-  assert.deepEqual(tables.map(t => t.title), ['Overview', 'Item report', 'Commission and staff pay', 'Commission details', 'All bills', 'Attendance', 'Room report']);
+  assert.deepEqual(tables.map(t => t.title), ['Overview', 'Category summary', 'Item report', 'Staff payments', 'Commission details', 'Bill totals', 'Attendance', 'Room report']);
   assert.equal(tables[0].rows.find(row => row[0] === 'Sales after discounts')[1], '160.00');
   assert.equal(tables[0].rows.find(row => row[0] === 'Staff commission excluding tips')[1], '8.00');
   assert.equal(tables[0].rows.find(row => row[0].startsWith('Store attendant'))[1], '8.00');
-  assert.equal(tables[1].rows.at(-1).at(-1), '160.00');
+  assert.equal(tables.find(table => table.title === 'Item report').rows.at(-1).at(-1), '160.00');
   assert.equal(tables.at(-1).rows[0][0], '0012');
   assert.equal(tables.at(-1).rows.at(-1)[1], '160.00');
   const attendance = tables.find(table => table.title === 'Attendance');
@@ -56,7 +56,7 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   const daily = fixture();
   const pdf = await daily.generateDailyPdfReport('sw', '2028-02-02');
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
-  assert(daily.tables().some(t => t.title === 'Daily bills'));
+  assert(daily.tables().some(t => t.title === 'Bill totals'));
   assert(!daily.tables().some(t => t.title === 'Attendance'));
   assert.deepEqual(daily.options(), { signOff: false });
   assert.deepEqual(daily.queries[0].where.businessDate, { gte: '2028-02-02', lte: '2028-02-02' });
@@ -66,6 +66,30 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   assert.equal(empty.tables()[0].rows.find(row => row[0] === 'Grand total')[1], '0.00');
   assert.equal(empty.tables().at(-1).rows[0][1], '0.00');
   if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/daily-report.pdf', pdf);
+});
+test('compact financial tables keep complete bills and pay components together and reconcile category sales', async () => {
+  const extra = { checkNumber: 1002, roomNumber: '0008', guestName: 'Second guest', businessDate: '2028-02-03', nationality: 'German', grossAmount: 300, discountAmount: 30, serviceChargeAmount: 27, taxAmount: 47.52, tipAmount: 10, netAmount: 354.52,
+    items: [{ categoryName: 'Courses', itemName: 'Course', quantity: 3, lineTotal: 270 }] };
+  for (const property of ['Siyam World', 'Sun Siyam Iru Fushi']) {
+    const f = fixture(false, property, [extra]);
+    const pdf = await f.generateMonthlyPdfReport('sw', '2028-02', 'Report Manager');
+    if (process.env.PDF_QA_DIR && property === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-multiple-bills.pdf', pdf);
+    const get = title => f.tables().find(table => table.title === title);
+    for (const title of ['Category summary', 'Item report', 'Staff payments', 'Commission details', 'Bill totals']) assert.equal(get(title).singleTable, true);
+    assert.deepEqual(get('Category summary').rows, [['Courses', 3, '270.00'], ['Retail', 2, '160.00'], ['TOTAL', 5, '430.00']]);
+    const pay = get('Staff payments');
+    assert.equal(pay.columns.length, 3);
+    assert.match(pay.rows[0][0], /Store employee\nStore Attendant/);
+    assert.equal(pay.rows[0][1], 'Personal: 8.00');
+    assert.equal(pay.rows.at(-1)[2], '13.00\nTips: 5.00');
+    const totals = get('Bill totals');
+    assert.equal(totals.columns.length, 4);
+    assert.match(totals.rows[0][0], /#1001\nJürgen Иванов\nRoom: 0012/);
+    assert.match(totals.rows[1][0], /Room: 0008\nDate: 2028-02-03\nNationality: German\nItems: 1/);
+    assert.equal(totals.rows.at(-1)[1], '430.00\nGross: 500.00\nDiscount: 70.00');
+    assert.equal(totals.rows.at(-1)[2], 'Service: 43.00\nTax: 75.68\nTip: 15.00');
+    assert.equal(totals.rows.at(-1)[3], '563.68');
+  }
 });
 test('the supplied letterhead applies only to Iru Fushi daily and monthly reports; sign-off stays monthly', async () => {
   for (const name of ['Iru Fushi', 'Irufushi', 'Sun Siyam Iru Fushi']) {

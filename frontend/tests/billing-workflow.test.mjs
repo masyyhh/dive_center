@@ -294,3 +294,19 @@ test('Siyam Save posts once without confirmation, retains failed drafts and perm
   assert.ok(f.button(next, 'Save'));
   cleanup.forEach(dispose => dispose());
 });
+
+
+test('final bill summary keeps checkout calculations and optional tip in sync', () => {
+  const f = fixture('Iru Fushi');
+  const summary = () => descendants(f.render(), node => node.props['aria-label'] === 'Final bill total')[0];
+  assert.match(text(summary()), /Gross total\$300.00/);
+  assert.doesNotMatch(text(summary()), /Checkout discount|Guest tip|All activities, packages/);
+  descendants(f.render(), node => node.props.id === 'checkout-discount')[0].props.onChange({ target: { value: '10' } });
+  descendants(f.render(), node => node.props.id === 'newbillview-field-10')[0].props.onChange({ target: { value: '5' } });
+  const result = summary();
+  assert.match(text(result), /Checkout discount \(10%\)−\$30.00/);
+  assert.match(text(result), /Service charge \(10%\)\$27.00/);
+  assert.match(text(result), /Tax \/ TGST \(16%\)\$47.52/);
+  assert.match(text(result), /Guest tip\$5.00/);
+  assert.equal(text(descendants(result, node => node.props['aria-live'] === 'polite')[0]), '$349.52');
+});

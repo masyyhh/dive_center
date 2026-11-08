@@ -6,12 +6,15 @@ import { electronicDocumentNotice } from '../utils/documentNotice';
 export type ReportCell = string | number;
 export interface ReportTable {
   title: string;
-  columns: { label: string; width?: number; numeric?: boolean }[];
+  columns: { label: string; width?: number; minWidth?: number; numeric?: boolean; align?: 'left' | 'center' | 'right' }[];
   rows: ReportCell[][];
   /** Repeat these identity columns when a wide table is split horizontally. */
   repeatColumns?: number;
   note?: string;
   compact?: boolean;
+  emphasizeRows?: number[];
+  /** Compact records flow vertically, without dividing their columns into panels. */
+  singleTable?: boolean;
 }
 
 export interface ReportPdfOptions {
@@ -37,19 +40,25 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
     const pageWidth = branded ? 595.28 : 841.89;
     const left = branded ? 43.2 : 32;
     const available = pageWidth - left * 2;
-    const tableTop = branded ? 180 : 98;
     let page = 0;
     let y = 100;
     const bottom = branded ? 710 : 532;
-    const lineHeight = 12;
-    const startReportPage = (section: string) => {
+    const lineHeight = 13;
+    const startReportPage = (section: string, panel?: string) => {
       // Keep every element positioned explicitly, including the supplied footer.
       doc.addPage({ size: 'A4', layout: branded ? 'portrait' : 'landscape', margin: 0 }); page++;
       if (branded) doc.image(path.resolve(__dirname, '../../assets/letterheads/iru-fushi.jpg'), 0, 0, { width: 595.28, height: 841.89 });
-      doc.font('ReportBold').fontSize(branded ? 13 : 16).fillColor('#172b3a').text(title, left, branded ? 110 : 25, { width: available, lineBreak: false });
-      doc.font('Report').fontSize(9).fillColor('#536575').text(subtitle, left, branded ? 134 : 49, { width: available, lineBreak: false });
-      doc.font('ReportBold').fontSize(12).fillColor('#172b3a').text(section, left, branded ? 154 : 73, { width: available, lineBreak: false });
-      y = tableTop;
+      const titleY = branded ? 108 : 28;
+      const titleLineHeight = branded ? 19 : 22;
+      doc.font('ReportBold').fontSize(branded ? 14 : 17).fillColor('#193b47');
+      const titleLines = wrap(title, available);
+      titleLines.forEach((line, index) => doc.text(line, left, titleY + index * titleLineHeight, { width: available, lineBreak: false }));
+      const subtitleY = titleY + titleLines.length * titleLineHeight + 5;
+      doc.font('Report').fontSize(8.5).fillColor('#607480').text(subtitle, left, subtitleY, { width: available, lineBreak: false });
+      const sectionY = subtitleY + 24;
+      doc.font('ReportBold').fontSize(12).fillColor('#193b47').text(section, left, sectionY, { width: available - (panel ? 110 : 0), lineBreak: false });
+      if (panel) doc.font('Report').fontSize(8).fillColor('#607480').text(panel, left + available - 110, sectionY + 3, { width: 110, align: 'right', lineBreak: false });
+      y = sectionY + 26;
     };
     // Wrap using the actual embedded font metrics, including long unbroken values.
     const wrap = (text: string, width: number): string[] => {
@@ -74,56 +83,95 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       return lines.length ? lines : [''];
     };
     for (const table of tables) {
-      const padding = table.compact ? 6 : 14;
+      const padding = table.compact ? 5 : 12;
       const repeat = table.repeatColumns ?? 1;
       const widths = table.columns.map(column => Math.max(48, column.width ?? 78));
+      doc.font('ReportBold').fontSize(9);
+      const minimums = table.columns.map((column, index) => {
+        const minimum = column.minWidth ?? Math.max(48, widths[index] * .75);
+        // Keep formatted amounts together instead of breaking a number across lines.
+        const amountWidth = column.numeric ? Math.min(180, table.rows.reduce((maximum, row) => Math.max(maximum, doc.widthOfString(String(row[index] ?? ''))), 0) + 16) : 0;
+        return Math.max(minimum, amountWidth);
+      });
       const identity = Array.from({ length: Math.min(repeat, widths.length) }, (_, i) => i);
       const groups: number[][] = [];
       let group = [...identity];
-      let used = identity.reduce((sum, index) => sum + widths[index], 0);
-      for (let index = identity.length; index < widths.length; index++) {
-        if (used + widths[index] > available && group.length > identity.length) {
-          groups.push(group); group = [...identity]; used = identity.reduce((sum, id) => sum + widths[id], 0);
+      let used = identity.reduce((sum, index) => sum + minimums[index], 0);
+      for (let index = identity.length; !table.singleTable && index < widths.length; index++) {
+        if (used + minimums[index] > available && group.length > identity.length) {
+          groups.push(group); group = [...identity]; used = identity.reduce((sum, id) => sum + minimums[id], 0);
         }
-        group.push(index); used += widths[index];
+        group.push(index); used += minimums[index];
       }
-      groups.push(group);
+      groups.push(table.singleTable ? widths.map((_, index) => index) : group);
+      // Avoid a final panel containing just one amount when adjacent panels can share the space.
+      if (groups.length > 1) {
+        const previous = groups[groups.length - 2];
+        const last = groups[groups.length - 1];
+        while (previous.length - last.length > 1) {
+          const candidate = previous[previous.length - 1];
+          if (last.reduce((total, index) => total + minimums[index], 0) + minimums[candidate] > available) break;
+          previous.pop(); last.splice(identity.length, 0, candidate);
+        }
+      }
       for (let band = 0; band < groups.length; band++) {
         const indices = groups[band];
-        const naturalWidth = indices.reduce((sum, index) => sum + widths[index], 0);
-        const colWidths = indices.map(index => widths[index] * Math.min(1.35, available / naturalWidth));
+        const naturalWidth = indices.reduce((sum, index) => sum + Math.max(widths[index], minimums[index]), 0);
+        const minimumWidth = indices.reduce((sum, index) => sum + minimums[index], 0);
+        const flex = naturalWidth - minimumWidth;
+        const colWidths = indices.map(index => available >= naturalWidth
+          ? Math.max(widths[index], minimums[index]) * available / naturalWidth
+          : minimumWidth >= available ? minimums[index] * available / minimumWidth
+          : minimums[index] + (Math.max(widths[index], minimums[index]) - minimums[index]) * (available - minimumWidth) / flex);
         const totalWidth = colWidths.reduce((sum, value) => sum + value, 0);
-        doc.font('ReportBold').fontSize(8.5);
-        const headers = indices.map((index, i) => wrap(table.columns[index].label, colWidths[i] - 14));
-        const headerHeight = Math.max(...headers.map(lines => lines.length)) * lineHeight + 14;
+        doc.font('ReportBold').fontSize(9);
+        const headers = indices.map((index, i) => wrap(table.columns[index].label, colWidths[i] - 16));
+        const headerHeight = Math.max(...headers.map(lines => lines.length)) * lineHeight + 16;
         const startPage = () => {
-          startReportPage(table.title + (groups.length > 1 ? ` - columns ${band + 1}/${groups.length}` : ''));
-          doc.rect(left, y, totalWidth, headerHeight).fill('#e9eff3');
+          startReportPage(table.title, groups.length > 1 ? `Panel ${band + 1} of ${groups.length}` : undefined);
+          doc.rect(left, y, totalWidth, headerHeight).fill('#224b59');
           let x = left;
-          doc.font('ReportBold').fontSize(8.5).fillColor('#172b3a');
+          doc.font('ReportBold').fontSize(9).fillColor('#ffffff');
           headers.forEach((lines, i) => {
-            lines.forEach((line, j) => doc.text(line, x + 7, y + 7 + j * lineHeight, { width: colWidths[i] - 14, lineBreak: false }));
+            const inset = (headerHeight - lines.length * lineHeight) / 2;
+            lines.forEach((line, j) => doc.text(line, x + 8, y + inset + j * lineHeight, { width: colWidths[i] - 16, align: table.columns[indices[i]].align ?? (table.columns[indices[i]].numeric ? 'right' : table.compact && indices[i] > 0 ? 'center' : 'left'), lineBreak: false }));
             x += colWidths[i];
           });
           y += headerHeight;
         };
         startPage();
+        const bodyCapacity = bottom - y;
         const rows = table.rows.length ? table.rows : [['No records for this period.']];
         rows.forEach((row, rowIndex) => {
-          doc.font('Report').fontSize(8.5);
-          const cells = indices.map((index, i) => wrap(String(row[index] ?? ''), colWidths[i] - 14));
+          const label = String(row[0] ?? '');
+          const total = /^TOTAL$/i.test(label) || Boolean(table.emphasizeRows?.includes(rowIndex));
+          const subtotal = / subtotal$/i.test(label);
+          const font = total || subtotal ? 'ReportBold' : 'Report';
+          doc.font(font).fontSize(9);
+          const cells = indices.map((index, i) => wrap(String(row[index] ?? ''), colWidths[i] - 16));
           const maxLines = Math.max(...cells.map(lines => lines.length));
+          const next = rows[rowIndex + 1];
+          if (rowIndex === rows.length - 2 && next && (/^TOTAL(?:\n|$)/i.test(String(next[0])) || table.emphasizeRows?.includes(rowIndex + 1))) {
+            doc.font('ReportBold').fontSize(9);
+            const nextLines = Math.max(...indices.map((index, i) => wrap(String(next[index] ?? ''), colWidths[i] - 16).length));
+            const pairHeight = (maxLines + nextLines) * lineHeight + padding * 2;
+            if (pairHeight <= bodyCapacity && y + pairHeight > bottom) startPage();
+          }
+          if (maxLines * lineHeight + padding <= bodyCapacity && y + maxLines * lineHeight + padding > bottom) startPage();
           let offset = 0;
           while (offset < maxLines) {
             if (y + padding + lineHeight > bottom) startPage();
             const count = Math.min(maxLines - offset, Math.floor((bottom - y - padding) / lineHeight));
             const height = count * lineHeight + padding;
-            if (rowIndex % 2 === 1) doc.rect(left, y, totalWidth, height).fill('#f5f8fa');
+            if (total || subtotal || rowIndex % 2 === 1) doc.rect(left, y, totalWidth, height).fill(total ? '#e8f0f3' : subtotal ? '#eef3f5' : '#f7f9fa');
+            if (total && offset === 0) doc.moveTo(left, y).lineTo(left + totalWidth, y).lineWidth(.7).strokeColor('#9eb3bc').stroke();
             let x = left;
-            doc.font('Report').fontSize(8.5).fillColor('#243744');
+            doc.font(font).fontSize(9).fillColor('#243d49');
             cells.forEach((lines, i) => {
-              lines.slice(offset, offset + count).forEach((line, j) => doc.text(line, x + 7, y + padding / 2 + j * lineHeight, {
-                width: colWidths[i] - 14, lineBreak: false, align: table.columns[indices[i]].numeric ? 'right' : 'left',
+              const visible = lines.slice(offset, offset + count);
+              const inset = (height - visible.length * lineHeight) / 2;
+              visible.forEach((line, j) => doc.text(line, x + 8, y + inset + j * lineHeight, {
+                width: colWidths[i] - 16, lineBreak: false, align: table.columns[indices[i]].align ?? (table.columns[indices[i]].numeric ? 'right' : table.compact && indices[i] > 0 ? 'center' : 'left'),
               }));
               x += colWidths[i];
             });
@@ -133,7 +181,7 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
             if (offset < maxLines) startPage();
           }
         });
-        if (table.note) {
+        if (table.note && band === groups.length - 1) {
           doc.font('Report').fontSize(8);
           for (const line of wrap(table.note, totalWidth)) {
             if (y + 20 > bottom) startPage();
@@ -147,31 +195,31 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       const width = (available - 48) / 2;
       doc.font('Report').fontSize(8.5);
       const preparedName = wrap(options.preparedBy?.name ?? 'System generated', width - 48);
-      const preparedDateOffset = Math.max(82, 42 + preparedName.length * lineHeight + 12);
-      const signOffHeight = 30 + Math.max(134, preparedDateOffset + lineHeight);
+      const preparedDateOffset = Math.max(68, 34 + preparedName.length * lineHeight + 12);
+      const signOffHeight = 28 + preparedDateOffset + lineHeight + 8;
       if (!page || y + signOffHeight > bottom) startReportPage('Report sign-off');
-      const top = y + 30;
+      const top = y + 28;
       ['PREPARED BY', 'RECEIVED BY'].forEach((label, index) => {
         const x = left + index * (width + 48);
         doc.font('ReportBold').fontSize(10).fillColor('#172b3a').text(label, x, top, { width, lineBreak: false });
         if (index === 0) {
-          doc.font('Report').fontSize(8.5).fillColor('#536575').text('Name:', x, top + 42, { lineBreak: false });
-          preparedName.forEach((line, i) => doc.text(line, x + 48, top + 42 + i * lineHeight, { width: width - 48, lineBreak: false }));
+          doc.font('Report').fontSize(8.5).fillColor('#536575').text('Name:', x, top + 34, { lineBreak: false });
+          preparedName.forEach((line, i) => doc.text(line, x + 48, top + 34 + i * lineHeight, { width: width - 48, lineBreak: false }));
           const dateY = top + preparedDateOffset;
           doc.text('Date:', x, dateY, { lineBreak: false });
           doc.text(options.preparedBy?.date ?? businessToday(), x + 48, dateY, { width: width - 48, lineBreak: false });
           return;
         }
-        for (const [field, offset] of [['Name', 42], ['Signature', 82], ['Date', 122]] as const) {
+        for (const [field, offset] of [['Name', 34], ['Date', preparedDateOffset]] as const) {
           doc.font('Report').fontSize(8.5).fillColor('#536575').text(`${field}:`, x, top + offset, { lineBreak: false });
           doc.moveTo(x + 48, top + offset + 12).lineTo(x + width, top + offset + 12).lineWidth(.5).strokeColor('#8393a0').stroke();
         }
       });
     }
     if (!page) startReportPage('Report');
-    doc.font('Report').fontSize(7.5).fillColor('#536575');
+    doc.font('Report').fontSize(8).fillColor('#536575');
     wrap(electronicDocumentNotice, available).forEach((line, index) => {
-      doc.text(line, left, (branded ? 720 : 542) + index * 9, { width: available, lineBreak: false });
+      doc.text(line, left, (branded ? 720 : 542) + index * 10, { width: available, align: 'center', lineBreak: false });
     });
     doc.end();
   } catch (error) {
