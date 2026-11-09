@@ -1,3 +1,4 @@
+import { disclaimerTestGuestsEnabled } from './services/disclaimerTesting';
 import { requestInputBudget } from './utils/validation';
 import { auditApiActivity } from './middleware/audit';
 import express, { Request, Response, NextFunction } from 'express';
@@ -21,6 +22,8 @@ import { presenceRouter } from './routes/presence.routes';
 import { reportsRouter } from './routes/reports.routes';
 import { auditRouter } from './routes/audit.routes';
 
+// Fail before listening if fictional guest mode targets a live datasource.
+disclaimerTestGuestsEnabled();
 const app = express();
 
 // Setup Security, Helmet, CORS
@@ -38,7 +41,7 @@ app.use('/api', requestInputBudget);
 app.use('/api', auditApiActivity);
 
 // Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -75,7 +78,7 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit', auditRouter);
 
 // Never return internal exception details in production.
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status <= 599 ? err.status : 500;
   if (status >= 500) console.error('Unhandled API error:', err);
   res.status(status).json({ error: status === 400 ? 'Invalid request.' : status === 413 ? 'Request body is too large.' : 'An unexpected server error occurred.' });

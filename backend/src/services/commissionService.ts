@@ -1,5 +1,8 @@
+import { photoIds } from '../utils/photoCredits';
+import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
+import { isStoreAttendant, splitStorePool, STORE_ATTENDANT_RETAIL_RATE } from '../utils/storeAttendantPool';
 
 export interface StaffCommissionResult {
   staffId: string;
@@ -26,7 +29,7 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
-export interface CommissionBreakdownDetail {
+interface CommissionBreakdownDetail {
   id: string;
   billId: string;
   billItemId: string | null;
@@ -87,6 +90,8 @@ export const calculateCommissionForPeriod = async (
       items: {
         include: {
           item: true,
+          instructorCredits: true,
+          photoCredits: true,
         },
       },
     },
@@ -130,6 +135,8 @@ export const calculateCommissionForPeriod = async (
   };
   // Certifications are tracked separately and never distributed as staff pay.
   let certificationPoolTotal = 0;
+  let storeAttendantPoolTotal = 0;
+  let unallocatedStoreAttendantPoolTotal = 0;
 
   // Helper function to check if attendance status counts toward commission pool
   // Per PDF Page 5: Present = Yes, Off / Off (half day) = Yes (counted in full).
@@ -203,18 +210,38 @@ export const calculateCommissionForPeriod = async (
         }
 
         const source = { billId: bill.id, billItemId: line.id, checkNumber: bill.checkNumber, businessDate: date, itemName: line.itemName, quantity: line.quantity };
+        // Only explicit saved snapshots participate; never backfill historical sales.
+        const retailPool = line.storeAttendantRateSnapshot === STORE_ATTENDANT_RETAIL_RATE &&
+          typeof line.storeAttendantPoolAmount === 'number' && Number.isFinite(line.storeAttendantPoolAmount) && line.storeAttendantPoolAmount > 0 ? line.storeAttendantPoolAmount : 0;
+        if (retailPool > 0) {
+          storeAttendantPoolTotal += retailPool;
+          const recipients = staffMembers.filter(staff => isStoreAttendant(staff.roleTitle) && canReceiveCredit(staff.id));
+          const shares = splitStorePool(retailPool, recipients.map(staff => staff.id));
+          if (!shares.length) unallocatedStoreAttendantPoolTotal += retailPool;
+          for (const share of shares) {
+            const entry = commissionMap.get(share.staffId)!;
+            entry.personalCommission += share.amount;
+            personalDetails.push({ id: `${line.id}-store-${share.staffId}`, checkNumber: bill.checkNumber, businessDate: date,
+              guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName, role: 'Store attendant (Retail 5% shared)',
+              staffId: share.staffId, staffName: entry.staffName, amount: share.amount });
+            if (share.staffId === detailStaffId) breakdownDetails.push({ ...source, id: `${line.id}-STORE-${share.staffId}`, kind: 'PERSONAL',
+              basisAmount: retailPool, recipientCount: shares.length, factor: 1, amount: share.amount,
+              explanation: 'Saved 5% of Retail sales after discounts, before tax and service charge; shared equally among eligible Store attendants, with remaining cents allocated by staff ID.' });
+          }
+        }
         if (detailStaffId && contribution > 0 && (poolType === 'COURSE_POOL' || poolType === 'DIVE_POOL')) poolSources.push({ ...source, basisAmount: contribution, poolType });
 
         // Personal commission (fixed amounts to designated roles on line)
         if (line.personalCommissionsJson) {
           try {
             const rates = JSON.parse(line.personalCommissionsJson);
+            const discountFactor = line.commissionDiscountFactor ?? 1;
             // Seller
             if (line.sellerStaffId && canReceiveCredit(line.sellerStaffId) && typeof rates.seller === 'number' && Number.isFinite(rates.seller) && rates.seller > 0) {
-              const amt = Number(rates.seller) * line.quantity;
+              const amt = Number(rates.seller) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.sellerStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.sellerStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Seller fixed payment per service unit × quantity', 1, 1, Number(rates.seller));
+              addDetail(line.sellerStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Seller fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.seller));
               const sObj = staffMap.get(line.sellerStaffId);
               personalDetails.push({
                 id: `${line.id}-seller`,
@@ -231,10 +258,10 @@ export const calculateCommissionForPeriod = async (
             }
             // Guide
             if (line.guideStaffId && canReceiveCredit(line.guideStaffId) && typeof rates.guide === 'number' && Number.isFinite(rates.guide) && rates.guide > 0) {
-              const amt = Number(rates.guide) * line.quantity;
+              const amt = Number(rates.guide) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.guideStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.guideStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Guide fixed payment per service unit × quantity', 1, 1, Number(rates.guide));
+              addDetail(line.guideStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Guide fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.guide));
               const sObj = staffMap.get(line.guideStaffId);
               personalDetails.push({
                 id: `${line.id}-guide`,
@@ -249,52 +276,38 @@ export const calculateCommissionForPeriod = async (
                 amount: amt,
               });
             }
-            // Instructor
-            if (line.instructorStaffId && canReceiveCredit(line.instructorStaffId) && typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
-              const amt = Number(rates.instructor) * line.quantity;
-              const entry = commissionMap.get(line.instructorStaffId);
-              if (entry) entry.personalCommission += amt;
-              addDetail(line.instructorStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Instructor fixed payment per service unit × quantity', 1, 1, Number(rates.instructor));
-              const sObj = staffMap.get(line.instructorStaffId);
-              personalDetails.push({
-                id: `${line.id}-instructor`,
-                checkNumber: bill.checkNumber,
-                businessDate: bill.businessDate,
-                guestName: bill.guestName,
-                roomNumber: bill.roomNumber,
-                itemName: line.itemName,
-                role: 'Instructor',
-                staffId: line.instructorStaffId,
-                staffName: sObj?.name || 'Staff',
-                amount: amt,
-              });
+            // The catalogue amount is paid in full to every selected instructor.
+            if (typeof rates.instructor === 'number' && Number.isFinite(rates.instructor) && rates.instructor > 0) {
+              for (const staffId of instructorIds(line)) {
+                if (!canReceiveCredit(staffId)) continue;
+                const amt = rates.instructor * line.quantity * discountFactor;
+                const entry = commissionMap.get(staffId);
+                if (entry) entry.personalCommission += amt;
+                addDetail(staffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Full saved catalogue instructor rate × quantity × saved after-discount factor; paid to each selected instructor', 1, 1, rates.instructor);
+                personalDetails.push({ id: `${line.id}-instructor-${staffId}`, checkNumber: bill.checkNumber, businessDate: bill.businessDate,
+                  guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName, role: 'Instructor',
+                  staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
+              }
             }
-            // Photo
-            if (line.photoStaffId && canReceiveCredit(line.photoStaffId) && typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
-              const amt = Number(rates.photo) * line.quantity;
-              const entry = commissionMap.get(line.photoStaffId);
-              if (entry) entry.personalCommission += amt;
-              addDetail(line.photoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', `${line.includesComplimentaryMedia ? 'Photo / Video' : 'Photographer'} fixed payment per service unit × quantity`, 1, 1, Number(rates.photo));
-              const sObj = staffMap.get(line.photoStaffId);
-              personalDetails.push({
-                id: `${line.id}-photo`,
-                checkNumber: bill.checkNumber,
-                businessDate: bill.businessDate,
-                guestName: bill.guestName,
-                roomNumber: bill.roomNumber,
-                itemName: line.itemName,
-                role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo',
-                staffId: line.photoStaffId,
-                staffName: sObj?.name || 'Staff',
-                amount: amt,
-              });
+            // Each selected Photo staff member receives the saved rate in full.
+            if (typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
+              for (const staffId of photoIds(line)) {
+                if (!canReceiveCredit(staffId)) continue;
+                const amt = rates.photo * line.quantity * discountFactor;
+                const entry = commissionMap.get(staffId);
+                if (entry) entry.personalCommission += amt;
+                addDetail(staffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Full saved Photo rate × quantity × saved after-discount factor; paid to each selected Photo staff member', 1, 1, rates.photo);
+                personalDetails.push({ id: `${line.id}-photo-${staffId}`, checkNumber: bill.checkNumber, businessDate: bill.businessDate,
+                  guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName,
+                  role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo', staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
+              }
             }
             // Video
             if (line.videoStaffId && canReceiveCredit(line.videoStaffId) && typeof rates.video === 'number' && Number.isFinite(rates.video) && rates.video > 0) {
-              const amt = Number(rates.video) * line.quantity;
+              const amt = Number(rates.video) * line.quantity * discountFactor;
               const entry = commissionMap.get(line.videoStaffId);
               if (entry) entry.personalCommission += amt;
-              addDetail(line.videoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Video fixed payment per service unit × quantity', 1, 1, Number(rates.video));
+              addDetail(line.videoStaffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Video fixed payment per service unit × quantity × saved after-discount factor', 1, 1, Number(rates.video));
               const sObj = staffMap.get(line.videoStaffId);
               personalDetails.push({
                 id: `${line.id}-video`,
@@ -360,7 +373,7 @@ export const calculateCommissionForPeriod = async (
     // 3. Base-Leader Override (+10% of total pool, paid regardless of attendance)
     // Page 7: "An extra 10% of the pool, paid to the base leader(s) — regardless of attendance."
     const totalDayPool = dailyCoursePool + dailyDivePool;
-    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date));
+    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date) && dayAttendanceMap.get(bl.id)?.toUpperCase() !== 'BASIC');
     if (totalDayPool > 0 && employedBaseLeaders.length > 0) {
       const overrideTotal = totalDayPool * 0.10;
       const overrideShare = overrideTotal / employedBaseLeaders.length;
@@ -402,6 +415,8 @@ export const calculateCommissionForPeriod = async (
     personalDetails,
     breakdownDetails,
     certificationPoolTotal: Math.round(certificationPoolTotal * 100) / 100,
+    storeAttendantPoolTotal: Math.round(storeAttendantPoolTotal * 100) / 100,
+    unallocatedStoreAttendantPoolTotal: Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100,
     grandTotal: Math.round(grandTotal * 100) / 100,
   };
 };

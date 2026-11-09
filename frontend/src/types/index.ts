@@ -1,4 +1,4 @@
-export type UserRole = 'GLOBAL_ADMIN' | 'PROPERTY_MANAGER' | 'CENTRE_STAFF';
+type UserRole = 'GLOBAL_ADMIN' | 'PROPERTY_MANAGER' | 'CENTRE_STAFF';
 
 export interface Property {
   id: string;
@@ -44,6 +44,7 @@ export interface StaffMember {
   propertyId: string;
   name: string;
   email?: string | null;
+  erNumber?: string | null;
   roleTitle: string;
   isDiveStaff: boolean;
   isCoursePoolSharing: boolean;
@@ -80,6 +81,7 @@ export interface Item {
 }
 
 export interface BillItem {
+  sourceLineId?: string;
   clientLineId?: string;
   autoPhotoFor?: string | null;
   autoPhotoForLineId?: string | null;
@@ -92,12 +94,18 @@ export interface BillItem {
   unitPrice: number;
   discountPercent: number;
   lineTotal: number;
+  commissionDiscountFactor?: number;
+  poolRateSnapshot?: number | null;
   poolTypeSnapshot?: Item['poolType'] | null;
   poolContributionAmount?: number | null;
   sellerStaffId?: string | null;
   guideStaffId?: string | null;
   instructorStaffId?: string | null;
+  instructorStaffIds?: string[];
+  instructorCredits?: { staffId: string; staff?: { id: string; name: string } }[];
   photoStaffId?: string | null;
+  photoStaffIds?: string[];
+  photoCredits?: { staffId: string; staff?: { id: string; name: string } }[];
   videoStaffId?: string | null;
   sellerStaff?: { id: string; name: string };
   guideStaff?: { id: string; name: string };
@@ -105,6 +113,8 @@ export interface BillItem {
   photoStaff?: { id: string; name: string };
   videoStaff?: { id: string; name: string };
   personalCommissionsJson?: string | null;
+  storeAttendantRateSnapshot?: number | null;
+  storeAttendantPoolAmount?: number | null;
   totalPersonalCommission?: number;
   includesComplimentaryMedia?: boolean;
 }
@@ -118,6 +128,8 @@ export interface Bill {
   roomNumber: string;
   departureDate?: string | null;
   nationality: string;
+  serviceChargeRateSnapshot?: number | null;
+  taxRateSnapshot?: number | null;
   grossAmount: number;
   discountAmount: number;
   serviceChargeAmount: number;
@@ -143,7 +155,7 @@ export interface AttendanceItem {
   isCoursePoolSharing: boolean;
   isDivePoolSharing: boolean;
   isBaseLeaderOverride: boolean;
-  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
+  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'BASIC' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
   note?: string;
   isSaved: boolean;
 }
@@ -186,7 +198,7 @@ export interface PersonalCommissionDetail {
   amount: number;
 }
 
-export interface PayrollBreakdownDetail {
+interface PayrollBreakdownDetail {
   id: string;
   billId: string;
   billItemId: string | null;
@@ -229,6 +241,8 @@ export interface DashboardReport {
     averageBill: number;
     totalCommission: number;
     certificationPoolTotal: number;
+    storeAttendantPoolTotal?: number;
+    unallocatedStoreAttendantPoolTotal?: number;
     netRevenue: number;
   };
   charts: {
@@ -294,7 +308,7 @@ export interface GlobalDashboardReport {
   };
 }
 
-export interface DivePackageItem {
+interface DivePackageItem {
   id?: string;
   packageId?: string;
   itemId: string;

@@ -8,11 +8,15 @@ const database = createTestDatabase('watersports');
 const prisma = database.prisma;
 const { submissionSchema, signatureSchema } = loadTypeScript('src/services/waterSportsForms.ts');
 const signature = [[[10, 20], [100, 40], [150, 90]]];
-let property, otherProperty, user, actor, calls;
+let property, otherProperty, user, actor, calls, testingGuests = false;
+const { disclaimerTestGuests } = loadTypeScript('src/services/disclaimerTesting.ts', {
+  '../config/secrets': { readSecret: name => name === 'DATABASE_URL' ? 'postgresql://dive_center_testing:unused@db/dive_center_testing' : '' },
+});
 const noLimit = () => (_req, _res, next) => next();
 class PmsLookupError extends Error {}
 const { waterSportsRouter } = loadTypeScript('src/routes/water-sports.routes.ts', {
   '../db': { prisma },
+  '../services/disclaimerTesting': { disclaimerTestGuestsEnabled: () => testingGuests, disclaimerTestGuests },
   'express-rate-limit': noLimit,
   '../middleware/auth': { requireAuth: (req, res, next) => req.user ? next() : res.status(401).json({ error: 'Unauthorized' }) },
   '../services/pmsService': {
@@ -221,4 +225,54 @@ test('staff overview excludes expired, cancelled and signed links without exposi
   }
   assert.equal((await invoke('GET', '/overview', { user: null, query: { propertyId: property.id } })).status, 401);
   assert.equal((await invoke('GET', '/overview', { query: { propertyId: otherProperty.id } })).status, 403);
+});
+
+
+test('fictional guest lookup completes real database signing without contacting PMS, including guardian and empty-room paths', async () => {
+  const keys = ['DISCLAIMER_TEST_GUESTS', 'APP_DEPLOYMENT_MODE', 'TESTING_LIVE_AUTH'];
+  const original = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    testingGuests = true;
+    process.env.DISCLAIMER_TEST_GUESTS = 'true';
+    process.env.APP_DEPLOYMENT_MODE = 'testing';
+    process.env.TESTING_LIVE_AUTH = 'false';
+    // Mapping is intentionally absent: fictional lookup needs no PMS setup.
+    const originalCodes = [...property.pmsPropertyCodes];
+    await prisma.property.update({ where: { id: property.id }, data: { pmsPropertyCodes: [], pmsPropertyCode: null, code: 'TEST-DISCLAIMER' } });
+    try {
+      const overview = await invoke('GET', '/overview', { query: { propertyId: property.id } });
+      assert.equal(overview.body.testingGuests, true);
+      for (const room of ['0012', '0013']) {
+        const session = await create('DIVE_PARTICIPATION', { roomNumber: room });
+        const opened = await tablet(session, 'GET', '');
+        assert.equal(opened.body.testingGuests, true);
+        const result = await tablet(session, 'POST', '/guests', { roomNumber: room });
+        assert.equal(result.status, 200);
+        assert.equal(result.body.guests.length, room === '0012' ? 2 : 1);
+        const guest = result.body.guests[0];
+        const payload = { candidateId: guest.id, documentId: opened.body.documents[0].id, acknowledged: true, isMinor: room === '0013', guardianName: room === '0013' ? 'TEST ONLY Parent' : '', signature };
+        if (payload.isMinor) assert.equal((await tablet(session, 'POST', '/sign', { ...payload, guardianName: '' })).status, 400);
+        const signed = await tablet(session, 'POST', '/sign', payload);
+        assert.equal(signed.status, 200);
+        assert.equal((await tablet(session, 'POST', '/sign', payload)).body.runningNumber, signed.body.runningNumber);
+        const record = await prisma.waterSportsRecord.findUnique({ where: { sessionId: session.id } });
+        assert.equal(record.roomNumber, room);
+        assert.equal(record.guestName, guest.fullName);
+        assert.match(record.confirmationNumber, /^DISCLAIMER-TEST-/);
+        assert.deepEqual(record.signature, signature);
+        assert.equal(record.isMinor, payload.isMinor);
+        assert.equal(record.documentHash, createHash('sha256').update(JSON.stringify(record.documentSnapshot)).digest('hex'));
+        assert.equal(await prisma.waterSportsRecord.count({ where: { sessionId: session.id } }), 1);
+        assert.equal(await prisma.auditLog.count({ where: { targetId: record.id, action: 'WATER_SPORTS_SIGN' } }), 1);
+      }
+      const empty = await create('DIVE_PARTICIPATION', { roomNumber: '0014' });
+      assert.deepEqual((await tablet(empty, 'POST', '/guests', { roomNumber: '0014' })).body.guests, []);
+      assert.equal(calls, 0);
+    } finally {
+      await prisma.property.update({ where: { id: property.id }, data: { pmsPropertyCodes: originalCodes, code: property.code } });
+    }
+  } finally {
+    testingGuests = false;
+    for (const key of keys) { if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key]; }
+  }
 });

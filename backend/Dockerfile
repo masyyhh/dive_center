@@ -15,9 +15,10 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/prisma ./prisma
-COPY package.json package-lock.json ./
-COPY tools ./tools
-COPY entrypoint.sh ./entrypoint.sh
+COPY --chown=node:node assets ./assets
+COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node tools ./tools
+COPY --chown=node:node entrypoint.sh ./entrypoint.sh
 RUN chmod 755 /app/entrypoint.sh
 USER node
 EXPOSE 5001

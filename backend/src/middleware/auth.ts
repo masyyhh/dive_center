@@ -8,7 +8,7 @@ import { authenticateTestingLive, testingLiveAuthEnabled } from '../services/tes
 const JWT_SECRET = loadJwtSecret();
 const credentialBinding = (id: string, hash: string) => createHmac('sha256', JWT_SECRET).update(JSON.stringify([id, hash])).digest('hex');
 
-export interface AuthenticatedUser {
+interface AuthenticatedUser {
   id: string;
   email: string | null;
   name: string;

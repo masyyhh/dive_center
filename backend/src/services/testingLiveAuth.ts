@@ -49,7 +49,7 @@ const allowed = (id: string) => {
     throw new TestingAuthError(503, 'The selected testing user list is unavailable.');
   }
 };
-export const verifyLiveIdentity = async (token: string): Promise<Identity> => {
+const verifyLiveIdentity = async (token: string): Promise<Identity> => {
   // One fixed read-only live endpoint. Never relay caller-supplied URLs, paths,
   // redirects, cookies, property headers, or business mutations to production.
   let origin: URL;

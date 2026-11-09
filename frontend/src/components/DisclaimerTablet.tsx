@@ -1,14 +1,14 @@
 import { isRoomNumber, roomNumberHelp } from '../utils/inputValidation';
 import { API_BASE } from '../services/api';
-import React, { useEffect, useRef, useState } from 'react';
-import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './WaterSportsShared';
+import { useEffect, useRef, useState } from 'react';
+import { Disclaimer, formNames, Signature, SignaturePad, StaffFields } from './DisclaimerShared';
 import { signatureHasInk, remainingMinutes } from '../utils/diveCentreJourney';
-import './water-sports.css';
+import './disclaimer.css';
 
 type Guest = { id: string; fullName: string; roomNumber: string; checkoutDate: string | null; propertyCode: string };
-type Session = { completed?: boolean; runningNumber?: number; propertyName?: string; formType: string; staffFields: Record<string, string>; documents: Disclaimer[]; businessDate: string; expiresAt: string };
+type Session = { testingGuests?: boolean; completed?: boolean; runningNumber?: number; propertyName?: string; formType: string; staffFields: Record<string, string>; documents: Disclaimer[]; businessDate: string; expiresAt: string };
 // The private guest capability stays in the fragment and is never used as a staff credential.
-export const DiveCentreTablet = ({ token }: { token: string }) => {
+export const DisclaimerTablet = ({ token }: { token: string }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [step, setStep] = useState(1), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [documentId, setDocumentId] = useState(''), [read, setRead] = useState(false), [unavailable, setUnavailable] = useState(false);
@@ -52,6 +52,7 @@ export const DiveCentreTablet = ({ token }: { token: string }) => {
   const steps = ['Your details', 'Read & understand', 'Review & sign'];
 
   return <main className="ws-tablet"><div className="ws-tablet-card">
+    {session?.testingGuests && <div className="ws-success" role="status"><strong>Testing only · Fictional guests</strong><p>This is a practice form. Use a practice signature. It will be saved in the testing database.</p></div>}
     <header className="dc-guest-header"><span className="eyebrow">WELCOME TO YOUR DIVE CENTRE</span>
       <h1>{session?.propertyName || 'Guest check-in'}</h1>
       {session && !session.completed && <><p>{formNames[session.formType] || 'Guest participation form'}</p>

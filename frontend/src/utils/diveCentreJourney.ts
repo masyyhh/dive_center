@@ -11,3 +11,13 @@ export const remainingMinutes = (expiresAt: string | undefined, now: number) => 
 
 /** Preserve issued legacy links while new invitations use Dive Centre URLs. */
 export const guestTokenFromHash = (hash: string) => hash.match(/^#(?:dive-centre|water-sports)-tablet\/([a-f0-9]{64})$/)?.[1];
+
+/** Use the same readiness decision for the checklist and the preparation action. */
+export const disclaimerReadiness = (overview: {
+  testingGuests?: boolean;
+  readiness: { pmsPropertyConfigured: boolean; documents: Record<string, number> };
+} | null, formType: string) => {
+  const guestLookupReady = !!(overview?.testingGuests || overview?.readiness.pmsPropertyConfigured);
+  const documentReady = (overview?.readiness.documents[formType] ?? 0) > 0;
+  return { guestLookupReady, documentReady, canPrepare: guestLookupReady && documentReady };
+};

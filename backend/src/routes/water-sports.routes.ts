@@ -1,3 +1,4 @@
+import { disclaimerTestGuestsEnabled, disclaimerTestGuests } from '../services/disclaimerTesting';
 import { Router, Request, Response, NextFunction } from 'express';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
@@ -57,7 +58,7 @@ waterSportsRouter.get('/overview', requireAuth, requirePropertyAccess(), handle(
   ]);
   if (!property?.isActive || property.deletedAt) return res.status(409).json({ error: 'Choose an active property.' });
   const codes = property.pmsPropertyCodes.length ? property.pmsPropertyCodes : [property.pmsPropertyCode || property.code];
-  return res.json({ businessDate: businessToday(), pendingCount, pending, signedToday, totalSigned,
+  return res.json({ businessDate: businessToday(), pendingCount, pending, signedToday, totalSigned, testingGuests: disclaimerTestGuestsEnabled(),
     readiness: { pmsPropertyConfigured: z.array(pmsPropertyCodeSchema).min(1).max(7).safeParse(codes).success,
       documents: { DIVE_PARTICIPATION: diving.length, SNORKELING: snorkeling.length, GEAR_RENTAL: equipment.length, AID_GEAR: equipment.length } } });
 }));
@@ -115,7 +116,7 @@ waterSportsRouter.get('/tablet', handle(async (req, res) => {
   if (!context) return expired(res);
   const { session, property } = context;
   if (session.record) return res.json({ completed: true, runningNumber: session.record.runningNumber });
-  return res.json({ propertyName: property.name, formType: session.formType, staffFields: session.staffFields, documents: session.documents, businessDate: businessToday(), expiresAt: session.expiresAt });
+  return res.json({ testingGuests: disclaimerTestGuestsEnabled(), propertyName: property.name, formType: session.formType, staffFields: session.staffFields, documents: session.documents, businessDate: businessToday(), expiresAt: session.expiresAt });
 }));
 waterSportsRouter.post('/tablet/guests', handle(async (req, res) => {
   const context = await tabletSession(req);
@@ -127,9 +128,12 @@ waterSportsRouter.post('/tablet/guests', handle(async (req, res) => {
   const claimed = await prisma.waterSportsSession.updateMany({ where: { id: session.id, lookupCount: { lt: 10 }, revokedAt: null, expiresAt: { gt: new Date() } }, data: { lookupCount: { increment: 1 } } });
   if (!claimed.count) return res.status(429).json({ error: 'Lookup limit reached. Please ask staff for a new form.' });
   const codes = z.array(pmsPropertyCodeSchema).min(1).max(7).safeParse(property.pmsPropertyCodes.length ? property.pmsPropertyCodes : [property.pmsPropertyCode || property.code]);
-  if (!codes.success) return res.status(409).json({ error: 'Staff need to configure the PMS resorts for this property.' });
+  const testingGuests = disclaimerTestGuestsEnabled();
+  if (!testingGuests && !codes.success) return res.status(409).json({ error: 'Staff need to configure the PMS resorts for this property.' });
   try {
-    const results = await Promise.all([...new Set(codes.data)].map(code => lookupInhouseGuests(code, room.data)));
+    const results = testingGuests
+      ? [{ guests: disclaimerTestGuests(room.data) }]
+      : await Promise.all([...new Set(codes.success ? codes.data : [])].map(code => lookupInhouseGuests(code, room.data)));
     const unique = new Map(results.flatMap(r => r.guests).map(g => [JSON.stringify(g), g]));
     const candidates: Candidate[] = [...unique.values()].map(g => ({ ...g, id: randomUUID() }));
     const updated = await prisma.waterSportsSession.updateMany({ where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() } }, data: { candidates } });

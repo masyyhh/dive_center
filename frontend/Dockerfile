@@ -14,3 +14,6 @@ RUN npm run build
 FROM ${CADDY_IMAGE}
 COPY --from=build /app/dist /srv
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
+
+# Git checkouts may be private; static assets and Caddy configuration must be readable.
+RUN chmod -R a+rX /srv && chmod 644 /etc/caddy/Caddyfile

@@ -1,6 +1,6 @@
 export const defaultStaffRoleTitles = [
   'Base Leader', 'Assistant Base Leader', 'Instructor', 'Divemaster',
-  'Underwater Photographer', 'Boat Crew', 'Receptionist',
+  'Underwater Photographer', 'Boat Crew', 'Receptionist', 'Store Attendant',
 ];
 
 export const normalizeRoleTitle = (name: string) => name.trim().replace(/\s+/g, ' ');

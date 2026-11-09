@@ -10,12 +10,12 @@ export const catalogueSpreadsheetHeaders = [
   'Instructor Payment / Unit', 'Photographer Payment / Unit', 'Videographer Payment / Unit',
   'Include Photo ($41.975)', 'Status',
 ];
-export const cataloguePoolLabels: Record<string, string> = { COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', CERTIFICATION_POOL: 'Certifications', NONE: 'No pool' };
+const cataloguePoolLabels: Record<string, string> = { COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', CERTIFICATION_POOL: 'Certifications', NONE: 'No pool' };
 
 const poolType = z.enum(['NONE', 'COURSE_POOL', 'CERTIFICATION_POOL', 'DIVE_POOL']);
 const rates = z.partialRecord(z.enum(['seller', 'guide', 'instructor', 'photo', 'video']), z.number().finite().nonnegative());
 const commissionSchema = z.object({ poolType, poolContribution: z.number().finite().nonnegative(), personalRates: rates.default({}), includesComplimentaryMedia: z.boolean().optional() }).strict().refine(data => validPoolRate(data.poolType, data.poolContribution), 'Course and dive pool rates must be between 0 and 100 percent.');
-export type CatalogueRow = { row: number; code: string; name: string; category: string; price: number; isActive: boolean; commission: z.infer<typeof commissionSchema> };
+type CatalogueRow = { row: number; code: string; name: string; category: string; price: number; isActive: boolean; commission: z.infer<typeof commissionSchema> };
 export class CatalogueError extends Error {}
 export const categoryPrefix = (name: string) => name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3).padEnd(3, 'X');
 export const itemCodeAllocator = (codes: Iterable<string>) => {
