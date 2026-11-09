@@ -61,7 +61,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
           </button>
         </div>
 
-        <TableScroll label="Staff commissions" className="overflow-x-auto">
+        <TableScroll paginate label="Staff commissions" className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-sm staff-commission-table">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
@@ -159,7 +159,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
           </button>
         </div>
 
-        <TableScroll label="Personal commission details" className="overflow-x-auto">
+        <TableScroll paginate label="Personal commission details" className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-sm personal-commission-table">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">

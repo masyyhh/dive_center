@@ -14,7 +14,7 @@ const { staffRouter } = loadTypeScript('src/routes/staff.routes.ts', stubs);
 const { billsRouter } = loadTypeScript('src/routes/bills.routes.ts', stubs);
 const { auditRouter } = loadTypeScript('src/routes/audit.routes.ts', stubs);
 const { calculateCommissionForPeriod } = loadTypeScript('src/services/commissionService.ts', { '../db': { prisma } });
-const statuses = ['PRESENT', 'OFF', 'OFF_HALF', 'ANNUAL_LEAVE', 'SICK', 'ABSENT', 'EMERGENCY_LEAVE'];
+const statuses = ['PRESENT', 'OFF', 'OFF_HALF', 'ANNUAL_LEAVE', 'SICK', 'ABSENT', 'EMERGENCY_LEAVE', 'BASIC'];
 const date = '2026-10-21';
 const call = (router, method, url, data = {}) => request(router, method, url, { user: admin, ...data });
 let number = 100;
@@ -36,7 +36,7 @@ test('bill choices exclude saved leave/absence and staff outside employment date
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.staff.map(s => s.id).sort(), ['PRESENT', 'OFF', 'OFF_HALF', 'UNRECORDED'].sort());
   const roster = await call(staffRouter, 'GET', '/', { query: { propertyId: 'male' } });
-  assert.equal(roster.body.staff.length, 10);
+  assert.equal(roster.body.staff.length, 11);
   assert.equal((await call(staffRouter, 'GET', '/', { query: { propertyId: 'male', creditOnDate: '2026-02-30' } })).status, 400);
 });
 test('server rejects every excluded status in all five credit roles and tip sharing', async () => {

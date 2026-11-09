@@ -49,15 +49,15 @@ export function GuestDetails({ model }: { model: BillModel }) {
   const content = <>
       <Heading className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-2">
         <UserCheck className="w-4 h-4 text-sky-500" />
-        <span>{compactBilling ? 'Guest details' : '2. Guest details'}</span>
+        <span>Guest details</span>
       </Heading>
-      {!compactBilling && <p className="workflow-section-help">* Required fields.</p>}
+
 
 
       {pmsMessage && <div className="notice" role="status">{pmsMessage}</div>}
       {pmsError && <div className="notice notice-error" role="alert">{pmsError}</div>}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm guest-details-fields">
         <div>
           <label htmlFor="bill-room" className="block text-slate-500 dark:text-slate-400 font-semibold mb-1">
             Room Number *
@@ -69,17 +69,16 @@ export function GuestDetails({ model }: { model: BillModel }) {
               aria-label="Room number"
               aria-required="true"
               aria-invalid={(attemptedReview || roomNumber.length > 0) && !isRoomNumber(roomNumber)}
-              aria-describedby="room-help room-error"
+              aria-describedby={`room-help${businessDate !== businessToday() ? ' pms-room-help' : ''}${(attemptedReview || roomNumber.length > 0) && !isRoomNumber(roomNumber) ? ' room-error' : ''}`}
               value={roomNumber}
               onChange={(e) => { cancelPmsLookup(); setRoomNumber(e.target.value); }}
               placeholder="e.g. 304"
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
-            <button type="button" className="secondary-button" onClick={lookupGuests} disabled={!isRoomNumber(roomNumber) || pmsBusy || saving || businessDate !== businessToday()} aria-busy={pmsBusy} aria-label="Look up in-house guests for this room"><Search size={16} />{pmsBusy ? 'Looking up…' : 'Find guests'}</button>
+            <button type="button" className="secondary-button" onClick={lookupGuests} disabled={!isRoomNumber(roomNumber) || pmsBusy || saving || businessDate !== businessToday()} title="Find in-house guests" aria-busy={pmsBusy} aria-label="Look up in-house guests for this room"><Search size={16} /><span className="sr-only">{pmsBusy ? 'Looking up…' : 'Find guests'}</span></button>
           </div>
-          {businessDate !== businessToday() && <p className="field-help">PMS lookup shows guests in-house today. Enter details manually for a different business date.</p>}
           {pmsGuests.length > 0 && <button type="button" className="text-button" disabled={saving} onClick={() => { setSelectedPmsGuest(null); setGuestPickerOpen(true); }}>Choose a guest from this room ({pmsGuests.length})</button>}
-          <p id="room-help" className="field-help">{compactBilling ? 'Digits only; leading zeros kept.' : 'Digits only. Leading zeros are kept, e.g. 0012.'}</p>
+          <p id="room-help" className="sr-only">{compactBilling ? 'Digits only; leading zeros kept.' : 'Digits only. Leading zeros are kept, e.g. 0012.'}</p>
           {(attemptedReview || roomNumber.length > 0) && !isRoomNumber(roomNumber) && <p id="room-error" className="field-error" role="alert">{roomNumberHelp}</p>}
         </div>
 
@@ -104,7 +103,8 @@ export function GuestDetails({ model }: { model: BillModel }) {
 
         {optionalFields}
       </div>
+      {businessDate !== businessToday() && <p id="pms-room-help" className="field-help guest-lookup-help">Enter guest details manually for this business date. Guest lookup is available for today.</p>}
   </>;
-  const className = "bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4";
+  const className = "guest-details-section bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4";
   return <div id="bill-guest-details" className={className}>{content}</div>;
 }

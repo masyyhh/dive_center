@@ -1,6 +1,10 @@
+import { businessWeek, displayDate } from '../../utils/dates';
 import { Download, FileText } from 'lucide-react';
 
 interface ExportPanelProps {
+  exportWeekDate: string;
+  setExportWeekDate: (date: string) => void;
+  handleDownloadWeekly: () => void;
   exportDate: string;
   setExportDate: (date: string) => void;
   exportMonth: string;
@@ -15,11 +19,12 @@ interface ExportPanelProps {
   onConfirmLock: () => void;
   onRetryPayroll: () => void;
 }
-export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportMonth, lockLoading, payrollLoading, payrollLocked, payrollError, canManageLocks, handleDownloadDaily, handleDownloadMonthly, onConfirmLock, onRetryPayroll }: ExportPanelProps) {
+export function ExportPanel({ exportWeekDate, setExportWeekDate, handleDownloadWeekly, exportDate, setExportDate, exportMonth, setExportMonth, lockLoading, payrollLoading, payrollLocked, payrollError, canManageLocks, handleDownloadDaily, handleDownloadMonthly, onConfirmLock, onRetryPayroll }: ExportPanelProps) {
+  const week = businessWeek(exportWeekDate);
   return (
 <section id="panel-exports" role="tabpanel" aria-labelledby="tab-exports" className="space-y-6">
       {/* Export Cards Section (PDF Page 6: Daily & Monthly independent downloads) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Daily Report Download */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm export-card flex flex-col items-stretch justify-between gap-4">
           <div>
@@ -28,7 +33,7 @@ export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportM
               <span>Daily Report (.pdf)</span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Printable bills, totals and commissions.
+              Bills, totals and prepared/received details.
             </p>
           </div>
 
@@ -49,6 +54,11 @@ export function ExportPanel({ exportDate, setExportDate, exportMonth, setExportM
               <span>Download</span>
             </button>
           </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm export-card flex flex-col items-stretch justify-between gap-4">
+          <div><div className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-1.5"><FileText className="w-4 h-4 text-sky-500" /><span>Weekly Report (.pdf)</span></div><p className="text-xs text-slate-400 mt-0.5">Sales, commissions, attendance and rooms. Monday–Sunday.</p></div>
+          <div><label htmlFor="weekly-report-date" className="block text-xs text-slate-500 mb-1">Choose a date in the week</label><div className="flex flex-wrap items-center gap-2"><input id="weekly-report-date" type="date" aria-label="Weekly report date" aria-describedby="weekly-report-range" value={exportWeekDate} onChange={event => setExportWeekDate(event.target.value)} className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white" /><button aria-label="Download weekly PDF" disabled={!week} onClick={handleDownloadWeekly} className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm transition flex items-center gap-1"><Download className="w-3.5 h-3.5" />Download</button></div><p id="weekly-report-range" role="status" className="text-xs text-slate-500 mt-2">{week ? `${displayDate(week.start)} – ${displayDate(week.end)}` : 'Choose a valid date.'}</p></div>
         </div>
 
         {/* Monthly Report Download */}

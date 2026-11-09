@@ -155,7 +155,7 @@ export interface AttendanceItem {
   isCoursePoolSharing: boolean;
   isDivePoolSharing: boolean;
   isBaseLeaderOverride: boolean;
-  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
+  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'BASIC' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
   note?: string;
   isSaved: boolean;
 }

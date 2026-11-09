@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
-import { businessToday, isBusinessDate, isYearMonth } from '../utils/dates';
+import { businessToday, businessWeek, isBusinessDate, isYearMonth } from '../utils/dates';
 import { renderReportPdf, ReportTable, ReportCell } from './reportPdfRenderer';
 
 const money = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,18 +22,20 @@ const personalSplit = (staffId: string, total: number, details: { staffId: strin
   return [photo, upselling, guiding, Math.round(total * 100) - photo - upselling - guiding].map(value => value / 100);
 };
 
-export async function generateReportPdf(propertyId: string, period: string, monthly: boolean, preparedByName = 'System generated') {
-  if (monthly ? !isYearMonth(period) : !isBusinessDate(period)) throw new Error('Choose a valid report period.');
-  const start = monthly ? `${period}-01` : period;
-  const end = monthly ? new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0)).toISOString().slice(0, 10) : period;
+export async function generateReportPdf(propertyId: string, period: string, monthly: boolean | 'weekly', preparedByName = 'System generated') {
+  if (monthly === true ? !isYearMonth(period) : !isBusinessDate(period)) throw new Error('Choose a valid report period.');
+  const week = monthly === 'weekly' ? businessWeek(period) : null;
+  if (monthly === 'weekly' && !week) throw new Error('Choose a valid report week.');
+  const start = week ? week.start : monthly ? `${period}-01` : period;
+  const end = week ? week.end : monthly ? new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0)).toISOString().slice(0, 10) : period;
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property) throw new Error('Property not found');
   const bills = await prisma.bill.findMany({ where: { propertyId, status: 'ACTIVE', businessDate: { gte: start, lte: end } },
     include: { items: true }, orderBy: [{ businessDate: 'asc' }, { checkNumber: 'asc' }] });
-  const commission = await calculateCommissionForPeriod(propertyId, start, end);
   const tables: ReportTable[] = [];
   const iruFushiLetterhead = /^(sun\s+siyam\s+)?iru\s*fushi$/i.test(property.name.trim());
-  const periodLabel = new Intl.DateTimeFormat('en-GB', { ...(monthly ? {} : { day: '2-digit' as const }), month: 'long', year: 'numeric', timeZone: 'Indian/Maldives' }).format(new Date(`${start}T12:00:00Z`));
+  const formatDate = (date: string) => new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
+  const periodLabel = week ? `${formatDate(start)} - ${formatDate(end)}` : new Intl.DateTimeFormat('en-GB', { ...(monthly ? {} : { day: '2-digit' as const }), month: 'long', year: 'numeric', timeZone: 'Indian/Maldives' }).format(new Date(`${start}T12:00:00Z`));
   const preparedBy = { name: preparedByName, date: businessToday() };
   if (!monthly) {
     const total = (field: 'grossAmount' | 'discountAmount' | 'serviceChargeAmount' | 'taxAmount' | 'tipAmount' | 'netAmount') => money(sum(bills.map(bill => bill[field])));
@@ -44,17 +46,10 @@ export async function generateReportPdf(propertyId: string, period: string, mont
         money(bill.grossAmount), money(bill.discountAmount), money(bill.serviceChargeAmount), money(bill.taxAmount), money(bill.tipAmount), money(bill.netAmount)]),
         ['TOTAL', '', '', '', sum(bills.map(bill => bill.items.length)), total('grossAmount'), total('discountAmount'), total('serviceChargeAmount'), total('taxAmount'), total('tipAmount'), total('netAmount')]],
       note: `${bills.length} active bill${bills.length === 1 ? '' : 's'}. Items count is the number of saved bill lines. Amounts in ${property.currency}.` });
-    const fields = ['courseCommission', 'diveCommission', 'overrideCommission', 'tipsCommission', 'personalCommission', 'totalCommission'] as const;
-    tables.push({ title: 'Staff Commission', singleTable: true, compact: true,
-      columns: [column('Staff member', 190), column('Role', 120), column('Course pool', 78, true), column('Dive pool', 78, true), column('Base leader override', 90, true), column('Tips', 65, true), column('Personal', 78, true), column('Total pay', 85, true)],
-      rows: [...commission.staffResults.map(row => [row.staffName, row.roleTitle, ...fields.map(field => money(row[field]))]),
-        ['TOTAL', '', ...fields.map(field => money(sum(commission.staffResults.map(row => row[field]))))]] });
-    tables.push({ title: 'Certifications Pool', singleTable: true,
-      columns: [column('Metric', 300), column('Value', 400)],
-      rows: [[`Certifications pool (${property.currency})`, money(commission.certificationPoolTotal)], ['Distribution', 'No staff commission or base-leader override']] });
     return renderReportPdf(`${property.name} - Daily report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
-      { signOff: true, preparedBy, logo: iruFushiLetterhead ? 'iru-fushi' : 'dive-centre' });
+      { signOff: true, signOffPosition: 'bottom', preparedBy, logo: iruFushiLetterhead ? 'iru-fushi' : 'dive-centre' });
   }
+  const commission = await calculateCommissionForPeriod(propertyId, start, end);
   const sales = sum(bills.map(bill => bill.grossAmount - bill.discountAmount));
   tables.push({ title: 'Overview', emphasizeRows: [3, 7, 9], columns: [column('Metric', 340), column(`Amount / value (${property.currency})`, 170, true)], rows: [
     ['Active bills', bills.length], ['Gross sales', money(sum(bills.map(bill => bill.grossAmount)))],
@@ -136,10 +131,10 @@ export async function generateReportPdf(propertyId: string, period: string, mont
     const staff = await prisma.staffMember.findMany({ where: { propertyId, hireDate: { lte: end }, OR: [{ leavingDate: null }, { leavingDate: { gte: start } }] }, orderBy: { name: 'asc' } });
     const attendance = await prisma.attendance.findMany({ where: { propertyId, staffMember: { propertyId }, date: { gte: start, lte: end } } });
     const statuses = new Map(attendance.map(row => [`${row.staffMemberId}:${row.date}`, row.status]));
-    const codes: Record<string, string> = { PRESENT: 'P', OFF: 'O', OFF_HALF: 'O 1/2', ANNUAL_LEAVE: 'AL', SICK: 'S', ABSENT: 'A', EMERGENCY_LEAVE: 'EL' };
+    const codes: Record<string, string> = { BASIC: 'B', PRESENT: 'P', OFF: 'O', OFF_HALF: 'O 1/2', ANNUAL_LEAVE: 'AL', SICK: 'S', ABSENT: 'A', EMERGENCY_LEAVE: 'EL' };
     const rows: ReportCell[][] = [];
-    for (let day = 1; day <= Number(end.slice(-2)); day++) {
-      const date = `${period}-${String(day).padStart(2, '0')}`;
+    for (const day = new Date(`${start}T12:00:00Z`); day.getTime() <= new Date(`${end}T12:00:00Z`).getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
+      const date = day.toISOString().slice(0, 10);
       rows.push([date, ...staff.map(person => {
         if (person.hireDate > date || (person.leavingDate && person.leavingDate < date)) return '-';
         const status = statuses.get(`${person.id}:${date}`);
@@ -147,21 +142,24 @@ export async function generateReportPdf(propertyId: string, period: string, mont
       })]);
     }
     const count = (id: string, status: string) => attendance.filter(row => row.staffMemberId === id && row.status === status).length;
-    rows.push(['At work', ...staff.map(person => count(person.id, 'PRESENT') + count(person.id, 'OFF_HALF') / 2)],
+    rows.push(['At work', ...staff.map(person => count(person.id, 'PRESENT') + count(person.id, 'BASIC') + count(person.id, 'OFF_HALF') / 2)],
+      ['Basic (no commission)', ...staff.map(person => count(person.id, 'BASIC'))],
       ['Off', ...staff.map(person => count(person.id, 'OFF') + count(person.id, 'OFF_HALF') / 2)],
       ['Annual leave', ...staff.map(person => count(person.id, 'ANNUAL_LEAVE'))], ['Sick', ...staff.map(person => count(person.id, 'SICK'))],
       ['Absent', ...staff.map(person => count(person.id, 'ABSENT'))], ['Emergency leave', ...staff.map(person => count(person.id, 'EMERGENCY_LEAVE'))],
-      ['Payable days', ...staff.map(person => count(person.id, 'PRESENT') + count(person.id, 'OFF') + count(person.id, 'OFF_HALF'))]);
+      ['Payable days', ...staff.map(person => count(person.id, 'PRESENT') + count(person.id, 'OFF') + count(person.id, 'OFF_HALF') + count(person.id, 'BASIC'))]);
     tables.push({ title: 'Attendance', compact: true, emphasizeRows: [rows.length - 1], columns: [column('Date / summary', 105, false, 95), ...staff.map(person => column(person.name, 100, false, 90))], rows,
-      note: 'P: present | O: off | O 1/2: half off | AL: annual leave | S: sick | A: absent | EL: emergency leave. Blank means no saved attendance; - means outside employment dates. Dates repeat for each staff column group.' });
+      note: 'B: basic (payable, no commission) | P: present | O: off | O 1/2: half off | AL: annual leave | S: sick | A: absent | EL: emergency leave. Blank means no saved attendance; - means outside employment dates. Dates repeat for each staff column group.' });
     const rooms = new Map<string, number>();
     for (const bill of bills) rooms.set(bill.roomNumber, (rooms.get(bill.roomNumber) ?? 0) + bill.grossAmount - bill.discountAmount);
     tables.push({ title: 'Room report', columns: [column('Room', 200), column('Turnover after discounts', 200, true)],
       rows: [...[...rooms].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([room, turnover]) => [room, money(turnover)]), ['TOTAL', money(sales)]] });
   }
-  return renderReportPdf(`${property.name} - Monthly report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
+  return renderReportPdf(`${property.name} - ${week ? 'Weekly' : 'Monthly'} report`, `${periodLabel} | ${property.currency} | Active bills only`, tables,
     { signOff: true, preparedBy, ...(iruFushiLetterhead ? { letterhead: 'iru-fushi' as const } : { logo: 'dive-centre' as const }) });
 }
 
 export const generateDailyPdfReport = (propertyId: string, date: string, preparedByName?: string) => generateReportPdf(propertyId, date, false, preparedByName);
 export const generateMonthlyPdfReport = (propertyId: string, month: string, preparedByName?: string) => generateReportPdf(propertyId, month, true, preparedByName);
+
+export const generateWeeklyPdfReport = (propertyId: string, date: string, preparedByName?: string) => generateReportPdf(propertyId, date, 'weekly', preparedByName);

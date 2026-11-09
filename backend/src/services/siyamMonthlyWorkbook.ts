@@ -19,6 +19,7 @@ const sum = (values: number[]) => values.reduce((total, value) => total + value,
 const round = (value: number) => Math.round(value * 100) / 100;
 const codes: Record<string, string> = {
   PRESENT: 'p',
+  BASIC: 'b',
   OFF: 'o',
   OFF_HALF: 'o1/2',
   ANNUAL_LEAVE: 'al',
@@ -429,12 +430,13 @@ export function createSiyamMonthlyWorkbook(data: MonthlyData) {
   attendance.addRow([]);
   const count = (id: string, status: string) => attendances.filter(a => a.staffMemberId === id && a.status === status).length;
   const attendanceSummary: [string, (id: string) => number][] = [
-    ['at work', id => count(id, 'PRESENT') + count(id, 'OFF_HALF') / 2],
+    ['at work', id => count(id, 'PRESENT') + count(id, 'BASIC') + count(id, 'OFF_HALF') / 2],
+    ['basic (no commission)', id => count(id, 'BASIC')],
     ['off', id => count(id, 'OFF') + count(id, 'OFF_HALF') / 2],
     ['annual leave', id => count(id, 'ANNUAL_LEAVE')],
     ['sick', id => count(id, 'SICK')],
-    ['non payable', id => daysInMonth - (count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF'))],
-    ['total payable days', id => count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF')],
+    ['non payable', id => daysInMonth - (count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF') + count(id, 'BASIC'))],
+    ['total payable days', id => count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF') + count(id, 'BASIC')],
   ];
 
   for (const [label, fn] of attendanceSummary) {

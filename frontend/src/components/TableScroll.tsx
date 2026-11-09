@@ -1,7 +1,8 @@
+import { PaginatedCollection } from './PaginatedCollection';
 import React, { useEffect, useId, useRef, useState } from 'react';
 
 /** Make wide tables discoverable and keyboard-scrollable only when they overflow. */
-export function TableScroll({ label, className = '', children }: {
+function ScrollableTable({ label, className = '', children }: {
   label: string;
   className?: string;
   children: React.ReactNode;
@@ -31,4 +32,12 @@ export function TableScroll({ label, className = '', children }: {
     </div>
     {overflow && <p className="table-scroll-cue" id={hintId}>Scroll horizontally to see all columns <span aria-hidden="true">↔</span><span className="sr-only">. Keyboard users can focus the table region and use the arrow keys.</span></p>}
   </>;
+}
+
+
+export function TableScroll({ label, className, children, paginate = false }: {
+  label: string; className?: string; children: React.ReactNode; paginate?: boolean;
+}) {
+  return paginate ? <PaginatedCollection label={label} renderContainer={content => <ScrollableTable label={label} className={className}>{content}</ScrollableTable>}>{children}</PaginatedCollection>
+    : <ScrollableTable label={label} className={className}>{children}</ScrollableTable>;
 }

@@ -75,3 +75,15 @@ test('Siyam World date changes respect the unsaved-work guard and locked payroll
   assert.equal(button(tree,'All Present').props.disabled,true);
  }
 });
+
+test('Basic attendance is available in each property layout and saves without losing notes', async () => {
+ for (const propertyName of ['Iru Fushi', 'Siyam World']) {
+  const f = await loaded({ propertyName });
+  assert.ok(nodes(f.render()).some(node => node.type === 'option' && node.props.value === 'BASIC'));
+  status(f.render()).props.onChange({ target: { value: 'BASIC' } });
+  assert.equal(status(f.render()).props.value, 'BASIC');
+  await save(f.render()).props.onClick(); await f.flush();
+  const call = f.calls.find(call => call.method === 'POST');
+  assert.deepEqual(JSON.parse(call.body).records[0], { staffMemberId: 'staff-1', status: 'BASIC', note: 'Existing note' });
+ }
+});

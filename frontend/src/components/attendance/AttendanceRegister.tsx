@@ -4,7 +4,7 @@ import { AttendanceItem } from '../../types';
 import { CheckCircle2, Users, Save, Sparkles } from 'lucide-react';
 import type { AttendanceModel } from './useAttendanceController';
 
-const statusLabels: Record<AttendanceItem['status'], string> = { PRESENT: 'Present', OFF: 'Off', OFF_HALF: 'Off (half day)', ANNUAL_LEAVE: 'Annual leave', SICK: 'Sick', ABSENT: 'Absent', EMERGENCY_LEAVE: 'Emergency leave' };
+const statusLabels: Record<AttendanceItem['status'], string> = { BASIC: 'Basic', PRESENT: 'Present', OFF: 'Off', OFF_HALF: 'Off (half day)', ANNUAL_LEAVE: 'Annual leave', SICK: 'Sick', ABSENT: 'Absent', EMERGENCY_LEAVE: 'Emergency leave' };
 
 export function AttendanceRegister({ model, compact = false }: { model: AttendanceModel; compact?: boolean }) {
   const {
@@ -77,7 +77,7 @@ export function AttendanceRegister({ model, compact = false }: { model: Attendan
                       <span className="text-xs text-slate-400 font-medium">
                         • {staff.roleTitle}
                       </span>
-                      {staff.isBaseLeaderOverride && (
+                      {staff.isBaseLeaderOverride && staff.status !== 'BASIC' && (
                         <span className="px-1.5 py-0.2 rounded text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                           +10% Override
                         </span>
@@ -86,14 +86,14 @@ export function AttendanceRegister({ model, compact = false }: { model: Attendan
 
                     {/* Commission Impact Indicator */}
                     {!compact && <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center space-x-1">
-                      <span>Commission Pool:</span>
+                      <span>{staff.status === 'BASIC' ? 'Basic:' : 'Commission Pool:'}</span>
                       {countsTowardCommission ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">
                           {staff.isSaved && !changed ? "✓ Included in day's pool" : 'Would count when saved'}
                         </span>
                       ) : (
                         <span className="text-rose-600 dark:text-rose-400 font-semibold">
-                          {staff.isSaved && !changed ? '✕ Excluded from pool' : 'Would be excluded when saved'}
+                          {staff.status === 'BASIC' ? 'No pool or personal commission' : staff.isSaved && !changed ? '✕ Excluded from pool' : 'Would be excluded when saved'}
                         </span>
                       )}
                     </div>}
@@ -114,6 +114,7 @@ export function AttendanceRegister({ model, compact = false }: { model: Attendan
                       }
                       className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
                     >
+                      <option value="BASIC">Basic (No pool or personal commission)</option>
                       <option value="PRESENT">Present (Full Pool)</option>
                       <option value="OFF">Off (Counts Full)</option>
                       <option value="OFF_HALF">Off (Half Day - Counts Full)</option>

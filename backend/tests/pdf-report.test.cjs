@@ -5,7 +5,7 @@ const { loadTypeScript } = require('./helpers/runtime.cjs');
 const { renderReportPdf } = loadTypeScript('src/services/reportPdfRenderer.ts');
 class GeneratedDate extends Date { constructor(...args) { super(...(args.length ? args : ['2026-11-06T22:15:00.000Z'])); } }
 
-function fixture(empty = false, propertyName = 'Siyam World', extraBills = [], commissionOverride) {
+function fixture(empty = false, propertyName = 'Siyam World', extraBills = [], commissionOverride, attendanceStatus = 'OFF_HALF') {
   const queries = [];
   let tables;
   let options;
@@ -17,7 +17,7 @@ function fixture(empty = false, propertyName = 'Siyam World', extraBills = [], c
       property: { findUnique: async () => ({ id: 'sw', name: propertyName, currency: 'USD' }) },
       bill: { findMany: async query => { queries.push(query); return empty ? [] : [bill, ...extraBills]; } },
       staffMember: { findMany: async () => empty ? [] : staff },
-      attendance: { findMany: async () => empty ? [] : [{ staffMemberId: 'staff0', date: '2028-02-02', status: 'OFF_HALF' }] },
+      attendance: { findMany: async () => empty ? [] : [{ staffMemberId: 'staff0', date: '2028-02-02', status: attendanceStatus }] },
     } },
     './commissionService': { calculateCommissionForPeriod: async () => (commissionOverride ?? { grandTotal: empty ? 0 : 13, certificationPoolTotal: 0, storeAttendantPoolTotal: empty ? 0 : 8, unallocatedStoreAttendantPoolTotal: 0,
       staffResults: empty ? [] : [{ staffId: 'store', staffName: 'Store employee', roleTitle: 'Store Attendant', courseCommission: 0, diveCommission: 0, overrideCommission: 0, tipsCommission: 5, personalCommission: 8, totalCommission: 13 }],
@@ -56,9 +56,9 @@ test('daily and empty monthly reports produce valid PDFs with truthful zero tota
   const daily = fixture();
   const pdf = await daily.generateDailyPdfReport('sw', '2028-02-02');
   assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
-  assert.deepEqual(daily.tables().map(t => t.title), ['Bills', 'Staff Commission', 'Certifications Pool']);
+  assert.deepEqual(daily.tables().map(t => t.title), ['Bills']);
   assert(!daily.tables().some(t => t.title === 'Attendance'));
-  assert.deepEqual(daily.options(), { signOff: true, preparedBy: { name: 'System generated', date: '2026-11-07' }, logo: 'dive-centre' });
+  assert.deepEqual(daily.options(), { signOff: true, signOffPosition: 'bottom', preparedBy: { name: 'System generated', date: '2026-11-07' }, logo: 'dive-centre' });
   assert.deepEqual(daily.queries[0].where.businessDate, { gte: '2028-02-02', lte: '2028-02-02' });
   const empty = fixture(true);
   const blank = await empty.generateMonthlyPdfReport('sw', '2028-02');
@@ -100,7 +100,7 @@ test('Iru Fushi keeps its monthly letterhead and daily logo, with sign-off on bo
     assert.match(pdf.toString('latin1'), /\/Subtype \/Image/);
     if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-monthly-report.pdf', pdf);
     const daily = await f.generateDailyPdfReport('sw', '2028-02-02');
-    assert.deepEqual(f.options(), { signOff: true, preparedBy: { name: 'System generated', date: '2026-11-07' }, logo: 'iru-fushi' });
+    assert.deepEqual(f.options(), { signOff: true, signOffPosition: 'bottom', preparedBy: { name: 'System generated', date: '2026-11-07' }, logo: 'iru-fushi' });
     assert.match(daily.toString('latin1'), /\/MediaBox \[0 0 841\.89 595\.28\]/);
     assert.match(daily.toString('latin1'), /\/Subtype \/Image/);
     if (process.env.PDF_QA_DIR && name === 'Sun Siyam Iru Fushi') fs.writeFileSync(process.env.PDF_QA_DIR + '/irufushi-daily-report.pdf', daily);
@@ -132,7 +132,7 @@ test('export endpoints return PDF attachment headers and enforce property access
   const { registerReportExportRoutes } = loadTypeScript('src/routes/report.export.ts', {
     '../middleware/auth': { requireAuth: (_req, _res, next) => next() },
     '../db': { prisma: { user: { findUnique: async ({ where, select }) => { assert.equal(where.id, 'current-user'); assert.deepEqual(select, { name: true }); return accountExists ? { name: 'Trusted Full Name', username: 'trusted.login' } : null; } } } },
-    '../services/pdfReportService': { generateDailyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-daily'); }, generateMonthlyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-monthly'); } },
+    '../services/pdfReportService': { generateDailyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-daily'); }, generateMonthlyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-monthly'); }, generateWeeklyPdfReport: async (...args) => { generated.push(args); return Buffer.from('%PDF-weekly'); } },
   });
   registerReportExportRoutes(router);
   const call = (path, query) => new Promise((resolve, reject) => {
@@ -141,7 +141,7 @@ test('export endpoints return PDF attachment headers and enforce property access
     const res = { statusCode: 200, setHeader: (key, value) => { headers[key] = value; }, status(code) { this.statusCode = code; return this; }, json(body) { resolve({ status: this.statusCode, body, headers }); }, send(body) { resolve({ status: this.statusCode, body, headers }); } };
     router.handle(req, res, reject);
   });
-  for (const [path, query, filename] of [['/export/daily', { propertyId: 'sw', date: '2028-02-02', preparedBy: 'forged.login' }, 'Daily_Report_2028-02-02.pdf'], ['/export/monthly', { propertyId: 'sw', yearMonth: '2028-02', preparedBy: 'forged.login' }, 'Monthly_Report_2028-02.pdf']]) {
+  for (const [path, query, filename] of [['/export/daily', { propertyId: 'sw', date: '2028-02-02', preparedBy: 'forged.login' }, 'Daily_Report_2028-02-02.pdf'], ['/export/monthly', { propertyId: 'sw', yearMonth: '2028-02', preparedBy: 'forged.login' }, 'Monthly_Report_2028-02.pdf'], ['/export/weekly', { propertyId: 'sw', date: '2028-01-01', preparedBy: 'forged.login' }, 'Weekly_Report_2027-12-27_to_2028-01-02.pdf']]) {
     const response = await call(path, query);
     assert.equal(response.status, 200);
     assert.equal(response.headers['Content-Type'], 'application/pdf');
@@ -150,29 +150,33 @@ test('export endpoints return PDF attachment headers and enforce property access
   }
   assert.equal((await call('/export/daily', { propertyId: 'foreign', date: '2028-02-02' })).status, 403);
   assert.equal((await call('/export/monthly', { propertyId: 'sw', yearMonth: '2028-13' })).status, 400);
-  assert.equal(generated.length, 2);
+  assert.equal(generated.length, 3);
   assert.deepEqual(generated[0], ['sw', '2028-02-02', 'Trusted Full Name']);
   assert.deepEqual(generated[1], ['sw', '2028-02', 'Trusted Full Name']);
+  assert.deepEqual(generated[2], ['sw', '2028-01-01', 'Trusted Full Name']);
+  assert.equal((await call('/export/weekly', { propertyId: 'foreign', date: '2028-01-01' })).status, 403);
+  for (const date of ['2028-02-30', '', '2028-99-99', ['2028-01-01']]) assert.equal((await call('/export/weekly', { propertyId: 'sw', date })).status, 400);
   accountExists = false;
+  assert.equal((await call('/export/weekly', { propertyId: 'sw', date: '2028-01-01' })).status, 401);
   assert.equal((await call('/export/daily', { propertyId: 'sw', date: '2028-02-02' })).status, 401);
   assert.equal((await call('/export/monthly', { propertyId: 'sw', yearMonth: '2028-02' })).status, 401);
-  assert.equal(generated.length, 2);
+  assert.equal(generated.length, 3);
 });
 
 
 test('daily finance PDF keeps reference columns and correct line counts, totals and authenticated preparer', async () => {
   const f = fixture();
   await f.generateDailyPdfReport('sw', '2028-02-02', 'Finance Full Name');
-  const [bills, staff, certifications] = f.tables();
+  const [bills] = f.tables();
+  assert.equal(f.tables().length, 1);
   assert.equal(bills.columns.length, 11);
   assert.deepEqual(bills.rows[0], [1001, '0012', 'Jürgen Иванов', 'Other', 1, '200.00', '40.00', '16.00', '28.16', '5.00', '209.16']);
   assert.equal(bills.rows.at(-1)[4], 1);
   assert.equal(bills.rows.at(-1).at(-1), '209.16');
-  assert.equal(staff.columns.length, 8);
-  assert.equal(staff.rows.at(-1).at(-1), '13.00');
-  assert.equal(certifications.rows[1][1], 'No staff commission or base-leader override');
   assert.equal(f.options().preparedBy.name, 'Finance Full Name');
-  assert(bills.singleTable && staff.singleTable);
+  assert(bills.singleTable);
+  const pdf = await f.generateDailyPdfReport('sw', '2028-02-02', 'Finance Full Name');
+  assert.equal((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length, 1);
 });
 
 test('monthly photo, upselling and guiding splits preserve all saved personal payments without double counting', async () => {
@@ -191,4 +195,37 @@ test('monthly photo, upselling and guiding splits preserve all saved personal pa
   assert.equal(row.at(-1), personal.toFixed(2));
   assert.deepEqual(table.rows.at(-1).slice(1), row.slice(1));
   assert.equal(f.tables().find(t => t.title === 'Staff payments').rows[0][2], `${(personal + 6).toFixed(2)}\nTips: 3.00`);
+});
+
+
+test('weekly PDF uses one Monday-Sunday range across years and includes seven attendance dates and separate personal commission', async () => {
+  const f = fixture(false, 'Iru Fushi');
+  const pdf = await f.generateWeeklyPdfReport('sw', '2028-01-01', 'Weekly Report Manager');
+  assert.deepEqual(f.queries[0].where.businessDate, { gte: '2027-12-27', lte: '2028-01-02' });
+  const attendance = f.tables().find(table => table.title === 'Attendance');
+  assert.deepEqual(attendance.rows.slice(0,7).map(row => row[0]), ['2027-12-27','2027-12-28','2027-12-29','2027-12-30','2027-12-31','2028-01-01','2028-01-02']);
+  assert.equal(attendance.rows.length, 15);
+  assert(f.tables().some(table => table.title === 'Personal commission summary'));
+  assert.equal(f.tables().find(table => table.title === 'Bill totals').rows.at(-1).at(-1), '209.16');
+  assert.equal(f.options().preparedBy.name, 'Weekly Report Manager');
+  assert.equal(f.options().letterhead, 'iru-fushi');
+  if (process.env.PDF_QA_DIR) fs.writeFileSync(process.env.PDF_QA_DIR + '/weekly-report.pdf', pdf);
+  await assert.rejects(() => f.generateWeeklyPdfReport('sw', '2028-02-30'), /valid report period/);
+  const empty = fixture(true);
+  await empty.generateWeeklyPdfReport('sw', '2028-02-29');
+  assert.deepEqual(empty.queries[0].where.businessDate, { gte: '2028-02-28', lte: '2028-03-05' });
+  assert.equal(empty.tables()[0].rows.find(row => row[0] === 'Grand total')[1], '0.00');
+});
+
+
+test('Basic attendance is marked separately and remains worked and payable in monthly and weekly PDFs', async () => {
+ for (const weekly of [false, true]) {
+  const f = fixture(false, 'Iru Fushi', [], undefined, 'BASIC');
+  const pdf = weekly ? await f.generateWeeklyPdfReport('sw', '2028-02-02') : await f.generateMonthlyPdfReport('sw', '2028-02');
+  const table = f.tables().find(table => table.title === 'Attendance');
+  assert.equal(table.rows.find(row => row[0] === '2028-02-02')[1], 'B');
+  for (const label of ['At work', 'Basic (no commission)', 'Payable days']) assert.equal(table.rows.find(row => row[0] === label)[1], 1, label);
+  assert.match(table.note, /basic \(payable, no commission\)/);
+  if (process.env.PDF_QA_DIR && !weekly) fs.writeFileSync(process.env.PDF_QA_DIR + '/basic-attendance.pdf', pdf);
+ }
 });

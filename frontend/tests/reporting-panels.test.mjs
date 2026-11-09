@@ -56,18 +56,23 @@ test('recompute remains disabled when loading, recomputing, missing a report or 
 });
 test('export dates, downloads and payroll actions remain separate; staff cannot see manager lock controls', () => {
   const calls = [];
-  const props = { exportDate: '2026-11-04', exportMonth: '2026-10', payrollLocked: false, payrollLoading: false, payrollError: '', lockLoading: false, canManageLocks: true, setExportDate: date => calls.push(['date', date]), setExportMonth: month => calls.push(['month', month]), handleDownloadDaily: () => calls.push('daily'), handleDownloadMonthly: () => calls.push('monthly'), onConfirmLock: () => calls.push('confirm') };
+  const props = { exportWeekDate: '2026-11-04', setExportWeekDate: date => calls.push(['week', date]), handleDownloadWeekly: () => calls.push('weekly'), exportDate: '2026-11-04', exportMonth: '2026-10', payrollLocked: false, payrollLoading: false, payrollError: '', lockLoading: false, canManageLocks: true, setExportDate: date => calls.push(['date', date]), setExportMonth: month => calls.push(['month', month]), handleDownloadDaily: () => calls.push('daily'), handleDownloadMonthly: () => calls.push('monthly'), onConfirmLock: () => calls.push('confirm') };
   const tree = ExportPanel(props);
   find(tree, node => node.props?.['aria-label'] === 'Download daily PDF').props.onClick();
   find(tree, node => node.props?.['aria-label'] === 'Download monthly PDF').props.onClick();
+  find(tree, node => node.props?.['aria-label'] === 'Download weekly PDF').props.onClick();
+  find(tree, node => node.props?.['aria-label'] === 'Weekly report date').props.onChange({ target: { value: '2026-11-09' } });
   button(tree, 'Lock month').props.onClick();
   const html = renderToStaticMarkup(tree);
   assert.match(html, /Daily Report \(.pdf\)/);
+  assert.match(html, /2 Nov 2026 – 8 Nov 2026/);
+  assert.match(html, /Weekly Report/);
   assert.match(html, /Monthly Report \(.pdf\)/);
   assert.doesNotMatch(html, /xlsx|Workbook/);
   find(tree, node => node.props?.['aria-label'] === 'Daily report date').props.onChange({ target: { value: '2026-11-03' } });
-  assert.deepEqual(calls, ['daily', 'monthly', 'confirm', ['date', '2026-11-03']]);
+  assert.deepEqual(calls, ['daily', 'monthly', 'weekly', ['week', '2026-11-09'], 'confirm', ['date', '2026-11-03']]);
   assert.equal(button(ExportPanel({ ...props, canManageLocks: false }), 'Lock month'), undefined);
+  assert.equal(find(ExportPanel({ ...props, exportWeekDate: '' }), node => node.props?.['aria-label'] === 'Download weekly PDF').props.disabled, true);
   assert.equal(button(ExportPanel({ ...props, payrollLocked: null }), 'Lock month').props.disabled, true);
 });
 test('performance values and empty chart feedback remain available without data', () => {
@@ -75,4 +80,14 @@ test('performance values and empty chart feedback remain available without data'
   assert.match(html, /\$100.00/);
   assert.match(html, /No saved bills in this period/);
   assert.doesNotThrow(() => renderToStaticMarkup(PerformancePanel({ report: null, currencySymbol: '$' })));
+});
+
+
+test('weekly date ranges are calendar-based across Sundays, years and leap days', () => {
+ const { businessWeek } = load(path.join(components, '../utils/dates.ts'));
+ for (const date of ['2026-11-02', '2026-11-08']) assert.deepEqual(businessWeek(date), { start: '2026-11-02', end: '2026-11-08' });
+ assert.deepEqual(businessWeek('2028-01-01'), { start: '2027-12-27', end: '2028-01-02' });
+ assert.deepEqual(businessWeek('2028-02-29'), { start: '2028-02-28', end: '2028-03-05' });
+ assert.equal(businessWeek('2026-02-29'), null);
+ assert.equal(businessWeek(''), null);
 });

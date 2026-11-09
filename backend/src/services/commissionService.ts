@@ -373,7 +373,7 @@ export const calculateCommissionForPeriod = async (
     // 3. Base-Leader Override (+10% of total pool, paid regardless of attendance)
     // Page 7: "An extra 10% of the pool, paid to the base leader(s) — regardless of attendance."
     const totalDayPool = dailyCoursePool + dailyDivePool;
-    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date));
+    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date) && dayAttendanceMap.get(bl.id)?.toUpperCase() !== 'BASIC');
     if (totalDayPool > 0 && employedBaseLeaders.length > 0) {
       const overrideTotal = totalDayPool * 0.10;
       const overrideShare = overrideTotal / employedBaseLeaders.length;

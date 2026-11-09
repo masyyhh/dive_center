@@ -18,3 +18,15 @@ export const monthRange = (yearMonth: string) => {
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return { start: `${yearMonth}-01`, end: `${yearMonth}-${lastDay}` };
 };
+
+/** Monday through Sunday, calculated as calendar dates without device timezone shifts. */
+export const businessWeek = (date: string) => {
+  if (!isBusinessDate(date)) return null;
+  const monday = new Date(`${date}T12:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(sunday.getUTCDate() + 6);
+  const start = monday.toISOString().slice(0, 10);
+  const end = sunday.toISOString().slice(0, 10);
+  return isBusinessDate(start) && isBusinessDate(end) ? { start, end } : null;
+};

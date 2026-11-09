@@ -164,6 +164,7 @@ const saveDayPresenceSchema = z.object({
         'PRESENT',
         'OFF',
         'OFF_HALF',
+        'BASIC',
         'ANNUAL_LEAVE',
         'SICK',
         'ABSENT',

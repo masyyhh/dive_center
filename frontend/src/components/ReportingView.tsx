@@ -3,7 +3,7 @@ import { serializeCsv } from '../utils/csv';
 import { formatMoney } from '../utils/format';
 import { Modal } from './Modal';
 import { PayrollBreakdown } from './PayrollBreakdown';
-import { businessToday } from '../utils/dates';
+import { businessToday, businessWeek } from '../utils/dates';
 import React, { useState, useEffect, useRef } from 'react';
 import { useProperty } from '../context/PropertyContext';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +43,7 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
 
   // Independent export parameters (PDF Page 6: "Monthly report — pick a month independent of the dashboard range")
   const [exportDate, setExportDate] = useState<string>(todayStr);
+  const [exportWeekDate, setExportWeekDate] = useState<string>(todayStr);
   const [exportMonth, setExportMonth] = useState<string>(currentYm);
 
   const reportRequest = useRef(0);
@@ -154,6 +155,16 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
     ); } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not download the daily report.'); }
   };
 
+  const handleDownloadWeekly = async () => {
+    if (!activeProperty) return;
+    const week = businessWeek(exportWeekDate);
+    if (!week) { setErrorMsg('Choose a valid date for the weekly report.'); return; }
+    try { await downloadFile(
+      `/reports/export/weekly?propertyId=${activeProperty.id}&date=${exportWeekDate}`,
+      `Weekly_Report_${week.start}_to_${week.end}.pdf`
+    ); } catch (err) { setErrorMsg(err instanceof Error ? err.message : 'Could not download the weekly report.'); }
+  };
+
   // Monthly PDF download
   const handleDownloadMonthly = async () => {
     if (!activeProperty) return;
@@ -248,7 +259,7 @@ export const ReportingView: React.FC<{ section?: string; onSectionChange: (secti
       </div>
       {reportTab === 'performance' && <PerformancePanel report={report} currencySymbol={currencySymbol} downloadChartCsv={downloadChartCsv} />}
       {reportTab === 'commissions' && <CommissionPanel report={report} currencySymbol={currencySymbol} downloadChartCsv={downloadChartCsv} loading={loading} recomputing={recomputing} handleRecompute={handleRecompute} setBreakdownStaffId={setBreakdownStaffId} />}
-      {reportTab === 'exports' && <ExportPanel exportDate={exportDate} setExportDate={setExportDate} exportMonth={exportMonth} setExportMonth={setExportMonth} lockLoading={lockLoading} payrollLoading={payrollLoading} payrollLocked={payrollLocked} payrollError={payrollError} canManageLocks={canManageLocks} handleDownloadDaily={handleDownloadDaily} handleDownloadMonthly={handleDownloadMonthly} onConfirmLock={() => setConfirmLock(true)} onRetryPayroll={() => setPayrollVersion(value => value + 1)} />}
+      {reportTab === 'exports' && <ExportPanel exportWeekDate={exportWeekDate} setExportWeekDate={setExportWeekDate} handleDownloadWeekly={handleDownloadWeekly} exportDate={exportDate} setExportDate={setExportDate} exportMonth={exportMonth} setExportMonth={setExportMonth} lockLoading={lockLoading} payrollLoading={payrollLoading} payrollLocked={payrollLocked} payrollError={payrollError} canManageLocks={canManageLocks} handleDownloadDaily={handleDownloadDaily} handleDownloadMonthly={handleDownloadMonthly} onConfirmLock={() => setConfirmLock(true)} onRetryPayroll={() => setPayrollVersion(value => value + 1)} />}
       {breakdownStaffId && activeProperty && <PayrollBreakdown propertyId={activeProperty.id} staffId={breakdownStaffId} startDate={startDate} endDate={endDate} currencySymbol={currencySymbol} onClose={() => setBreakdownStaffId(null)} />}
       {confirmLock && <Modal label={payrollLocked ? 'Unlock payroll month?' : 'Lock payroll month?'} busy={lockLoading} onClose={() => setConfirmLock(false)} error={errorMsg}><div className="surface guard-dialog"><h2>{payrollLocked ? 'Unlock' : 'Lock'} {exportMonth}?</h2><p>{payrollLocked ? 'Bills and attendance in this month will become editable again.' : 'Bills and attendance in this month will be frozen for payroll. Confirm your team has finished reviewing them.'}</p><div className="dialog-actions"><button className="secondary-button" disabled={lockLoading} onClick={() => setConfirmLock(false)}>Cancel</button><button className="primary-button" disabled={lockLoading} onClick={handleToggleLock}>{lockLoading ? 'Updating…' : payrollLocked ? 'Unlock month' : 'Lock month'}</button></div></div></Modal>}
     </div>

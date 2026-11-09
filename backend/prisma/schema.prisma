@@ -284,7 +284,7 @@ model Attendance {
   propertyId     String
   staffMemberId  String
   date           String      // YYYY-MM-DD
-  // "PRESENT", "OFF", "OFF_HALF", "ANNUAL_LEAVE", "SICK", "ABSENT", "EMERGENCY_LEAVE"
+  // "PRESENT", "OFF", "OFF_HALF", "BASIC", "ANNUAL_LEAVE", "SICK", "ABSENT", "EMERGENCY_LEAVE"
   status         String      @default("PRESENT") 
   note           String?
   createdAt      DateTime    @default(now())

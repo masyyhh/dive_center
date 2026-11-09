@@ -45,7 +45,7 @@ export function StaffSection({ model }: { model: AdminModel }) {
             <p className="text-xs text-slate-500">Saved for {activeProperty?.name || 'the selected property'} and available when adding staff. Configure pool sharing for each staff member.</p>
           </form>}
 
-          <TableScroll label="Staff roster" className="overflow-x-auto">
+          <TableScroll paginate label="Staff roster" className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">

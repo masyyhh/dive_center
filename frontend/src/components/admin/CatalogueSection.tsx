@@ -91,12 +91,12 @@ export function CatalogueSection({ model }: { model: AdminModel }) {
           </div>}
 
           <p className="field-help">Select up to 200 activities for bulk changes.</p>
-          <TableScroll label="Catalogue activities" className="overflow-x-auto catalogue-table-region">
+          <TableScroll paginate label="Catalogue activities" className="overflow-x-auto catalogue-table-region">
             <table className="w-full text-left border-collapse text-sm catalogue-table">
               <caption className="sr-only">{showArchivedItems ? 'Deleted' : 'Active'} activities for {activeProperty?.name}</caption>
               <thead>
                 <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
-                  <th className="py-3 px-4"><input type="checkbox" aria-label="Select all visible activities"
+                  <th className="py-3 px-4"><input type="checkbox" aria-label="Select all matching activities across pages"
                     checked={selectableItems.length > 0 && selectedVisibleCount === selectableItems.length}
                     ref={node => { if (node) node.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < selectableItems.length; }}
                     disabled={bulkBusy || itemBusy || !selectableItems.length || (new Set([...selectedItemIds, ...selectableItems.map(item => item.id)]).size > 200 && selectedVisibleCount !== selectableItems.length)}
