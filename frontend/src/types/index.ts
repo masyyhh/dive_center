@@ -148,6 +148,9 @@ export interface Bill {
   updatedAt: string;
 }
 
+export type BillSummary = Pick<Bill, 'id' | 'propertyId' | 'checkNumber' | 'businessDate' | 'guestName' | 'roomNumber' | 'nationality' | 'grossAmount' | 'discountAmount' | 'netAmount' | 'status' | 'createdAt' | 'updatedAt'>;
+export interface BillPage { bills: BillSummary[]; nextCursor: string | null; hasMore: boolean; limit: number }
+
 export interface AttendanceItem {
   staffMemberId: string;
   staffName: string;
@@ -155,7 +158,7 @@ export interface AttendanceItem {
   isCoursePoolSharing: boolean;
   isDivePoolSharing: boolean;
   isBaseLeaderOverride: boolean;
-  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
+  status: 'PRESENT' | 'OFF' | 'OFF_HALF' | 'BASIC' | 'ANNUAL_LEAVE' | 'SICK' | 'ABSENT' | 'EMERGENCY_LEAVE';
   note?: string;
   isSaved: boolean;
 }

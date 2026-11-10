@@ -19,7 +19,14 @@ export function fixture(options={}){
    if(url.endsWith('/re-date'))bill={...bill,businessDate:body.newDate};
    return{bill};
   }
-  if(url.startsWith('/bills?'))return{bills:options.bills??[bill]};
+  if(url.startsWith('/bills?')){
+   if(options.deferLists)return new Promise(resolve=>(options.pendingLists??=[]).push({url,resolve}));
+   const params=new URL(url,'https://fixture.invalid').searchParams;
+   const q=(params.get('search')||'').toLowerCase();
+   const rows=(options.bills??[bill]).filter(row=>(params.get('discountedOnly')!=='true'||row.discountAmount>0)&&(!q||[row.guestName,row.roomNumber,String(row.checkNumber),row.nationality||''].some(v=>v.toLowerCase().includes(q))));
+   const start=Number(params.get('cursor')||0),limit=Number(params.get('limit')||50);
+   return{bills:rows.slice(start,start+limit),nextCursor:start+limit<rows.length?String(start+limit):null,hasMore:start+limit<rows.length,limit};
+  }
   if(url.startsWith('/bills/')){if(options.detailError)throw Error(options.detailError);return options.deferDetails?new Promise(resolve=>pendingDetails.push(resolve)):{bill};}
   throw Error('Unexpected request '+url);
  };

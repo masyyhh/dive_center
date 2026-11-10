@@ -3,8 +3,8 @@ import { additionalDisclaimerTranslations } from './waterSportsTranslations';
 import { boundedArray } from '../utils/validation';
 import { isBusinessDate } from '../utils/dates';
 
-export const formTypeSchema = z.enum(['DIVE_PARTICIPATION', 'PARTICIPATION', 'SNORKELING', 'GEAR_RENTAL', 'AID_GEAR']);
-export const documentKind = (type: string) => type === 'DIVE_PARTICIPATION' ? 'DIVING' : type === 'SNORKELING' ? 'SNORKELING' : 'PARTICIPATION';
+export const formTypeSchema = z.enum(['DIVE_PARTICIPATION', 'PARTICIPATION', 'SNORKELING', 'GEAR_RENTAL', 'AID_GEAR', 'EQUIPMENT_RENTAL']);
+export const documentKind = (type: string) => type === 'EQUIPMENT_RENTAL' ? 'EQUIPMENT_RENTAL' : type === 'DIVE_PARTICIPATION' ? 'DIVING' : type === 'SNORKELING' ? 'SNORKELING' : 'PARTICIPATION';
 export const languageSchema = z.string().trim().min(2).max(35).regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/);
 const dateSchema = z.string().refine(isBusinessDate, 'Use a valid calendar date.');
 export const staffFieldsSchema = z.object({

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Property } from '../types';
 import { useAuth } from './AuthContext';
 import { apiFetch, getStoredPropertyId, setStoredPropertyId } from '../services/api';
@@ -7,6 +7,7 @@ interface PropertyContextType {
   properties: Property[];
   activeProperty: Property | null;
   loading: boolean;
+  error: string;
   canSwitchProperty: boolean;
   setActiveProperty: (property: Property) => void;
   refreshProperties: () => Promise<void>;
@@ -18,13 +19,17 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const { user } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [activeProperty, setActivePropertyState] = useState<Property | null>(null);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState<boolean>(true);
 
   const canSwitchProperty = Boolean(
     user && (user.role === 'GLOBAL_ADMIN' || (user.role === 'PROPERTY_MANAGER' && properties.length > 1))
   );
 
+  const propertyRequest = useRef(0);
   const refreshProperties = async () => {
+    const request = ++propertyRequest.current;
+    setError('');
     if (!user || !user.authenticatorEnabled) {
       setProperties([]);
       setActivePropertyState(null);
@@ -36,6 +41,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       setLoading(true);
       const data = await apiFetch<{ properties: Property[] }>('/properties');
+      if (request !== propertyRequest.current) return;
       setProperties(data.properties);
 
       // Check stored property
@@ -54,14 +60,16 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setActivePropertyState(matched || null);
       setStoredPropertyId(matched?.id || null);
     } catch (err) {
-      console.error('Failed to load properties:', err);
+      if (request === propertyRequest.current) { console.error('Failed to load properties:', err); setError(err instanceof Error ? err.message : 'Could not load properties.'); }
     } finally {
-      setLoading(false);
+      if (request === propertyRequest.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    setProperties([]); setActivePropertyState(null);
     refreshProperties();
+    return () => { propertyRequest.current++; };
   }, [user]);
 
   const setActiveProperty = (property: Property) => {
@@ -78,6 +86,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         properties,
         activeProperty,
         loading,
+        error,
         canSwitchProperty,
         setActiveProperty,
         refreshProperties,

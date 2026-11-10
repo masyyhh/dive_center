@@ -30,12 +30,12 @@ const handle = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: 
 waterSportsRouter.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 waterSportsRouter.get('/documents', requireAuth, requirePropertyAccess(), handle(async (req, res) => {
-  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING']) }).safeParse(req.query);
+  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING', 'EQUIPMENT_RENTAL']) }).safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: 'Choose a property and disclaimer.' });
   return res.json({ documents: await availableDocuments(parsed.data.propertyId, parsed.data.kind) });
 }));
 waterSportsRouter.post('/documents', requireAuth, requireRole('GLOBAL_ADMIN', 'PROPERTY_MANAGER'), requirePropertyAccess('body'), handle(async (req, res) => {
-  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING']), language: languageSchema, languageName: z.string().trim().min(1).max(80), title: z.string().trim().min(1).max(200), body: z.string().trim().min(100).max(30000) }).strict().safeParse(req.body);
+  const parsed = z.object({ propertyId: propertySchema, kind: z.enum(['DIVING', 'PARTICIPATION', 'SNORKELING', 'EQUIPMENT_RENTAL']), language: languageSchema, languageName: z.string().trim().min(1).max(80), title: z.string().trim().min(1).max(200), body: z.string().trim().min(100).max(30000) }).strict().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Enter a language code, language name, title and complete disclaimer text (100–30,000 characters).' });
   const document = await prisma.waterSportsDocument.create({ data: { ...parsed.data, createdById: req.user!.id } });
   await logAuditEvent({ req, propertyId: document.propertyId, action: 'WATER_SPORTS_DOCUMENT_PUBLISH', targetType: 'WaterSportsDocument', targetId: document.id, details: { language: document.language, kind: document.kind } });
@@ -66,6 +66,7 @@ waterSportsRouter.post('/sessions', requireAuth, requirePropertyAccess('body'), 
   const parsed = z.object({ propertyId: propertySchema, formType: formTypeSchema, roomNumber: roomSchema, staffFields: staffFieldsSchema }).strict().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Check the room number and staff fields.' });
   const { propertyId, formType, staffFields } = parsed.data;
+  if (formType === 'EQUIPMENT_RENTAL') return res.status(400).json({ error: 'Prepare equipment agreements from Equipment rentals.' });
   const property = await prisma.property.findUnique({ where: { id: propertyId } });
   if (!property?.isActive || property.deletedAt) return res.status(409).json({ error: 'Choose an active property.' });
   if ((formType === 'GEAR_RENTAL' || formType === 'AID_GEAR') && (!staffFields.maskNumber || !staffFields.finsNumber)) return res.status(400).json({ error: 'Enter the mask and fins numbers before handing over the tablet.' });
@@ -127,6 +128,9 @@ waterSportsRouter.post('/tablet/guests', handle(async (req, res) => {
   if (!room.success || room.data !== session.roomNumber) return res.status(400).json({ error: 'Please enter the room number for this form, or ask a staff member for help.' });
   const claimed = await prisma.waterSportsSession.updateMany({ where: { id: session.id, lookupCount: { lt: 10 }, revokedAt: null, expiresAt: { gt: new Date() } }, data: { lookupCount: { increment: 1 } } });
   if (!claimed.count) return res.status(429).json({ error: 'Lookup limit reached. Please ask staff for a new form.' });
+  if (session.formType === 'EQUIPMENT_RENTAL') {
+    return res.json({ guests: (session.candidates as unknown as Candidate[]).map(g => ({ id: g.id, fullName: g.fullName, roomNumber: g.roomNumber, checkoutDate: g.checkoutDate, propertyCode: g.propertyCode })) });
+  }
   const codes = z.array(pmsPropertyCodeSchema).min(1).max(7).safeParse(property.pmsPropertyCodes.length ? property.pmsPropertyCodes : [property.pmsPropertyCode || property.code]);
   const testingGuests = disclaimerTestGuestsEnabled();
   if (!testingGuests && !codes.success) return res.status(409).json({ error: 'Staff need to configure the PMS resorts for this property.' });
@@ -156,6 +160,11 @@ waterSportsRouter.post('/tablet/sign', handle(async (req, res) => {
   const document = (session.documents as unknown as Document[]).find(d => d.id === data.documentId);
   if (!guest || !document) return res.status(400).json({ error: 'Select your name and read an available disclaimer before signing.' });
   const record = await prisma.$transaction(async tx => {
+    if (session.formType === 'EQUIPMENT_RENTAL') {
+      await tx.$queryRaw`SELECT id FROM "Property" WHERE id = ${session.propertyId} FOR UPDATE`;
+      const agreement = await tx.rentalAgreement.findUnique({ where: { sessionId: session.id }, include: { rental: true } });
+      if (!agreement || agreement.rental.status !== 'DRAFT' || agreement.version !== agreement.rental.version) return null;
+    }
     // Row claim serializes simultaneous submits. The unique sessionId also prevents duplicate records.
     const claim = await tx.waterSportsSession.updateMany({ where: { id: session.id, revokedAt: null, expiresAt: { gt: new Date() }, candidates: { equals: session.candidates! } }, data: { revokedAt: new Date() } });
     if (!claim.count) return tx.waterSportsRecord.findUnique({ where: { sessionId: session.id } });
@@ -166,6 +175,11 @@ waterSportsRouter.post('/tablet/sign', handle(async (req, res) => {
       isMinor: data.isMinor, guardianName: data.isMinor ? data.guardianName : null, signature: data.signature,
       createdById: session.createdById,
     } });
+    if (session.formType === 'EQUIPMENT_RENTAL') {
+      const agreement = await tx.rentalAgreement.findUniqueOrThrow({ where: { sessionId: session.id } });
+      await tx.rentalEvent.create({ data: { rentalId: agreement.rentalId, actorId: session.createdById, action: 'AGREEMENT_SIGN', details: { recordId: record.id, version: agreement.version, documentHash: record.documentHash } } });
+      await tx.auditLog.create({ data: { propertyId: session.propertyId, userId: session.createdById, action: 'EQUIPMENT_AGREEMENT_SIGN', targetType: 'EquipmentRental', targetId: agreement.rentalId, details: JSON.stringify({ recordId: record.id, version: agreement.version }) } });
+    }
     await tx.auditLog.create({ data: { propertyId: session.propertyId, userId: session.createdById, action: 'WATER_SPORTS_SIGN', targetType: 'WaterSportsRecord', targetId: record.id, details: JSON.stringify({ runningNumber: record.runningNumber, documentId: document.id, language: document.language, guardian: data.isMinor }) } });
     // Do not retain the room's other guests after completion.
     await tx.waterSportsSession.update({ where: { id: session.id }, data: { candidates: [] } });

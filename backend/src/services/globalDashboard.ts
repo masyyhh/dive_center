@@ -23,7 +23,7 @@ export async function globalDashboard(startDate: string, endDate: string) {
   }
   const today = businessToday();
   const dates: string[] = [];
-  for (let day = new Date(`${startDate}T12:00:00Z`); day.toISOString().slice(0, 10) <= endDate; day.setUTCDate(day.getUTCDate() + 1)) {
+  for (let day = new Date(`${startDate}T12:00:00Z`); day.getTime() <= new Date(`${endDate}T12:00:00Z`).getTime(); day.setUTCDate(day.getUTCDate() + 1)) {
     const date = day.toISOString().slice(0, 10);
     if (date >= today) break;
     dates.push(date);

@@ -23,7 +23,7 @@ export const CommissionRulesView: React.FC<{
     </div>
     <p className="text-sm text-slate-500">Changes apply to new bills only.</p>
     <label className="block">Search<input className="w-full" type="search" value={search} placeholder="Name, code or category" onChange={event => setSearch(event.target.value)} /></label>
-    {loading ? <p role="status">Loading commission rules…</p> : <TableScroll label="Commission rules" className="overflow-x-auto"><table className="w-full text-left text-sm">
+    {loading ? <p role="status">Loading commission rules…</p> : <TableScroll paginate label="Commission rules" className="overflow-x-auto"><table className="w-full text-left text-sm">
       <thead><tr><th className="p-3">Activity</th><th className="p-3">Pool contribution</th><th className="p-3">Employee payments</th><th className="p-3">Actions</th></tr></thead>
       <tbody>{visible.map(item => <tr key={item.id} className="border-t border-slate-200 dark:border-slate-800">
         <td className="p-3"><strong>{item.name}</strong><div>{item.code} · {item.category?.name}</div></td>

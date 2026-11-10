@@ -112,7 +112,9 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
   };
   // Load the catalogue and next check number
   useEffect(() => {
-    if (!activeProperty) return;
+    let cancelled = false;
+    setItems([]); setCategories([]); setPackages([]);
+    if (!activeProperty) { setSetupLoading(false); return; }
 
     const loadData = async () => {
       setSetupLoading(true);
@@ -130,6 +132,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
           ).catch(() => ({ packages: [] })),
         ]);
 
+        if (cancelled) return;
         setCategories(itemsData.categories);
         setItems(itemsData.items);
         setPackages(packagesData.packages || []);
@@ -137,13 +140,14 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
         setNextCheck(nextCheckData.nextCheckNumber);
         if (!restoredDraft) setCheckNumber(nextCheckData.nextCheckNumber);
       } catch (err) {
-        setErrorMsg('Unable to load the catalogue. Please reload this page to try again.');
+        if (!cancelled) setErrorMsg('Unable to load the catalogue. Please reload this page to try again.');
       } finally {
-        setSetupLoading(false);
+        if (!cancelled) setSetupLoading(false);
       }
     };
 
     loadData();
+    return () => { cancelled = true; };
   }, [activeProperty]);
 
   const staffKey = `${activeProperty?.id || ''}:${businessDate}`;

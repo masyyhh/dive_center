@@ -1,3 +1,4 @@
+import { businessMonth } from '../utils/dates';
 import ExcelJS from 'exceljs';
 import type { Attendance, Bill, BillItem, Property, StaffMember } from '@prisma/client';
 import type { PersonalCommissionDetail, StaffCommissionResult } from './commissionService';
@@ -19,6 +20,7 @@ const sum = (values: number[]) => values.reduce((total, value) => total + value,
 const round = (value: number) => Math.round(value * 100) / 100;
 const codes: Record<string, string> = {
   PRESENT: 'p',
+  BASIC: 'b',
   OFF: 'o',
   OFF_HALF: 'o1/2',
   ANNUAL_LEAVE: 'al',
@@ -412,13 +414,12 @@ export function createSiyamMonthlyWorkbook(data: MonthlyData) {
     attendance.getCell(3, index + 2).alignment = { textRotation: 90, vertical: 'middle', horizontal: 'center', wrapText: true };
   });
 
-  const [yearNum, monthNum] = yearMonth.split('-').map(Number);
-  const daysInMonth = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate();
+  const daysInMonth = Number(businessMonth(yearMonth)!.end.slice(-2));
   const statuses = new Map(attendances.map(a => [`${a.staffMemberId}:${a.date}`, a.status]));
 
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${yearMonth}-${String(day).padStart(2, '0')}`;
-    const dateObj = new Date(Date.UTC(yearNum, monthNum - 1, day, 12, 0, 0));
+    const dateObj = new Date(`${yearMonth}-${String(day).padStart(2, '0')}T12:00:00Z`);
     const row = attendance.addRow([dateObj, ...people.map(s => codes[statuses.get(`${s.id}:${dateStr}`) || ''] || '')]);
     row.getCell(1).numFmt = 'dd/mm/yyyy';
     row.eachCell((cell, col) => {
@@ -429,12 +430,13 @@ export function createSiyamMonthlyWorkbook(data: MonthlyData) {
   attendance.addRow([]);
   const count = (id: string, status: string) => attendances.filter(a => a.staffMemberId === id && a.status === status).length;
   const attendanceSummary: [string, (id: string) => number][] = [
-    ['at work', id => count(id, 'PRESENT') + count(id, 'OFF_HALF') / 2],
+    ['at work', id => count(id, 'PRESENT') + count(id, 'BASIC') + count(id, 'OFF_HALF') / 2],
+    ['basic (no commission)', id => count(id, 'BASIC')],
     ['off', id => count(id, 'OFF') + count(id, 'OFF_HALF') / 2],
     ['annual leave', id => count(id, 'ANNUAL_LEAVE')],
     ['sick', id => count(id, 'SICK')],
-    ['non payable', id => daysInMonth - (count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF'))],
-    ['total payable days', id => count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF')],
+    ['non payable', id => daysInMonth - (count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF') + count(id, 'BASIC'))],
+    ['total payable days', id => count(id, 'PRESENT') + count(id, 'OFF') + count(id, 'OFF_HALF') + count(id, 'BASIC')],
   ];
 
   for (const [label, fn] of attendanceSummary) {

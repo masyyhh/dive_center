@@ -36,6 +36,8 @@ model Property {
   attendanceRecords   Attendance[]
   monthLocks          MonthLock[]
   auditLogs           AuditLog[]
+  equipmentInventory EquipmentStock[]
+  equipmentRentals EquipmentRental[]
   waterSportsDocuments WaterSportsDocument[]
   waterSportsSessions WaterSportsSession[]
   waterSportsRecords WaterSportsRecord[]
@@ -61,6 +63,8 @@ model User {
   updatedAt           DateTime       @updatedAt
 
   assignedProperties  UserProperty[]
+  equipmentRentals EquipmentRental[]
+  rentalEvents RentalEvent[]
   createdBills        Bill[]         @relation("CreatedBills")
   auditLogs           AuditLog[]
   monthLocksCreated   MonthLock[]
@@ -114,6 +118,7 @@ model StaffMember {
   updatedAt             DateTime      @updatedAt
 
   property              Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  equipmentRentals EquipmentRental[]
   attendances           Attendance[]
   sellerLines           BillItem[]    @relation("SellerStaff")
   guideLines            BillItem[]    @relation("GuideStaff")
@@ -122,6 +127,8 @@ model StaffMember {
   photoLines            BillItem[]    @relation("PhotoStaff")
   photoCredits          BillItemPhotoStaff[]
   videoLines            BillItem[]    @relation("VideoStaff")
+
+  @@index([propertyId, isActive])
 }
 
 model Category {
@@ -191,6 +198,7 @@ model DivePackageItem {
   item        Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
   @@unique([packageId, itemId])
+  @@index([itemId])
 }
 
 model Bill {
@@ -231,6 +239,9 @@ model Bill {
   // Partial live-check uniqueness is enforced by SQL migration; Prisma 5 cannot model it.
   @@index([propertyId, businessDate])
   @@index([propertyId, status])
+  @@index([propertyId, businessDate(sort: Desc), checkNumber(sort: Desc), id(sort: Desc)])
+  @@index([propertyId, status, businessDate])
+  @@index([propertyId, roomNumber, businessDate, createdAt(sort: Desc)])
 }
 
 model BillItem {
@@ -277,6 +288,9 @@ model BillItem {
   videoStaff              StaffMember? @relation("VideoStaff", fields: [videoStaffId], references: [id])
 
   createdAt               DateTime     @default(now())
+
+  @@index([billId, linePosition])
+  @@index([itemId])
 }
 
 model Attendance {
@@ -284,7 +298,7 @@ model Attendance {
   propertyId     String
   staffMemberId  String
   date           String      // YYYY-MM-DD
-  // "PRESENT", "OFF", "OFF_HALF", "ANNUAL_LEAVE", "SICK", "ABSENT", "EMERGENCY_LEAVE"
+  // "PRESENT", "OFF", "OFF_HALF", "BASIC", "ANNUAL_LEAVE", "SICK", "ABSENT", "EMERGENCY_LEAVE"
   status         String      @default("PRESENT") 
   note           String?
   createdAt      DateTime    @default(now())
@@ -326,6 +340,8 @@ model AuditLog {
   user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, createdAt])
+  @@index([propertyId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
 }
 
 // One current password-reset grant per account. Tokens are stored only as keyed digests.
@@ -398,6 +414,7 @@ model WaterSportsSession {
   revokedAt    DateTime?
   record       WaterSportsRecord?
 
+  rentalAgreement RentalAgreement?
   @@index([propertyId, createdAt])
   property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
@@ -427,6 +444,7 @@ model WaterSportsRecord {
   signedAt         DateTime @default(now())
 
   @@index([propertyId, businessDate, runningNumber])
+  @@index([propertyId, runningNumber(sort: Desc)])
   property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
@@ -466,4 +484,96 @@ model BillItemPhotoStaff {
 
   @@id([billItemId, staffId])
   @@index([staffId])
+}
+
+// Physical stock is separate from the sales catalogue. Serialised stock has quantity one.
+model EquipmentStock {
+  id String @id @default(uuid())
+  propertyId String
+  code String
+  name String
+  category String
+  size String
+  serialNumber String?
+  condition String @default("GOOD")
+  quantity Int
+  damagedQuantity Int @default(0)
+  priceCents Int
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  lines EquipmentRentalLine[]
+  @@unique([propertyId, code])
+  @@unique([propertyId, serialNumber])
+  @@index([propertyId, isActive])
+}
+
+model EquipmentRental {
+  id String @id @default(uuid())
+  reference String @unique
+  propertyId String
+  guestSnapshot Json
+  expectedReturnDate String
+  assignedStaffId String
+  assignedStaffName String
+  currency String
+  status String @default("DRAFT")
+  version Int @default(1)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  activatedAt DateTime?
+  closedAt DateTime?
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  assignedStaff StaffMember @relation(fields: [assignedStaffId], references: [id], onDelete: Restrict)
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  lines EquipmentRentalLine[]
+  agreements RentalAgreement[]
+  history RentalEvent[]
+  @@index([propertyId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([propertyId, status, expectedReturnDate])
+}
+
+model EquipmentRentalLine {
+  id String @id @default(uuid())
+  rentalId String
+  stockId String
+  name String
+  code String
+  category String
+  size String
+  serialNumber String?
+  condition String
+  quantity Int
+  returnedQuantity Int @default(0)
+  priceCents Int
+  rental EquipmentRental @relation(fields: [rentalId], references: [id], onDelete: Restrict)
+  stock EquipmentStock @relation(fields: [stockId], references: [id], onDelete: Restrict)
+  @@unique([rentalId, stockId])
+  @@index([stockId])
+}
+
+model RentalAgreement {
+  id String @id @default(uuid())
+  rentalId String
+  version Int
+  sessionId String @unique
+  createdAt DateTime @default(now())
+  rental EquipmentRental @relation(fields: [rentalId], references: [id], onDelete: Restrict)
+  session WaterSportsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  @@index([rentalId, version])
+}
+
+// Append-only operational history, committed in the same transaction as stock movements.
+model RentalEvent {
+  id String @id @default(uuid())
+  rentalId String
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action String
+  details Json
+  createdAt DateTime @default(now())
+  rental EquipmentRental @relation(fields: [rentalId], references: [id], onDelete: Restrict)
+  @@index([rentalId, createdAt])
 }

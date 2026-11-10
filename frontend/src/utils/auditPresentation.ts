@@ -1,5 +1,5 @@
 const areas: Record<string, string> = {
-  items: 'catalogue', bills: 'bills', staff: 'staff records', properties: 'properties',
+  equipment: 'equipment rentals', items: 'catalogue', bills: 'bills', staff: 'staff records', properties: 'properties',
   users: 'user accounts', reports: 'reports', attendance: 'attendance', presence: 'attendance',
   audit: 'activity history', auth: 'account access', 'dive-centre': 'disclaimer forms',
   'water-sports': 'disclaimer forms',

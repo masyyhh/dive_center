@@ -18,7 +18,7 @@ export function NewBillView(props: NewBillViewProps) {
     if (compactBilling && model.attemptedReview && model.checkoutPreview.error) document.getElementById('checkout-discount')?.focus();
   }, [compactBilling, errorMsg, model.attemptedReview, model.checkoutPreview.error]);
   return (
-    <div className={compactBilling ? "bill-builder siyam-bill siyam-ledger" : "space-y-6"} data-editing={editingBill ? true : undefined} aria-busy={saving}>
+    <div className={compactBilling ? "bill-builder siyam-bill siyam-ledger" : "bill-builder space-y-6"} data-editing={editingBill ? true : undefined} aria-busy={saving}>
       {editingBill && <section className="surface p-4 space-y-3"><div className="flex flex-wrap justify-between gap-3"><h2 className="font-semibold">Edit posted bill #{editingBill.checkNumber}</h2><button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscardOpen(true)}>Cancel editing</button></div><p>Changes and the original bill are recorded in the audit log. Existing discounts are already included in each saved line. Personal commissions will be recalculated after discounts. Locked payroll months cannot be edited.</p><label htmlFor="bill-edit-reason">Reason for correction <span aria-hidden="true">*</span><input id="bill-edit-reason" required minLength={5} maxLength={1000} disabled={saving} value={editReason} onChange={event => setEditReason(event.target.value)} className="w-full" /></label></section>}
       <BillToolbar model={model} />
       {model.saveNotice && <div className="notice notice-success" role="status"><CheckCircle2 size={18} /><span>{model.saveNotice}</span><button type="button" className="text-button" onClick={() => model.setSaveNotice('')}>Dismiss</button></div>}

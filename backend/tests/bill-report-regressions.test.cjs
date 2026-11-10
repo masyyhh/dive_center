@@ -24,7 +24,7 @@ test('suggested check number respects both the configured starting number and li
 test('bill filters reject invalid dates, reversed ranges and unsupported statuses before querying', async () => {
   const queries = [];
   const { billsRouter } = loadTypeScript('src/routes/bills.routes.ts', {
-    '../db': { prisma: { bill: { findMany: async query => { queries.push(query); return []; } } } },
+    '../db': { prisma: { $queryRaw: async query => { queries.push(query); return []; } } },
     '../middleware/auth': auth,
   });
   for (const query of [
@@ -35,8 +35,8 @@ test('bill filters reject invalid dates, reversed ranges and unsupported statuse
   assert.equal(queries.length, 0);
   const valid = await request(billsRouter, 'GET', '/', { query: { propertyId: 'male', startDate: '2028-02-29', status: 'ALL' } });
   assert.equal(valid.status, 200);
-  assert.equal(queries[0].where.businessDate.gte, '2028-02-29');
-  assert.equal(queries[0].where.status, undefined);
+  assert(queries[0].values.includes('2028-02-29'));
+  assert(!queries[0].text.includes('"status" ='));
 });
 
 function excelFixture() {

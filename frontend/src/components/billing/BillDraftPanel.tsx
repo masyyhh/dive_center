@@ -42,16 +42,15 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
       {!compactBilling && <GuestDetails model={model} />}
       {/* Bill Lines Table */}
       <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4 bill-draft-card">
-        {!compactBilling && <div className="flex items-center justify-between">
+        {!compactBilling && <div className="bill-lines-heading flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-            3. Review bill lines ({billLines.length})
+            Bill items ({billLines.length})
           </h3>
-          {!compactBilling && <span className="text-sm text-slate-400">Prices and assignments for this check</span>}
         </div>}
 
         {billLines.length === 0 && !compactBilling ? (
-          <div className="py-8 text-center text-sm text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-            {compactBilling ? `Choose activities to add to check #${checkNumber}.` : `No items added yet. Click an item in the catalogue on the left to add to check #${checkNumber}.`}
+          <div className="bill-lines-empty">
+            Choose an item from the catalogue to add to check #{checkNumber}.
           </div>
         ) : (
           <LineList compact={compactBilling}>
@@ -246,7 +245,7 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                                 </option>
                               ))}
                             </select>
-                            {line.videoStaffId && <p className="text-xs text-slate-500 mt-1">Employee payment: {formatMoney(personalRates.video * line.quantity, activeProperty?.currencySymbol || '$')}. Applies even when the service is complimentary.</p>}
+                            {line.videoStaffId && <p className="text-xs text-slate-500 mt-1">Payment after discounts: {formatMoney(personalRates.video * line.quantity * (1 - (checkoutPreview.lines[idx]?.discountPercent ?? line.discountPercent) / 100), currencySymbol)}.</p>}
                           </div>
                         )}
                       </div>
@@ -304,29 +303,16 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
           {selectedPhoto && <small>Linked Photo lines support discounts only.</small>}
         </div>}
 
-        {!compactBilling && <div className="space-y-4">
-        {/* Tip & Notes */}
-        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3 text-sm">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {!compactBilling && <TipControl model={model} />}
-
-            {tipAmount > 0 && (
-              <div>
-                <label className="block text-slate-500 dark:text-slate-400 font-semibold mb-1">
-                  Staff Sharing Tip (split equally)
-                </label>
-                <div className="tip-recipients" role="group" aria-label="Staff sharing tip">
-                  {staffList.length ? staffList.map(staff => <label key={staff.id}><input type="checkbox" disabled={!staffReady || saving} checked={tipStaffIds.includes(staff.id)} onChange={e => setTipStaffIds(ids => e.target.checked ? [...ids, staff.id] : ids.filter(id => id !== staff.id))} />{staff.name}</label>) : <p className="text-slate-500">No team members available.</p>}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div><label htmlFor="bill-notes" className="block text-sm mb-1">Notes (optional)</label><textarea id="bill-notes" value={notes} onChange={event => setNotes(event.target.value)} rows={2} className="w-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg p-3" /></div>
-        {!compactBilling && <DiscountControl model={model} />}
-        {/* Running Totals Breakdown Flow (PDF Page 3) */}
-        {/* Gross -> - Discount -> + Service charge -> + Tax -> + Tip -> Net */}
+        {!compactBilling && <div className="bill-adjustments">
+          <DiscountControl model={model} />
+          <TipControl model={model} />
+          <div className="bill-notes-control"><label htmlFor="bill-notes">Notes <span>(optional)</span></label><textarea id="bill-notes" value={notes} onChange={event => setNotes(event.target.value)} rows={1} placeholder="Add a note…" /></div>
+          {tipAmount > 0 && <div className="bill-tip-sharing">
+            <label>Staff sharing tip <span>(split equally)</span></label>
+            <div className="tip-recipients" role="group" aria-label="Staff sharing tip">
+              {staffList.length ? staffList.map(staff => <label key={staff.id}><input type="checkbox" disabled={!staffReady || saving} checked={tipStaffIds.includes(staff.id)} onChange={e => setTipStaffIds(ids => e.target.checked ? [...ids, staff.id] : ids.filter(id => id !== staff.id))} />{staff.name}</label>) : <p className="text-slate-500">No team members available.</p>}
+            </div>
+          </div>}
         </div>}
         {!compactBilling && <BillTotals model={model} />}
 

@@ -19,6 +19,7 @@ export interface ReportTable {
 
 export interface ReportPdfOptions {
   signOff?: boolean;
+  signOffPosition?: 'bottom';
   letterhead?: 'iru-fushi';
   logo?: 'iru-fushi' | 'dive-centre';
   preparedBy?: { name: string; date: string };
@@ -208,7 +209,7 @@ export function renderReportPdf(title: string, subtitle: string, tables: ReportT
       const preparedDateOffset = Math.max(68, 34 + preparedName.length * lineHeight + 12);
       const signOffHeight = 28 + preparedDateOffset + lineHeight + 8;
       if (!page || y + signOffHeight > bottom) startReportPage('Report sign-off');
-      const top = y + 28;
+      const top = options.signOffPosition === 'bottom' ? Math.max(y + 28, bottom - signOffHeight + 28) : y + 28;
       ['PREPARED BY', 'RECEIVED BY'].forEach((label, index) => {
         const x = left + index * (width + 48);
         doc.font('ReportBold').fontSize(10).fillColor('#172b3a').text(label, x, top, { width, lineBreak: false });

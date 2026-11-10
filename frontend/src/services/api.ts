@@ -90,7 +90,7 @@ export async function revokeSession(): Promise<void> {
   setAuthToken(null);
 }
 
-// Download helper for Excel reports
+// Download reports with the same actionable error messages as JSON requests.
 export async function downloadFile(endpoint: string, filename: string) {
   const token = getAuthToken();
   const activePropertyId = getStoredPropertyId();
@@ -102,7 +102,9 @@ export async function downloadFile(endpoint: string, filename: string) {
   const response = await fetch(`${API_BASE}${endpoint}`, { headers });
 
   if (!response.ok) {
-    throw new Error('Failed to download file');
+    let message = `Could not download file (${response.status}).`;
+    try { const error = await response.json(); if (typeof error.error === 'string') message = error.error; } catch { /* Non-JSON server response. */ }
+    throw new ApiError(message, response.status);
   }
 
   const blob = await response.blob();

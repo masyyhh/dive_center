@@ -1,10 +1,10 @@
 import { roomNumberSchema } from '../utils/fields';
 import { Router, Request, Response } from 'express';
-import { z } from 'zod';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
-import { businessToday, isBusinessDate } from '../utils/dates';
+import { businessToday } from '../utils/dates';
+import { BillListError, listBills } from '../services/billList';
 
 export function registerBillReadRoutes(billsRouter: Router) {
   // GET /api/bills/next-check?propertyId=...
@@ -73,58 +73,9 @@ export function registerBillReadRoutes(billsRouter: Router) {
   // GET /api/bills?propertyId=...&startDate=...&endDate=...&search=...
   billsRouter.get('/', requireAuth, requirePropertyAccess('query', 'propertyId'), async (req: Request, res: Response) => {
     try {
-      const { propertyId, startDate, endDate, search, status } = req.query;
-
-      if((startDate !== undefined && !isBusinessDate(startDate)) ||
-        (endDate !== undefined && !isBusinessDate(endDate)) ||
-        (typeof startDate === 'string' && typeof endDate === 'string' && startDate > endDate)) {
-        return res.status(400).json({ error: 'Choose valid calendar dates, with startDate on or before endDate.' });
-      }
-      if(status !== undefined && !z.enum(['ALL', 'ACTIVE', 'REBATED', 'DELETED']).safeParse(status).success) {
-        return res.status(400).json({ error: 'Choose a valid bill status.' });
-      }
-      if(search !== undefined && typeof search !== 'string') {
-        return res.status(400).json({ error: 'Enter a single search value.' });
-      }
-
-      const where: any = {
-        propertyId: String(propertyId),
-      };
-
-      if(status && typeof status === 'string' && status !== 'ALL') {
-        where.status = status;
-      }
-
-      if(startDate && typeof startDate === 'string') {
-        where.businessDate = { ...(where.businessDate || {}), gte: startDate };
-      }
-
-      if(endDate && typeof endDate === 'string') {
-        where.businessDate = { ...(where.businessDate || {}), lte: endDate };
-      }
-
-      let bills = await prisma.bill.findMany({
-        where,
-        include: {
-          createdBy: { select: { id: true, name: true } },
-          items: { orderBy: { linePosition: 'asc' }, include: { instructorCredits: true, photoCredits: true } },
-        },
-        orderBy: [{ businessDate: 'desc' }, { checkNumber: 'desc' }],
-      });
-
-      if(search && typeof search === 'string') {
-        const q = search.toLowerCase();
-        bills = bills.filter(
-          (b) =>
-            b.guestName.toLowerCase().includes(q) ||
-            b.roomNumber.toLowerCase().includes(q) ||
-            String(b.checkNumber).includes(q) ||
-            b.nationality.toLowerCase().includes(q)
-        );
-      }
-
-      return res.json({ bills });
+      return res.json(await listBills(req.query));
     } catch(error) {
+      if (error instanceof BillListError) return res.status(400).json({ error: error.message });
       console.error('Fetch bills error:', error);
       return res.status(500).json({ error: 'Failed to fetch bills.' });
     }

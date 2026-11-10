@@ -14,7 +14,21 @@ export const displayDate = (date: string, options: Intl.DateTimeFormatOptions = 
 
 export const monthRange = (yearMonth: string) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) return null;
-  const [year, month] = yearMonth.split('-').map(Number);
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return { start: `${yearMonth}-01`, end: `${yearMonth}-${lastDay}` };
+  const start = `${yearMonth}-01`;
+  const last = new Date(`${start}T12:00:00Z`);
+  last.setUTCMonth(last.getUTCMonth() + 1);
+  last.setUTCDate(0);
+  return { start, end: last.toISOString().slice(0, 10) };
+};
+
+/** Monday through Sunday, calculated as calendar dates without device timezone shifts. */
+export const businessWeek = (date: string) => {
+  if (!isBusinessDate(date)) return null;
+  const monday = new Date(`${date}T12:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(sunday.getUTCDate() + 6);
+  const start = monday.toISOString().slice(0, 10);
+  const end = sunday.toISOString().slice(0, 10);
+  return isBusinessDate(start) && isBusinessDate(end) ? { start, end } : null;
 };

@@ -2,6 +2,7 @@ import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
+import type { Prisma } from '@prisma/client';
 import { isStoreAttendant, splitStorePool, STORE_ATTENDANT_RETAIL_RATE } from '../utils/storeAttendantPool';
 
 export interface StaffCommissionResult {
@@ -47,11 +48,17 @@ interface CommissionBreakdownDetail {
 }
 type BreakdownSource = Pick<CommissionBreakdownDetail, 'billId' | 'billItemId' | 'checkNumber' | 'businessDate' | 'itemName' | 'quantity' | 'basisAmount'>;
 
+export const commissionBillInclude = {
+  items: { include: { item: true, instructorCredits: true, photoCredits: true } },
+} satisfies Prisma.BillInclude;
+type CommissionBill = Prisma.BillGetPayload<{ include: typeof commissionBillInclude }>;
+
 export const calculateCommissionForPeriod = async (
   propertyId: string,
   startDate: string,
   endDate: string,
-  detailStaffId?: string
+  detailStaffId?: string,
+  preloadedBills?: CommissionBill[]
 ) => {
   // 1. Fetch active staff members for this property
   const staffMembers = await prisma.staffMember.findMany({
@@ -77,7 +84,7 @@ export const calculateCommissionForPeriod = async (
   }
 
   // 2. Fetch ACTIVE bills within the date range (rebated & deleted bills earn no commission)
-  const bills = await prisma.bill.findMany({
+  const bills = preloadedBills ?? await prisma.bill.findMany({
     where: {
       propertyId,
       status: 'ACTIVE',
@@ -86,15 +93,7 @@ export const calculateCommissionForPeriod = async (
         lte: endDate,
       },
     },
-    include: {
-      items: {
-        include: {
-          item: true,
-          instructorCredits: true,
-          photoCredits: true,
-        },
-      },
-    },
+    include: commissionBillInclude,
   });
 
   // Group bills by businessDate for daily pool calculations
@@ -373,7 +372,7 @@ export const calculateCommissionForPeriod = async (
     // 3. Base-Leader Override (+10% of total pool, paid regardless of attendance)
     // Page 7: "An extra 10% of the pool, paid to the base leader(s) — regardless of attendance."
     const totalDayPool = dailyCoursePool + dailyDivePool;
-    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date));
+    const employedBaseLeaders = baseLeaders.filter(bl => bl.hireDate <= date && (!bl.leavingDate || bl.leavingDate >= date) && dayAttendanceMap.get(bl.id)?.toUpperCase() !== 'BASIC');
     if (totalDayPool > 0 && employedBaseLeaders.length > 0) {
       const overrideTotal = totalDayPool * 0.10;
       const overrideShare = overrideTotal / employedBaseLeaders.length;

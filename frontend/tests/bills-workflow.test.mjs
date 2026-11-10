@@ -129,3 +129,40 @@ test('Siyam uses compact filters without a hidden discount-only restriction',asy
   }
  }
 });
+
+test('server pages replace rows, navigate back, and keep the submitted search until another search is applied',async()=>{
+ const bills=Array.from({length:55},(_,i)=>({...sampleBill,id:`bill-${i}`,checkNumber:1000+i,guestName:'Matching guest'}));
+ for(const propertyName of ['Siyam World','Iru Fushi']){
+  const f=fixture({propertyName,bills});f.render();await f.flush();
+  let tree=f.render();assert.ok(button(tree,'Next'));assert.equal(nodes(tree).filter(n=>String(n.props?.['aria-label']||'').startsWith('View bill ')).length,50);
+  const search=()=>nodes(f.render()).find(n=>n.props?.['aria-label']==='Search bills');
+  search().props.onChange({target:{value:'Not submitted'}});
+  button(f.render(),'Next').props.onClick();await f.flush();tree=f.render();
+  assert.match(text(tree),/Page 2/);assert.equal(nodes(tree).filter(n=>String(n.props?.['aria-label']||'').startsWith('View bill ')).length,5);
+  assert(!f.calls.at(-1).url.includes('Not%20submitted'));
+  assert.match(f.calls.at(-1).url,/cursor=50/);assert.equal(button(tree,'Next').props.disabled,true);
+  button(tree,'Previous').props.onClick();await f.flush();assert.match(text(f.render()),/Page 1/);
+  search().props.onChange({target:{value:'Matching'}});
+  nodes(f.render()).find(n=>n.type==='form').props.onSubmit({preventDefault(){}});f.render();await f.flush();
+  assert.match(f.calls.at(-1).url,/search=Matching/);assert(!f.calls.at(-1).url.includes('cursor='));
+ }
+});
+
+test('changing filters resets server pagination and stale page responses cannot restore the previous results',async()=>{
+ const options={deferLists:true,pendingLists:[]};const f=fixture(options);f.render();await f.flush();
+ const first=options.pendingLists[0];
+ nodes(f.render()).find(n=>n.props?.['aria-label']==='Bills from date').props.onChange({target:{value:'2026-08-01'}});
+ f.render();await f.flush();assert.equal(options.pendingLists.length,2);
+ options.pendingLists[1].resolve({bills:[{...sampleBill,id:'new',checkNumber:202}],nextCursor:null,hasMore:false});await f.flush();
+ first.resolve({bills:[sampleBill],nextCursor:'stale',hasMore:true});await f.flush();
+ const tree=f.render();assert.ok(nodes(tree).find(n=>n.props?.['aria-label']==='View bill 202'));
+ assert(!nodes(tree).find(n=>n.props?.['aria-label']==='View bill 101'));assert.equal(button(tree,'Next'),undefined);
+});
+
+test('an invalid date range closes stale bill details instead of leaving old bill information open',async()=>{
+ const f=await open({propertyName:'Siyam World'});
+ const input=nodes(f.render()).find(node=>node.props?.['aria-label']==='Bills from date');
+ input.props.onChange({target:{value:'invalid'}});f.render();await f.flush();
+ const tree=f.render();assert.equal(nodes(tree).some(node=>node.props?.['aria-label']==='Close bill details'),false);
+ assert.match(text(tree),/Choose a valid date range/);
+});

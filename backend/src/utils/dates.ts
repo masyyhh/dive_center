@@ -15,3 +15,25 @@ export const isYearMonth = (value: unknown): value is string =>
 
 export const isDateRange = (start: unknown, end: unknown): boolean =>
   isBusinessDate(start) && isBusinessDate(end) && start <= end;
+
+/** Monday through Sunday, calculated as calendar dates without device timezone shifts. */
+export const businessWeek = (date: string) => {
+  if (!isBusinessDate(date)) return null;
+  const monday = new Date(`${date}T12:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(sunday.getUTCDate() + 6);
+  const start = monday.toISOString().slice(0, 10);
+  const end = sunday.toISOString().slice(0, 10);
+  return isBusinessDate(start) && isBusinessDate(end) ? { start, end } : null;
+};
+
+/** ISO construction avoids Date.UTC's special interpretation of years 00–99. */
+export const businessMonth = (value: string) => {
+  if (!isYearMonth(value)) return null;
+  const start = `${value}-01`;
+  const last = new Date(`${start}T12:00:00Z`);
+  last.setUTCMonth(last.getUTCMonth() + 1);
+  last.setUTCDate(0);
+  return { start, end: last.toISOString().slice(0, 10) };
+};

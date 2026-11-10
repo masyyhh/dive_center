@@ -7,7 +7,7 @@ import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess } from '../middleware/rbac';
 import { logAuditEvent } from '../services/auditService';
 
-import { businessToday, isBusinessDate, isYearMonth } from '../utils/dates';
+import { businessToday, businessMonth, isBusinessDate, isYearMonth } from '../utils/dates';
 
 export const presenceRouter = Router();
 
@@ -22,8 +22,7 @@ presenceRouter.get('/month-status', requireAuth, requirePropertyAccess('query', 
     const ym = String(yearMonth);
     const startDate = `${ym}-01`;
     // Find last day of month
-    const [year, month] = ym.split('-').map(Number);
-    const lastDayNum = new Date(year, month, 0).getDate();
+    const lastDayNum = Number(businessMonth(ym)!.end.slice(-2));
     const endDate = `${ym}-${String(lastDayNum).padStart(2, '0')}`;
 
     // Active dive staff for this property
@@ -164,6 +163,7 @@ const saveDayPresenceSchema = z.object({
         'PRESENT',
         'OFF',
         'OFF_HALF',
+        'BASIC',
         'ANNUAL_LEAVE',
         'SICK',
         'ABSENT',

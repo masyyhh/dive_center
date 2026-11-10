@@ -1,3 +1,4 @@
+import { BillPagination } from './BillPagination';
 import { TableScroll } from '../TableScroll';
 import { formatMoney } from '../../utils/format';
 import { displayDate } from '../../utils/dates';
@@ -17,7 +18,7 @@ export function BillsTable({ model, compact = false }: { model: BillsModel; comp
         <span className="bill-list-meta"><span>Room {bill.roomNumber} · {displayDate(bill.businessDate)}</span><strong>{formatMoney(bill.netAmount, currencySymbol)}</strong></span>
       </button></li>)}
     </ul>}
-  </section>;
+  <BillPagination model={model} /></section>;
   return (
     <>
       {/* Bills Table */}
@@ -92,6 +93,7 @@ export function BillsTable({ model, compact = false }: { model: BillsModel; comp
           </TableScroll>
         )}
       </div>
+      <BillPagination model={model} />
 
     </>
   );

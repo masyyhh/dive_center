@@ -4,7 +4,7 @@ import { Search, AlertTriangle, Receipt, RotateCcw } from 'lucide-react';
 import type { BillsModel } from './useBillsController';
 
 export function BillResultsSummary({ model }: { model: BillsModel }) {
-  return <div className="bills-header-summary" role="status"><strong>{model.loading ? 'Finding bills…' : `${model.visibleBills.length} ${model.visibleBills.length === 1 ? 'bill' : 'bills'} found`}</strong><span className="bills-header-date-range">{model.startDate && model.endDate ? `${displayDate(model.startDate)} – ${displayDate(model.endDate)}` : 'Select dates'}</span></div>;
+  return <div className="bills-header-summary" role="status"><strong>{model.loading ? 'Finding bills…' : `${model.visibleBills.length} ${model.visibleBills.length === 1 ? 'bill' : 'bills'} ${model.nextCursor || model.pageIndex > 0 ? 'on this page' : 'found'}`}</strong><span className="bills-header-date-range">{model.startDate && model.endDate ? `${displayDate(model.startDate)} – ${displayDate(model.endDate)}` : 'Select dates'}</span></div>;
 }
 
 export function BillsFilters({ model, summaryInHeader = false }: { model: BillsModel; summaryInHeader?: boolean }) {
@@ -12,7 +12,7 @@ export function BillsFilters({ model, summaryInHeader = false }: { model: BillsM
     discountedOnly, endDate, errorMsg, fetchBills,
     handleSearchSubmit, loading, resetFilters, search,
     setDiscountedOnly, setEndDate, setSearch, setStartDate,
-    setStatusFilter, startDate, statusFilter, visibleBills,
+    setStatusFilter, startDate, statusFilter,
   } = model;
   if (model.splitView) return <>
     <div className="bill-filter-toolbar" role="group" aria-label="Bill filters">
@@ -52,7 +52,7 @@ export function BillsFilters({ model, summaryInHeader = false }: { model: BillsM
             </button>
             <button
               onClick={() => {
-                const ym = new Date().toISOString().substring(0, 7);
+                const ym = businessToday().slice(0, 7);
                 setStartDate(`${ym}-01`);
                 setEndDate(businessToday());
               }}
@@ -125,7 +125,7 @@ export function BillsFilters({ model, summaryInHeader = false }: { model: BillsM
 
       {errorMsg && <div role="alert" className="notice notice-error"><AlertTriangle size={18} /><span>{errorMsg}</span><button onClick={fetchBills}>Try again</button></div>}
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={discountedOnly} onChange={event => setDiscountedOnly(event.target.checked)} />Only bills with discounts</label>
-      <div className="results-toolbar"><p role="status">{loading ? 'Finding bills…' : `${visibleBills.length} ${visibleBills.length === 1 ? 'bill' : 'bills'} found`}<span> · {startDate && endDate ? `${displayDate(startDate)} – ${displayDate(endDate)}` : 'Select dates'}</span></p><button className="secondary-button" onClick={resetFilters}>Reset filters</button></div>
+      <div className="results-toolbar"><BillResultsSummary model={model} /><button className="secondary-button" onClick={resetFilters}>Reset filters</button></div>
     </>
   );
 }

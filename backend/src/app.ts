@@ -7,6 +7,7 @@ import { prisma } from './db';
 import { configureSecurity, apiLimiter } from './middleware/security';
 import { configureProxySecurity } from './middleware/proxy';
 import { waterSportsRouter } from './routes/water-sports.routes';
+import { equipmentRouter } from './routes/equipment.routes';
 import { guestsRouter } from './routes/guests.routes';
 import { passwordRouter } from './routes/password.routes';
 import { testingAuthRouter } from './routes/testing-auth.routes';
@@ -69,6 +70,7 @@ app.use('/api/guests', guestsRouter);
 const diveCentreFlag = process.env.ENABLE_DIVE_CENTRE ?? process.env.ENABLE_WATER_SPORTS;
 const diveCentreEnabled = diveCentreFlag === 'true' || (process.env.NODE_ENV !== 'production' && diveCentreFlag !== 'false');
 if (diveCentreEnabled) {
+  app.use('/api/equipment', equipmentRouter);
   app.use('/api/dive-centre', waterSportsRouter);
   app.use('/api/water-sports', waterSportsRouter); // Preserve existing tablet links and integrations.
 }

@@ -53,3 +53,10 @@ test('connecting explicitly exchanges only the live token and does not replace o
   store.delete('dcm_auth_token');
   await assert.rejects(testing.connectTestingLiveSignIn(), /Sign in to the live version/);
 });
+
+test('report downloads surface server validation messages instead of generic errors',async()=>{
+ globalThis.localStorage={getItem:()=>null};globalThis.fetch=async()=>({ok:false,status:400,json:async()=>({error:'Choose a valid report date.'})});
+ await assert.rejects(live.downloadFile('/reports/export/daily','daily.pdf'),error=>error instanceof live.ApiError&&error.status===400&&error.message==='Choose a valid report date.');
+ globalThis.fetch=async()=>({ok:false,status:502,json:async()=>{throw Error('HTML response');}});
+ await assert.rejects(live.downloadFile('/reports/export/daily','daily.pdf'),/502/);
+});

@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useProperty } from '../../context/PropertyContext';
 import { apiFetch } from '../../services/api';
 import { isSiyamWorld } from '../../utils/propertyPresentation';
-import { Bill } from '../../types';
+import { Bill, BillSummary, BillPage } from '../../types';
 
 export interface BillsViewProps {
   section?: string;
@@ -38,10 +38,14 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
 
   useEffect(() => {
     const period = investigationPeriod(section);
-    if (period) { setStartDate(period.startDate); setEndDate(period.endDate); setStatusFilter('ACTIVE'); setDiscountedOnly(!splitView && period.discountedOnly); setSearch(''); }
+    if (period) { setStartDate(period.startDate); setEndDate(period.endDate); setStatusFilter('ACTIVE'); setDiscountedOnly(!splitView && period.discountedOnly); setSearch(''); setAppliedSearch(''); }
   }, [section, splitView]);
 
-  const [bills, setBills] = useState<Bill[]>([]);
+  const [bills, setBills] = useState<BillSummary[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [pageCursors, setPageCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -67,11 +71,12 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
 
   const requestVersion = useRef(0);
   const [resetVersion, setResetVersion] = useState(0);
-  const resetFilters = () => { setResetVersion(v => v + 1); setSearch(''); setStatusFilter('ALL'); setDiscountedOnly(false); setStartDate(`${businessToday().slice(0, 7)}-01`); setEndDate(businessToday()); };
-  const fetchBills = async () => {
-    if (!activeProperty) return;
+  const resetFilters = () => { setResetVersion(v => v + 1); setSearch(''); setAppliedSearch(''); setStatusFilter('ALL'); setDiscountedOnly(false); setStartDate(`${businessToday().slice(0, 7)}-01`); setEndDate(businessToday()); };
+  const fetchPage = async (cursor: string | null, index: number, cursors: (string | null)[], searchValue = appliedSearch) => {
     const request = ++requestVersion.current;
-    if (!isBusinessDate(startDate) || !isBusinessDate(endDate) || startDate > endDate) { setErrorMsg('Choose a valid date range. The start date must be on or before the end date.'); setBills([]); setLoading(false); return; }
+    closeBillDetails();
+    if (!activeProperty) { setBills([]); setNextCursor(null); setPageIndex(0); setLoading(false); return; }
+    if (!isBusinessDate(startDate) || !isBusinessDate(endDate) || startDate > endDate) { setErrorMsg('Choose a valid date range. The start date must be on or before the end date.'); setBills([]); setNextCursor(null); setPageIndex(0); setLoading(false); return; }
     try {
       setLoading(true);
       setErrorMsg(null);
@@ -79,30 +84,45 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
       if (statusFilter !== 'ALL') {
         query += `&status=${statusFilter}`;
       }
-      if (search.trim()) {
-        query += `&search=${encodeURIComponent(search.trim())}`;
+      if (searchValue.trim()) {
+        query += `&search=${encodeURIComponent(searchValue.trim())}`;
       }
+      query += '&limit=50';
+      if (cursor) query += `&cursor=${encodeURIComponent(cursor)}`;
+      if (!splitView && discountedOnly) query += '&discountedOnly=true';
 
-      const res = await apiFetch<{ bills: Bill[] }>(query);
+      const res = await apiFetch<BillPage>(query);
       if (request !== requestVersion.current) return;
       setBills(res.bills);
+      setNextCursor(res.nextCursor || null);
+      setPageIndex(index);
+      setPageCursors(cursors);
     } catch (err: any) {
       if (request !== requestVersion.current) return;
       setBills([]);
+      setNextCursor(null);
       setErrorMsg(err.message || 'Failed to load bills.');
     } finally {
       if (request === requestVersion.current) setLoading(false);
     }
   };
+  const fetchBills = () => fetchPage(null, 0, [null]);
+  const nextPage = () => {
+    if (!loading && nextCursor) void fetchPage(nextCursor, pageIndex + 1, [...pageCursors.slice(0, pageIndex + 1), nextCursor]);
+  };
+  const previousPage = () => {
+    if (!loading && pageIndex > 0) void fetchPage(pageCursors[pageIndex - 1], pageIndex - 1, pageCursors);
+  };
 
   useEffect(() => {
     fetchBills();
     return () => { requestVersion.current++; };
-  }, [activeProperty, startDate, endDate, statusFilter, resetVersion]);
+  }, [activeProperty, startDate, endDate, statusFilter, discountedOnly, splitView, resetVersion, appliedSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchBills();
+    if (appliedSearch === search.trim()) void fetchBills();
+    else setAppliedSearch(search.trim());
   };
 
   const openBillDetails = async (billId: string) => {
@@ -136,8 +156,8 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
         body: JSON.stringify({ newDate: newRedateDate }),
       });
       setRedateModalOpen(false);
-      openBillDetails(selectedBill.id);
       fetchBills();
+      openBillDetails(selectedBill.id);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to re-date bill.');
     } finally {
@@ -156,8 +176,8 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
       });
       setRebateModalOpen(false);
       setRebateReason('');
-      openBillDetails(selectedBill.id);
       fetchBills();
+      openBillDetails(selectedBill.id);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to rebate bill.');
     } finally {
@@ -184,7 +204,7 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
   };
 
   const currencySymbol = activeProperty?.currencySymbol || '$';
-  const visibleBills = !splitView && discountedOnly ? bills.filter(bill => bill.discountAmount > 0) : bills;
+  const visibleBills = bills;
   useEffect(() => {
     if (splitView && !loading && selectedBillId && !visibleBills.some(bill => bill.id === selectedBillId)) closeBillDetails();
   }, [splitView, loading, bills, discountedOnly, selectedBillId]);
@@ -209,6 +229,10 @@ export function useBillsController({ section, savedCheck, onDismissSaved, onSetu
     handleRedate,
     handleSearchSubmit,
     loading,
+    nextCursor,
+    nextPage,
+    previousPage,
+    pageIndex,
     newRedateDate,
     onDismissSaved,
     onSetup,

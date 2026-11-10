@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
-import { calculateCommissionForPeriod } from '../services/commissionService';
+import { calculateCommissionForPeriod, commissionBillInclude } from '../services/commissionService';
 import { globalDashboard } from '../services/globalDashboard';
 import { isDateRange } from '../utils/dates';
 
@@ -68,9 +68,7 @@ export function registerReportReadRoutes(reportsRouter: Router) {
           businessDate: { gte: start, lte: end },
           status: 'ACTIVE',
         },
-        include: {
-          items: true,
-        },
+        include: commissionBillInclude,
         orderBy: { businessDate: 'asc' },
       });
 
@@ -88,7 +86,7 @@ export function registerReportReadRoutes(reportsRouter: Router) {
 
       // Calculate Commissions
       const { staffResults, personalDetails, certificationPoolTotal, storeAttendantPoolTotal, unallocatedStoreAttendantPoolTotal, grandTotal: totalCommission } =
-        await calculateCommissionForPeriod(propId, start, end);
+        await calculateCommissionForPeriod(propId, start, end, undefined, bills);
 
       // Headline metrics
       let turnover = 0; // Gross

@@ -12,6 +12,9 @@ import { waterSportsEnabled } from './features';
 const DisclaimerView = waterSportsEnabled
   ? lazy(() => import('./components/DisclaimerView').then(module => ({ default: module.DisclaimerView })))
   : () => null;
+const EquipmentView = waterSportsEnabled
+  ? lazy(() => import('./components/EquipmentView').then(module => ({ default: module.EquipmentView })))
+  : () => null;
 const GlobalDashboard = lazy(() => import('./components/GlobalDashboard').then(module => ({ default: module.GlobalDashboard })));
 const HomeDashboard = lazy(() => import('./components/HomeDashboard').then(module => ({ default: module.HomeDashboard })));
 const NewBillView = lazy(() => import('./components/NewBillView').then(module => ({ default: module.NewBillView })));
@@ -24,12 +27,12 @@ import { LoginView } from './components/LoginView';
 import { useNavigation } from './context/NavigationContext';
 import { Waves } from 'lucide-react';
 
-const validTabs = Object.keys(navLabels).filter(tab => tab !== 'dive-centre' || waterSportsEnabled);
+const validTabs = Object.keys(navLabels).filter(tab => !['dive-centre', 'equipment'].includes(tab) || waterSportsEnabled);
 const readTab = (): NavTab => { const tab = location.hash.slice(1).split('/')[0]; const normalized = tab === 'water-sports' ? 'dive-centre' : tab; return validTabs.includes(normalized) ? normalized as NavTab : 'home'; };
 const readSection = () => location.hash.slice(1).split('/')[1] || '';
 export const AppContent: React.FC = () => {
-  const { user, loading, refreshUser } = useAuth();
-  const { activeProperty, loading: propertyLoading } = useProperty();
+  const { user, loading, profileError, refreshUser } = useAuth();
+  const { activeProperty, loading: propertyLoading, error: propertyError, refreshProperties } = useProperty();
   const [currentTab, setCurrentTab] = useState<NavTab>(readTab);
   const [section, setSection] = useState(readSection);
   const { requestNavigation, hasUnsavedChanges } = useNavigation();
@@ -112,6 +115,7 @@ export const AppContent: React.FC = () => {
     return () => window.removeEventListener('keydown', handleShortcut);
   });
   if (loading) return <div className="app-loading" role="status"><Waves size={32} /><span>Opening your workspace…</span></div>;
+  if (!user && profileError) return <div className="app-loading"><h1>Unable to verify your session</h1><p role="alert">{profileError}</p><button type="button" className="primary-button" onClick={() => { void refreshUser(); }}>Retry</button></div>;
   if (!user) return import.meta.env.VITE_DEPLOYMENT_MODE === 'testing' ? <TestingLoginView /> : <LoginView />;
   if (!user.authenticatorEnabled) return <div className="signin-page"><AuthenticatorSetupView onComplete={() => { void refreshUser(); }} /></div>;
   return <div className={`app-shell${isSiyamWorld(activeProperty) ? ' siyam-flat-workspace' : ''}${catalogueMode ? ' catalogue-billing-shell' : ''}`} style={catalogueMode ? { '--catalogue-width': `${catalogueWidth}px` } as React.CSSProperties : undefined}>
@@ -121,8 +125,9 @@ export const AppContent: React.FC = () => {
     <SubNav currentTab={currentTab} onTabChange={navigate} open={menuOpen} onClose={() => setMenuOpen(false)} onShortcuts={() => setShortcutsOpen(true)} catalogue={catalogueMode ? { width: catalogueWidth, onResize: setCatalogueWidth } : undefined} />
     <div className="workspace"><Navbar currentTab={currentTab} onMenu={() => setMenuOpen(true)} onSecurity={() => requestNavigation(() => { if (import.meta.env.VITE_DEPLOYMENT_MODE === 'testing') window.location.assign('/'); else setSecurityOpen(true); })} onShortcuts={() => setShortcutsOpen(true)} />
       <main id="main-content" className={`main-content view-${currentTab}${isSiyamWorld(activeProperty) && currentTab === 'new-bill' ? ' siyam-new-bill' : ''}`} ref={mainRef} tabIndex={-1}>
-        {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : !activeProperty && currentTab !== 'admin' && !(currentTab === 'home' && user.role === 'GLOBAL_ADMIN') ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
+        {propertyLoading ? <div className="app-loading" role="status">Loading your property…</div> : propertyError && !activeProperty ? <div className="empty-state"><h1>Unable to load properties</h1><p role="alert">{propertyError}</p><button type="button" className="primary-button" onClick={() => { void refreshProperties(); }}>Retry</button></div> : !activeProperty && currentTab !== 'admin' && !(currentTab === 'home' && user.role === 'GLOBAL_ADMIN') ? <div className="empty-state"><BuildingNotice /><h1>No property assigned</h1><p>Contact your administrator to get access to a dive centre.</p>{canAdmin && <button className="primary-button" onClick={() => navigate('admin')}>Manage properties</button>}</div> : <Suspense key={`${user.id}-${activeProperty?.id}`} fallback={<div className="app-loading" role="status">Opening {navLabels[currentTab].toLowerCase()}…</div>}>
           {waterSportsEnabled && currentTab === 'dive-centre' && <DisclaimerView />}
+          {waterSportsEnabled && currentTab === 'equipment' && <EquipmentView />}
           {currentTab === 'home' && (user.role === 'GLOBAL_ADMIN' && section !== 'property' ? <GlobalDashboard onNavigate={navigate} /> : <HomeDashboard onNavigate={navigate} />)}
           {currentTab === 'new-bill' && <>{!isSiyamWorld(activeProperty) && <div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1></div>}<NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { if (!isSiyamWorld(activeProperty)) { setSavedBill(check); commitRoute('bills'); } }} /></>}
           {currentTab === 'bills' && <BillsView onSetup={() => navigate('admin', 'items')} section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}

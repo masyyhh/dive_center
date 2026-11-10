@@ -26,6 +26,7 @@ test('compact billing is confined to Siyam World and mounts a single copy of eac
   for (const name of ['Siyam World', 'Sun Siyam World', 'Iru Fushi', 'Sun Siyam Vilu Reef']) {
     const tree = fixture(name).render();
     const compact = name.includes('World');
+    assert.equal(descendants(tree, node => typeof node.props.className === 'string' && node.props.className.split(' ').includes('bill-builder')).length, 1, `${name}: workspace styles must be attached`);
     assert.equal(descendants(tree, node => node.props.className === 'siyam-checkout').length, compact ? 1 : 0);
     assert.equal(descendants(tree, node => node.props.className === 'billing-toolbar-top').length, compact ? 0 : 1);
     assert.equal(descendants(tree, node => node.props.className === 'billing-draft-status').length, compact ? 0 : 1);
@@ -275,6 +276,7 @@ test('Siyam Save posts once without confirmation, retains failed drafts and perm
   assert.equal(JSON.parse(calls[0].body).items[0].lineTotal, 300);
   assert.equal(f.button(f.render(), 'Confirm & Save'), undefined);
   assert.equal(f.button(f.render(), 'Saving…').props.disabled, true);
+  for (const id of ['bill-room','bill-guest','newbillview-field-3','newbillview-field-4','newbillview-field-10']) assert.equal(descendants(f.render(),node=>node.props.id===id)[0].props.disabled,true,id);
   finish.reject(new Error('Connection failed'));
   await pending;
   assert.match(text(f.render()), /Connection failed/);
@@ -309,4 +311,25 @@ test('final bill summary keeps checkout calculations and optional tip in sync', 
   assert.match(text(result), /Tax \/ TGST \(16%\)\$47.52/);
   assert.match(text(result), /Guest tip\$5.00/);
   assert.equal(text(descendants(result, node => node.props['aria-live'] === 'polite')[0]), '$349.52');
+});
+
+
+test('videographer payment preview includes line and bill discounts', () => {
+ const f=fixture('Iru Fushi',{draft:{checkoutDiscountPercent:'50',billLines:[{clientLineId:'video',itemId:'dive',itemName:'Video',quantity:2,unitPrice:100,discountPercent:20,lineTotal:160,videoStaffId:'staff',personalCommissionsJson:JSON.stringify({video:10})}]}});
+ assert.match(text(f.render()),/Payment after discounts: \$8.00/);
+ assert.doesNotMatch(text(f.render()),/Applies even when the service is complimentary/);
+});
+
+test('cancelled catalogue loading cannot apply stale activities or next-check values', async()=>{
+ let resolveItems;
+ const f=fixture('Iru Fushi',{runControllerEffects:true,apiFetch:async url=>{
+  if(url.startsWith('/items'))return new Promise(resolve=>{resolveItems=resolve;});
+  if(url.startsWith('/packages'))return{packages:[]};
+  if(url.startsWith('/staff'))return{staff:[]};
+  return{nextCheckNumber:9999};
+ }});
+ f.render();const cleanups=f.controllerEffects.map(effect=>effect()).filter(Boolean);cleanups.forEach(cleanup=>cleanup());
+ resolveItems({items:[{id:'stale',name:'Stale service',price:1}],categories:[]});await new Promise(resolve=>setImmediate(resolve));
+ assert.doesNotMatch(text(f.render()),/Stale service/);
+ assert.equal(descendants(f.render(),node=>node.props.id==='bill-check-number')[0].props.value,1001);
 });
