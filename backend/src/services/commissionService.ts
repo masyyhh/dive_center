@@ -1,9 +1,12 @@
+import { isBusinessDate } from '../utils/dates';
 import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
 import type { Prisma } from '@prisma/client';
 import { isStoreAttendant, splitStorePool, STORE_ATTENDANT_RETAIL_RATE } from '../utils/storeAttendantPool';
+import { addCents, productCents } from '../utils/commissionMoney';
+import { calculateIruveliDay, commissionFields, emptyCommissionCents, IRUVELI_CENTS_EFFECTIVE_DATE, type CommissionCents, type UnallocatedCommission } from './iruveliCommissionDay';
 
 export interface StaffCommissionResult {
   staffId: string;
@@ -15,6 +18,8 @@ export interface StaffCommissionResult {
   tipsCommission: number;
   personalCommission: number;
   totalCommission: number;
+  /** Present only when the period includes Iruveli's cent-based calculation. */
+  cents?: CommissionCents;
 }
 
 export interface PersonalCommissionDetail {
@@ -28,9 +33,10 @@ export interface PersonalCommissionDetail {
   staffId: string;
   staffName: string;
   amount: number;
+  amountCents?: number;
 }
 
-interface CommissionBreakdownDetail {
+export interface CommissionBreakdownDetail {
   id: string;
   billId: string;
   billItemId: string | null;
@@ -45,13 +51,15 @@ interface CommissionBreakdownDetail {
   unitRate?: number;
   explanation: string;
   amount: number;
+  amountCents?: number;
+  sourceBillItemIds?: string[];
 }
 type BreakdownSource = Pick<CommissionBreakdownDetail, 'billId' | 'billItemId' | 'checkNumber' | 'businessDate' | 'itemName' | 'quantity' | 'basisAmount'>;
 
 export const commissionBillInclude = {
   items: { include: { item: true, instructorCredits: true, photoCredits: true } },
 } satisfies Prisma.BillInclude;
-type CommissionBill = Prisma.BillGetPayload<{ include: typeof commissionBillInclude }>;
+export type CommissionBill = Prisma.BillGetPayload<{ include: typeof commissionBillInclude }>;
 
 export const calculateCommissionForPeriod = async (
   propertyId: string,
@@ -60,6 +68,21 @@ export const calculateCommissionForPeriod = async (
   detailStaffId?: string,
   preloadedBills?: CommissionBill[]
 ) => {
+  // Explicit property ID scopes the schema-free backport. Preserve production's
+  // existing 10% override on course + dive pools; this release changes rounding only.
+  const diveOnlyOverride = false;
+  if (process.env.IRUVELI_COMMISSION_PROPERTY_ID === propertyId && (!isBusinessDate(IRUVELI_CENTS_EFFECTIVE_DATE) || IRUVELI_CENTS_EFFECTIVE_DATE < '2026-11-17')) throw new Error('Invalid Iruveli rollout date.');
+  const iruveliCents = process.env.IRUVELI_COMMISSION_PROPERTY_ID === propertyId && endDate >= IRUVELI_CENTS_EFFECTIVE_DATE;
+  // Locks finalized before rollout retain legacy results. Locking new payroll must
+  // not switch it back to the old calculation.
+  const locks = iruveliCents ? await prisma.monthLock.findMany({ where: { propertyId, isLocked: true, lockedAt: { lt: new Date(`${IRUVELI_CENTS_EFFECTIVE_DATE}T00:00:00+05:00`) }, yearMonth: { gte: startDate.slice(0, 7), lte: endDate.slice(0, 7) } }, select: { yearMonth: true } }) : [];
+  const lockedMonths = new Set(locks.map(lock => lock.yearMonth));
+  const usesCents = (date: string) => iruveliCents && date >= IRUVELI_CENTS_EFFECTIVE_DATE && !lockedMonths.has(date.slice(0, 7));
+  const centAmounts = new Map<string, CommissionCents>();
+  const unallocatedCommissions: UnallocatedCommission[] = [];
+  let certificationCents = 0, retailCents = 0, unallocatedRetailCents = 0;
+  let hasCentDates = false;
+
   // 1. Fetch active staff members for this property
   const staffMembers = await prisma.staffMember.findMany({
     where: { propertyId, isActive: true },
@@ -155,6 +178,23 @@ export const calculateCommissionForPeriod = async (
     const dayBills = billsByDate.get(date) || [];
     const dayAttendance = attendanceByDate.get(date) || [];
     const dayAttendanceMap = new Map(dayAttendance.map((a) => [a.staffMemberId, a.status]));
+
+    if (usesCents(date)) {
+      hasCentDates = true;
+      const day = calculateIruveliDay(propertyId, date, dayBills, staffMembers, dayAttendanceMap, diveOnlyOverride, detailStaffId);
+      for (const [id, values] of day.amounts) {
+        const row = centAmounts.get(id) ?? emptyCommissionCents();
+        for (const field of commissionFields) row[field] = addCents(row[field], values[field]);
+        centAmounts.set(id, row);
+      }
+      personalDetails.push(...day.personalDetails);
+      breakdownDetails.push(...day.details);
+      unallocatedCommissions.push(...day.unallocated);
+      certificationCents = addCents(certificationCents, day.certificationCents);
+      retailCents = addCents(retailCents, day.retailCents);
+      unallocatedRetailCents = addCents(unallocatedRetailCents, day.unallocatedRetailCents);
+      continue;
+    }
 
     const canReceiveCredit = (id: string) => {
       const staff = staffMap.get(id);
@@ -395,7 +435,7 @@ export const calculateCommissionForPeriod = async (
         r.overrideCommission +
         r.tipsCommission +
         r.personalCommission;
-      return {
+      const legacy = {
         ...r,
         courseCommission: Math.round(r.courseCommission * 100) / 100,
         diveCommission: Math.round(r.diveCommission * 100) / 100,
@@ -404,18 +444,26 @@ export const calculateCommissionForPeriod = async (
         personalCommission: Math.round(r.personalCommission * 100) / 100,
         totalCommission: Math.round(total * 100) / 100,
       };
+      if (!hasCentDates) return legacy;
+      const cents = emptyCommissionCents();
+      const additions = centAmounts.get(r.staffId) ?? emptyCommissionCents();
+      for (const field of commissionFields) cents[field] = addCents(productCents(legacy[field]), additions[field]);
+      // Preserve legacy payroll totals, including their historical component rounding.
+      cents.totalCommission = addCents(productCents(legacy.totalCommission), ...commissionFields.map(field => additions[field]));
+      return { ...legacy, ...Object.fromEntries([...commissionFields, 'totalCommission' as const].map(field => [field, cents[field] / 100])), cents };
     })
     .sort((a, b) => b.totalCommission - a.totalCommission);
 
-  const grandTotal = staffResults.reduce((acc, curr) => acc + curr.totalCommission, 0);
+  const grandTotal = hasCentDates ? addCents(...staffResults.map(row => row.cents!.totalCommission)) / 100 : staffResults.reduce((acc, curr) => acc + curr.totalCommission, 0);
 
   return {
     staffResults,
     personalDetails,
     breakdownDetails,
-    certificationPoolTotal: Math.round(certificationPoolTotal * 100) / 100,
-    storeAttendantPoolTotal: Math.round(storeAttendantPoolTotal * 100) / 100,
-    unallocatedStoreAttendantPoolTotal: Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100,
-    grandTotal: Math.round(grandTotal * 100) / 100,
+    certificationPoolTotal: hasCentDates ? addCents(productCents(Math.round(certificationPoolTotal * 100) / 100), certificationCents) / 100 : Math.round(certificationPoolTotal * 100) / 100,
+    storeAttendantPoolTotal: hasCentDates ? addCents(productCents(Math.round(storeAttendantPoolTotal * 100) / 100), retailCents) / 100 : Math.round(storeAttendantPoolTotal * 100) / 100,
+    unallocatedStoreAttendantPoolTotal: hasCentDates ? addCents(productCents(Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100), unallocatedRetailCents) / 100 : Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100,
+    ...(hasCentDates ? { calculationVersion: 'IRUVELI_CENTS_V1' as const, unallocatedCommissions } : {}),
+    grandTotal: hasCentDates ? grandTotal : Math.round(grandTotal * 100) / 100,
   };
 };

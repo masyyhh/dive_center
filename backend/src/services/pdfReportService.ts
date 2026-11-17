@@ -1,3 +1,4 @@
+import { addCents, formatCents } from '../utils/commissionMoney';
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
 import { businessToday, businessWeek, businessMonth, isBusinessDate, isYearMonth } from '../utils/dates';
@@ -50,6 +51,12 @@ export async function generateReportPdf(propertyId: string, period: string, mont
       { signOff: true, signOffPosition: 'bottom', preparedBy, logo: iruFushiLetterhead ? 'iru-fushi' : 'dive-centre' });
   }
   const commission = await calculateCommissionForPeriod(propertyId, start, end);
+  if (commission.unallocatedCommissions?.length) {
+    const rows = commission.unallocatedCommissions;
+    tables.push({ title: 'Unallocated commissions', columns: [column('Date', 70), column('Category', 90), column('Reason', 170), column(`Amount (${property.currency})`, 90, true)],
+      rows: [...rows.map(row => [row.businessDate, row.kind, row.reason, formatCents(row.amountCents)]), ['TOTAL', '', '', formatCents(addCents(...rows.map(row => row.amountCents)))]],
+      note: 'Undistributed balances are excluded from staff pay.' });
+  }
   const sales = sum(bills.map(bill => bill.grossAmount - bill.discountAmount));
   tables.push({ title: 'Overview', emphasizeRows: [3, 7, 9], columns: [column('Metric', 340), column(`Amount / value (${property.currency})`, 170, true)], rows: [
     ['Active bills', bills.length], ['Gross sales', money(sum(bills.map(bill => bill.grossAmount)))],

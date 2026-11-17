@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth';
 import { requirePropertyAccess, requireRole } from '../middleware/rbac';
 import { calculateCommissionForPeriod, commissionBillInclude } from '../services/commissionService';
 import { globalDashboard } from '../services/globalDashboard';
+import { addCents } from '../utils/commissionMoney';
 import { isDateRange } from '../utils/dates';
 
 export function registerReportReadRoutes(reportsRouter: Router) {
@@ -35,8 +36,13 @@ export function registerReportReadRoutes(reportsRouter: Router) {
       const details = result.breakdownDetails.sort((a, b) => a.businessDate.localeCompare(b.businessDate) || a.checkNumber - b.checkNumber || a.itemName.localeCompare(b.itemName));
       // Match the money formatter used in the UI, including fractional-cent shares.
       const displayedSum = details.reduce((sum, detail) => sum + Number(detail.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false })), 0);
+      const allDetailsInCents = Boolean(result.calculationVersion) && details.every(detail => detail.amountCents !== undefined);
+      const roundingAdjustment = allDetailsInCents && staff.cents
+        ? (staff.cents.totalCommission - addCents(...details.map(detail => detail.amountCents!))) / 100
+        : Math.round((staff.totalCommission - displayedSum) * 100) / 100;
       return res.json({
-        staff, details, roundingAdjustment: Math.round((staff.totalCommission - displayedSum) * 100) / 100,
+        staff, details, roundingAdjustment,
+        ...(result.calculationVersion ? { calculationVersion: result.calculationVersion, allDetailsInCents, unallocatedCommissions: result.unallocatedCommissions } : {}),
         period: { startDate, endDate }
       });
     } catch(error) {

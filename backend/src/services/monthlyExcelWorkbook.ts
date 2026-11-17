@@ -1,3 +1,4 @@
+import { addUnallocatedCommissionSheet } from './commissionReconciliation';
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
 import { isYearMonth } from '../utils/dates';
@@ -25,7 +26,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     orderBy: { businessDate: 'asc' },
   });
 
-  const { staffResults, personalDetails, certificationPoolTotal, unallocatedStoreAttendantPoolTotal } = await calculateCommissionForPeriod(
+  const { staffResults, personalDetails, certificationPoolTotal, unallocatedStoreAttendantPoolTotal, unallocatedCommissions } = await calculateCommissionForPeriod(
     propertyId,
     startDate,
     endDate
@@ -147,5 +148,6 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     });
   }
 
+  addUnallocatedCommissionSheet(workbook, unallocatedCommissions, currency);
   return workbook.xlsx.writeBuffer();
 };

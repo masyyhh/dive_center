@@ -1,3 +1,4 @@
+import { addUnallocatedCommissionSheet } from './commissionReconciliation';
 import { prisma } from '../db';
 import { calculateCommissionForPeriod } from './commissionService';
 import { createReportWorkbook, styleReportHeader } from './reportWorkbook';
@@ -13,7 +14,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     orderBy: { checkNumber: 'asc' },
   });
 
-  const { staffResults, certificationPoolTotal, storeAttendantPoolTotal, unallocatedStoreAttendantPoolTotal } = await calculateCommissionForPeriod(propertyId, date, date);
+  const { staffResults, certificationPoolTotal, storeAttendantPoolTotal, unallocatedStoreAttendantPoolTotal, unallocatedCommissions } = await calculateCommissionForPeriod(propertyId, date, date);
 
   const workbook = createReportWorkbook();
 
@@ -120,5 +121,6 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     retailSheet.addRow({ metric: 'Unallocated (no eligible Store attendants)', amount: unallocatedStoreAttendantPoolTotal });
     retailSheet.getColumn(2).numFmt = '#,##0.00';
   }
+  addUnallocatedCommissionSheet(workbook, unallocatedCommissions, currency);
   return workbook.xlsx.writeBuffer();
 };
