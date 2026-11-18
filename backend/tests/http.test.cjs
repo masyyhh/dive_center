@@ -13,7 +13,9 @@ delete process.env.JWT_SECRET_FILE;
 let databaseAvailable = true;
 const auditEntries = [];
 const prisma = { auditLog: { create: async ({ data }) => { auditEntries.push(data); return data; } }, $queryRaw: async () => { if (!databaseAvailable) throw new Error('Private database connection details'); return [{ value: 1 }]; } };
-const { default: app } = loadTypeScript('src/app.ts', { './db': { prisma }, '../db': { prisma } });
+// Nested equipment services import the same database through ../../db. Keep
+// every app import on the mock so HTTP checks never initialize a real client.
+const { default: app } = loadTypeScript('src/app.ts', { './db': { prisma }, '../db': { prisma }, '../../db': { prisma } });
 let server, origin;
 test.before(async () => {
   server = app.listen(0, '127.0.0.1');
