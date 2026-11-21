@@ -12,17 +12,19 @@ if (endpoint.protocol !== 'http:' || !['backend', '127.0.0.1', 'localhost'].incl
   throw Error('Smoke tests require a local disposable API endpoint.');
 }
 let token;
+let step = 'initialization';
 async function api(endpoint, method = 'GET', body, expected = 200) {
+  step = `${method} ${endpoint.split('?')[0]}`;
   const response = await fetch(base + endpoint, {
     method, signal: AbortSignal.timeout(10000),
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   assert.equal(response.status, expected, `${method} ${endpoint} returned unexpected status`);
-  if (endpoint.includes('/export/')) {
-    assert(response.headers.get('content-type').includes('spreadsheetml'));
+  if (endpoint.startsWith('/reports/export/daily?')) {
+    assert.match(response.headers.get('content-type') ?? '', /^application\/pdf\b/);
     const bytes = Buffer.from(await response.arrayBuffer());
-    assert.equal(bytes.subarray(0, 2).toString(), 'PK');
+    assert.equal(bytes.subarray(0, 5).toString(), '%PDF-');
     return;
   }
   return response.json();
@@ -42,10 +44,10 @@ async function api(endpoint, method = 'GET', body, expected = 200) {
   const { item } = await api('/items', 'POST', { propertyId: property.id, categoryId: categories[0].id, code: 'FIXTURE', name: 'Fixture activity', price: 10 }, 201);
   const { staff } = await api('/staff', 'POST', { propertyId: property.id, name: 'CI fixture', roleTitle: 'Instructor', hireDate: '2026-01-01' }, 201);
   await api('/presence/day', 'POST', { propertyId: property.id, date: '2026-10-21', records: [{ staffMemberId: staff.id, status: 'PRESENT' }] });
-  const { bill } = await api('/bills', 'POST', { propertyId: property.id, checkNumber: 1, businessDate: '2026-10-21', guestName: 'CI fixture', roomNumber: 'TEST', items: [{ itemId: item.id, itemName: item.name, categoryName: categories[0].name, quantity: 1, unitPrice: 10 }] }, 201);
+  const { bill } = await api('/bills', 'POST', { propertyId: property.id, checkNumber: 1, businessDate: '2026-10-21', guestName: 'CI fixture', roomNumber: '101', items: [{ itemId: item.id, itemName: item.name, categoryName: categories[0].name, quantity: 1, unitPrice: 10 }] }, 201);
   assert.equal(bill.items.length, 1);
   await api(`/reports/export/daily?propertyId=${property.id}&date=2026-10-21`);
   await api('/reports/month-lock', 'POST', { propertyId: property.id, yearMonth: '2026-10', lock: true });
   await api('/presence/day', 'POST', { propertyId: property.id, date: '2026-10-21', records: [] }, 423);
   console.log('Container smoke test passed: sign-in, enrollment, property/catalogue, billing, attendance, export and payroll lock.');
-})().catch(() => { console.error('Container smoke test failed; inspect fixture-stack logs. No credentials are printed by this tool.'); process.exitCode = 1; });
+})().catch(() => { console.error(`Container smoke test failed during ${step}. Inspect fixture-stack logs.`); process.exitCode = 1; });
