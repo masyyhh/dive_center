@@ -13,8 +13,11 @@ export PROXY_RELAY_BACKEND_IP=172.30.251.3
 compose() { docker compose --env-file .env.production -f compose.yaml -f deploy/compose.proxy-relay.yaml "$@"; }
 compose config --quiet
 compose up -d --no-deps --wait --wait-timeout 120 backend web
-binding=$(compose port backend 5001 2>/dev/null || true)
-[ -z "$binding" ] || { echo 'Relay mode must not publish the Node port.' >&2; exit 1; }
+backend_container=$(compose ps -q backend)
+# Inspect the actual host bindings. An exposed container port can exist in
+# NetworkSettings.Ports with a null binding when it is not published.
+binding_count=$(docker inspect --format '{{len (index .NetworkSettings.Ports "5001/tcp")}}' "$backend_container")
+[ "$binding_count" = 0 ] || { echo 'Relay mode must not publish the Node port.' >&2; exit 1; }
 # A direct client cannot bypass the NPM check with forged proxy headers.
 status=$(curl --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null -w '%{http_code}' \
   -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-For: 172.30.251.4' \
