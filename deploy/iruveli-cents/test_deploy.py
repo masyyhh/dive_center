@@ -12,29 +12,33 @@ spec.loader.exec_module(deploy)
 
 
 class ReleaseTests(unittest.TestCase):
-    def test_only_backend_image_command_and_explicit_scope_can_change(self):
-        before = {'services': {'backend': {'image': 'old', 'entrypoint': ['entrypoint.sh'], 'command': ['node', 'dist/index.js'], 'environment': {'SECRET_FILE': '/run/secrets/key'}}, 'web': {'image': 'web'}}, 'volumes': {'database': {}}}
-        env = {'IRUVELI_COMMISSION_PROPERTY_ID': 'id', 'IRUVELI_COMMISSION_EFFECTIVE_DATE': '2026-11-17'}
+    def test_only_backend_image_can_change(self):
+        before = {'services': {'backend': {'image': 'old', 'environment': {'SECRET_FILE': '/run/secrets/key'}}, 'web': {'image': 'web'}}, 'volumes': {'database': {}}}
         after = copy.deepcopy(before)
-        after['services']['backend'].update(deploy.image_override('new', env)['services']['backend'])
-        after['services']['backend']['environment'] = dict(before['services']['backend']['environment'], **env)
-        deploy.validate_candidate_config(before, after, 'new', env)
-        for mutation in ['frontend', 'secret', 'database']:
+        after['services']['backend']['image'] = 'new'
+        deploy.validate_candidate_config(before, after, 'new')
+        for mutation in ['frontend', 'secret', 'startup', 'database']:
             changed = copy.deepcopy(after)
             if mutation == 'frontend':
                 changed['services']['web']['image'] = 'other'
             elif mutation == 'secret':
                 changed['services']['backend']['environment']['SECRET_FILE'] = '/wrong'
+            elif mutation == 'startup':
+                changed['services']['backend']['entrypoint'] = ['node']
             else:
                 changed['volumes'] = {}
             with self.assertRaisesRegex(RuntimeError, 'changed more'):
-                deploy.validate_candidate_config(before, changed, 'new', env)
+                deploy.validate_candidate_config(before, changed, 'new')
 
-    def test_override_bypasses_migration_entrypoint(self):
-        value = deploy.image_override('old')['services']['backend']
-        self.assertEqual(value['entrypoint'], ['node'])
-        self.assertEqual(value['command'], ['dist/index.js'])
-        self.assertNotIn('environment', value)
+    def test_existing_two_file_layout_replaces_only_backend_image(self):
+        old = 'services:\n  backend:\n    image: old\n  web:\n    image: web\n'
+        image = 'sha256:' + 'a' * 64
+        self.assertEqual(deploy.with_backend_image(old, image), old.replace('image: old', 'image: ' + image))
+        args = deploy.compose(Path('/tmp/candidate.yaml'))
+        self.assertEqual(args.count('-f'), 2)
+        self.assertEqual(args[-1], '/tmp/candidate.yaml')
+        with self.assertRaisesRegex(RuntimeError, 'Expected one'):
+            deploy.with_backend_image(old.replace('image: old', 'build: ./backend'), image)
 
     def test_tampered_payload_fails_before_docker(self):
         with tempfile.TemporaryDirectory() as directory:

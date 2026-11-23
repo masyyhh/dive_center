@@ -31,11 +31,11 @@ module hashes expected from the running production image. The installer refuses
 a different running backend/frontend image or source baseline before stopping
 services. Stop if a check fails; do not remove the guard or run migrations.
 
-The Dockerfile layers only these compiled files onto the existing backend image.
-It overrides the entrypoint to run the API directly, bypassing automatic migrations.
-The application continues to read its original secret-file settings. The frontend,
-database image, database volume, ports, network, secrets and base Compose files
-are unchanged.
+The Dockerfile layers the compiled files onto the existing backend image. Its
+entrypoint keeps the same path, secret loading and startup command, and starts the
+API without automatic migrations. A separate rollback image uses the previous
+application code with the same migration-free startup. The frontend and database
+images, volume, ports, network, and secrets stay in place.
 
 ## Run on production
 
@@ -59,20 +59,16 @@ and runs a database-free smoke test inside the candidate image.
 
 Expect a brief interruption while only this application's web/API containers
 restart. Health verification precedes reopening web traffic. The script verifies
-public `/api/ready` and saves the active settings in
-`/srv/dive-centre-prod/compose.iruveli-cents.json`. Other applications are untouched.
+public `/api/ready`. The candidate changes only the backend image reference in
+`/srv/dive-centre-prod/compose.app.yaml`; the Iruveli settings are in the image.
 
 ## Subsequent maintenance
 
-Always include the new override after the existing Compose files:
+Continue using the existing two Compose files:
 
 ```bash
-sudo docker compose --project-directory /srv/dive-centre-prod -p dive-centre-prod --env-file /dev/null -f /srv/dive-centre-prod/compose.migration.yaml -f /srv/dive-centre-prod/compose.app.yaml -f /srv/dive-centre-prod/compose.iruveli-cents.json ps
+sudo docker compose --project-directory /srv/dive-centre-prod -p dive-centre-prod --env-file /dev/null -f /srv/dive-centre-prod/compose.migration.yaml -f /srv/dive-centre-prod/compose.app.yaml ps
 ```
-
-Omitting the override would revert the patch and restore the old migration-enabled
-entrypoint. Keep the rollout property ID and effective date unchanged for this
-release; changing them changes which dates use the new calculation.
 
 ## Rollback
 

@@ -1,9 +1,11 @@
 ARG PRODUCTION_BACKEND_IMAGE
-FROM ${PRODUCTION_BACKEND_IMAGE}
+FROM ${PRODUCTION_BACKEND_IMAGE} AS rollback
 WORKDIR /app
+COPY --chown=node:node --chmod=755 entrypoint.sh /app/entrypoint.sh
+
+FROM rollback AS candidate
+ARG IRUVELI_PROPERTY_ID
+ARG IRUVELI_EFFECTIVE_DATE
+ENV IRUVELI_COMMISSION_PROPERTY_ID=${IRUVELI_PROPERTY_ID} \
+    IRUVELI_COMMISSION_EFFECTIVE_DATE=${IRUVELI_EFFECTIVE_DATE}
 COPY --chown=node:node runtime/ /app/dist/
-USER node
-# Deliberately bypass the baseline entrypoint's automatic migrations.
-# The existing application reads its unchanged *_FILE secret settings itself.
-ENTRYPOINT ["node"]
-CMD ["dist/index.js"]

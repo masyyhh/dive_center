@@ -16,7 +16,8 @@ HERE = Path(__file__).resolve().parent
 API = 'dive-centre-prod-backend-1'
 WEB = 'dive-centre-prod-web-1'
 DB = 'dive-centre-prod-db-1'
-OVERRIDE = ROOT / 'compose.iruveli-cents.json'
+APP_CONFIG = ROOT / 'compose.app.yaml'
+LEGACY_OVERRIDE = ROOT / 'compose.iruveli-cents.json'
 
 
 def run(args, **kwargs):
@@ -31,13 +32,10 @@ def inspect(name):
     return json.loads(output(['docker', 'inspect', name]))[0]
 
 
-def compose(override=None):
-    args = ['docker', 'compose', '--project-directory', str(ROOT), '-p', 'dive-centre-prod',
+def compose(app_config=None):
+    return ['docker', 'compose', '--project-directory', str(ROOT), '-p', 'dive-centre-prod',
             '--env-file', '/dev/null', '-f', str(ROOT / 'compose.migration.yaml'),
-            '-f', str(ROOT / 'compose.app.yaml')]
-    if override:
-        args += ['-f', str(override)]
-    return args
+            '-f', str(app_config or APP_CONFIG)]
 
 
 def write_json(path, value):
@@ -45,22 +43,46 @@ def write_json(path, value):
     path.chmod(0o600)
 
 
-def image_override(image, env=None):
-    service = {'image': image, 'entrypoint': ['node'], 'command': ['dist/index.js']}
-    if env:
-        service['environment'] = env
-    return {'services': {'backend': service}}
+def with_backend_image(source, image):
+    if not re.fullmatch(r'sha256:[a-f0-9]{64}', image):
+        raise RuntimeError('Expected an immutable backend image ID.')
+    services = False
+    backend = False
+    matches = 0
+    lines = source.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        top = re.match(r'^([a-zA-Z0-9_-]+):', line)
+        if top:
+            services = top[1] == 'services'
+            backend = False
+        service = re.match(r'^  ([a-zA-Z0-9_-]+):', line)
+        if services and service:
+            backend = service[1] == 'backend'
+        if backend and re.match(r'^    image:', line):
+            lines[i] = '    image: ' + image + '\n'
+            matches += 1
+    if matches != 1:
+        raise RuntimeError('Expected one backend image declaration in compose.app.yaml.')
+    return ''.join(lines)
 
 
-def validate_candidate_config(before, after, image, env):
+def validate_candidate_config(before, after, image):
     expected = json.loads(json.dumps(before))
-    backend = expected['services']['backend']
-    backend['image'] = image
-    backend['entrypoint'] = ['node']
-    backend['command'] = ['dist/index.js']
-    backend.setdefault('environment', {}).update(env)
+    expected['services']['backend']['image'] = image
     if expected != after:
-        raise RuntimeError('Candidate changed more than the backend image, command, and Iruveli scope.')
+        raise RuntimeError('Candidate changed more than the backend image.')
+
+
+def select_app_config(path):
+    # Rename from the same filesystem to keep this change atomic.
+    pending = APP_CONFIG.with_name('.compose.iruveli.pending.' + str(os.getpid()))
+    with pending.open('xb') as target:
+        target.write(path.read_bytes())
+    try:
+        shutil.copymode(APP_CONFIG, pending)
+        os.replace(pending, APP_CONFIG)
+    finally:
+        pending.unlink(missing_ok=True)
 
 
 def verify_payload():
@@ -77,7 +99,7 @@ def preflight(manifest):
         raise RuntimeError('Use the production server local Docker daemon.')
     if Path('/var/lib/dive-cd/production/active.override.json').exists():
         raise RuntimeError('CI/CD is enrolled; this manual procedure does not apply.')
-    if OVERRIDE.exists():
+    if LEGACY_OVERRIDE.exists():
         raise RuntimeError('This patch already has an active override; inspect it before proceeding.')
     interfaces = json.loads(output(['ip', '-j', '-4', 'addr', 'show']))
     if not any(addr.get('local') == '192.168.135.39' for row in interfaces for addr in row.get('addr_info', [])):
@@ -90,7 +112,12 @@ def preflight(manifest):
         raise RuntimeError('Production images differ from the reported baseline. Nothing restarted.')
     if api['State'].get('Health', {}).get('Status') != 'healthy':
         raise RuntimeError('Baseline API is not healthy.')
+    if api['Config']['Entrypoint'] != ['/app/entrypoint.sh'] or api['Config']['Cmd'] != ['node', 'dist/index.js']:
+        raise RuntimeError('Unexpected production backend startup command.')
     config = json.loads(output(compose() + ['config', '--format', 'json']))
+    backend = config['services']['backend']
+    if backend.get('entrypoint') is not None or backend.get('command') is not None:
+        raise RuntimeError('Backend startup must inherit from the verified image.')
     for service, row in [('backend', api), ('web', web)]:
         configured = output(['docker', 'image', 'inspect', '--format', '{{.Id}}', config['services'][service]['image']])
         if configured != row['Image']:
@@ -115,9 +142,9 @@ def properties():
         'const {prisma}=require("/app/dist/db");prisma.property.findMany({where:{isActive:true,deletedAt:null},select:{id:true,name:true,currency:true}}).then(rows=>console.log(JSON.stringify(rows))).catch(()=>{console.error("Cannot read property list");process.exitCode=1}).finally(()=>prisma.$disconnect())']))
 
 
-def ready(override):
-    run(compose(override) + ['up', '-d', '--no-deps', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'backend'])
-    run(compose(override) + ['up', '-d', '--no-deps', '--no-build', '--pull', 'never', 'web'])
+def ready():
+    run(compose() + ['up', '-d', '--no-deps', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', '120', 'backend'])
+    run(compose() + ['up', '-d', '--no-deps', '--no-build', '--pull', 'never', 'web'])
     run(['curl', '--retry', '5', '--retry-all-errors', '--retry-delay', '2', '--connect-timeout', '10',
          '--max-time', '20', '--fail', '--silent', '--show-error', 'https://diving.ssrsys.com/api/ready'])
 
@@ -127,18 +154,22 @@ def rollback(directory):
     if directory.parent != ROOT / 'backups' or not directory.name.startswith('iruveli-cents-'):
         raise RuntimeError('Invalid rollback records directory.')
     record = json.loads((directory / 'release.json').read_text())
-    if inspect(API)['Image'] not in [record['previousBackend'], record.get('candidateBackend')] or inspect(WEB)['Image'] != record['previousWeb']:
+    if inspect(API)['Image'] not in [record['previousBackend'], record['candidateBackend'], record['rollbackBackend']] or inspect(WEB)['Image'] != record['previousWeb']:
         raise RuntimeError('Running release changed; stop and review before rollback.')
     for name, expected in record['configHashes'].items():
-        if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != expected:
+        actual = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        allowed = [expected]
+        if name == 'compose.app.yaml':
+            allowed += [record['candidateConfigHash'], record['rollbackConfigHash']]
+        if actual not in allowed:
             raise RuntimeError('Base Compose configuration changed; review before rollback.')
-    rollback_file = directory / 'rollback.json'
-    write_json(rollback_file, image_override(record['previousBackend']))
-    run(compose(OVERRIDE if OVERRIDE.exists() else None) + ['stop', 'web', 'backend'])
-    ready(rollback_file)
-    # Keep a documented no-migration override for subsequent maintenance commands.
-    write_json(OVERRIDE, image_override(record['previousBackend']))
-    print('\nPrevious application image restored. No database restore or migration was run.')
+    rollback_file = directory / 'rollback.yaml'
+    if hashlib.sha256(rollback_file.read_bytes()).hexdigest() != record['rollbackConfigHash']:
+        raise RuntimeError('Rollback configuration checksum mismatch.')
+    run(compose() + ['stop', 'web', 'backend'])
+    select_app_config(rollback_file)
+    ready()
+    print('\nPrevious application code restored without running migrations.')
 
 
 def deploy(manifest, api, web):
@@ -167,9 +198,17 @@ def deploy(manifest, api, web):
     candidate_tag = 'dive-centre-backend:iruveli-cents-' + stamp.lower()
     base_tag = 'dive-centre-backend:iruveli-cents-base-' + api['Image'].split(':')[1][:12]
     run(['docker', 'image', 'tag', api['Image'], base_tag])
-    run(['docker', 'build', '--pull=false', '--network=none', '--build-arg', 'PRODUCTION_BACKEND_IMAGE=' + base_tag,
-         '-t', candidate_tag, str(HERE)])
+    build = ['docker', 'build', '--pull=false', '--network=none', '--build-arg', 'PRODUCTION_BACKEND_IMAGE=' + base_tag]
+    rollback_tag = candidate_tag + '-rollback'
+    run(build + ['--target', 'rollback', '-t', rollback_tag, str(HERE)])
+    run(build + ['--build-arg', 'IRUVELI_PROPERTY_ID=' + property_id, '--build-arg', 'IRUVELI_EFFECTIVE_DATE=' + date,
+                 '-t', candidate_tag, str(HERE)])
     candidate = output(['docker', 'image', 'inspect', '--format', '{{.Id}}', candidate_tag])
+    rollback_image = output(['docker', 'image', 'inspect', '--format', '{{.Id}}', rollback_tag])
+    for image in [candidate, rollback_image]:
+        launch = inspect(image)['Config']
+        if launch['Entrypoint'] != ['/app/entrypoint.sh'] or launch['Cmd'] != ['node', 'dist/index.js']:
+            raise RuntimeError('Backend image changed the startup command.')
     run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
          '--security-opt', 'no-new-privileges:true', '--entrypoint', 'node',
          '--mount', 'type=bind,src=' + str(HERE / 'smoke.cjs') + ',dst=/tmp/smoke.cjs,readonly', candidate, '/tmp/smoke.cjs'])
@@ -180,26 +219,27 @@ def deploy(manifest, api, web):
         run(['docker', 'exec', '-i', DB, 'pg_restore', '--list'], stdin=source, stdout=subprocess.DEVNULL)
     # Recheck scope after building and backing up, before any interruption.
     preflight(manifest)
-    record['candidateBackend'] = candidate
-    write_json(directory / 'release.json', record)
-    candidate_file = directory / 'candidate.json'
-    value = image_override(candidate, {'IRUVELI_COMMISSION_PROPERTY_ID': property_id, 'IRUVELI_COMMISSION_EFFECTIVE_DATE': date})
-    write_json(candidate_file, value)
+    record.update(candidateBackend=candidate, rollbackBackend=rollback_image)
+    original = (directory / 'compose.app.yaml').read_text()
     before = json.loads(output(compose() + ['config', '--format', 'json']))
-    after = json.loads(output(compose(candidate_file) + ['config', '--format', 'json']))
-    validate_candidate_config(before, after, candidate, value['services']['backend']['environment'])
+    for label, image in [('candidate', candidate), ('rollback', rollback_image)]:
+        path = directory / (label + '.yaml')
+        path.write_text(with_backend_image(original, image))
+        after = json.loads(output(compose(path) + ['config', '--format', 'json']))
+        validate_candidate_config(before, after, image)
+        record[label + 'ConfigHash'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    write_json(directory / 'release.json', record)
     print('Backup and rollback records:', directory)
     try:
         run(compose() + ['stop', 'web', 'backend'])
-        ready(candidate_file)
-        write_json(OVERRIDE, value)
+        select_app_config(directory / 'candidate.yaml')
+        ready()
         (directory / 'COMPLETE').write_text('Application patch healthy; no migrations run.\n')
     except BaseException:
         rollback(directory)
         raise
-    print('\nDeployment complete. Frontend, schema, and historical records were not changed.')
+    print('\nDeployment complete. Continue using the existing two Compose files.')
     print('Rollback: sudo python3', str(HERE / 'deploy.py'), 'rollback', str(directory))
-    print('Include -f', str(OVERRIDE), 'in future Compose maintenance commands.')
 
 
 def main():
