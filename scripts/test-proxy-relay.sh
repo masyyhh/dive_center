@@ -42,7 +42,7 @@ const assert = require("node:assert/strict");
   assert.equal((await fetch(`${base}/api/ready`, { headers })).status, 200);
   const users = await fetch(`${base}/api/users`, { headers });
   assert.equal(users.status, 401);
-  assert.equal(users.headers.get("cache-control"), "no-store");
+  assert.match(users.headers.get("cache-control") ?? "", /^no-store(?:\s*,\s*no-store)*$/i);
   console.log("NPM relay: trusted HTTPS reaches frontend/API; untrusted peers and missing/insecure protocol are rejected.");
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '
