@@ -11,7 +11,7 @@ function fixture(bills, { propertyId = 'iruveli', locks = [], people = staff, tr
   const prisma = {
     monthLock: { findMany: async () => locks },
     tankCommissionAllocation: { findMany: async ({ where }) => {
-      assert.equal(where.session.propertyId, 'iruveli');
+      assert.equal(where.session.propertyId, propertyId);
       assert.equal(where.session.status, 'APPROVED');
       assert(where.session.businessDate.gte >= '2026-11-24');
       return allocations;
@@ -76,7 +76,7 @@ test('historical payroll is identical and approved trip cents appear exactly onc
   const bills = ['2026-11-23', '2026-11-24'].map(day => bill(day, [line(day, 'COURSE_POOL', 10)]));
   const old = fixture(bills);
   const withTrips = fixture(bills, {
-    tripEnv: { TRIPS_PROPERTY_ID: 'iruveli', TRIPS_START_DATE: '2026-11-24' },
+    tripEnv: { TRIPS_ENABLED: 'true', TRIPS_START_DATE: '2026-11-24' },
     allocations: [{ id: 'trip-pay', staffId: 'a', amountCents: 34, role: 'Crew',
       session: { businessDate: '2026-11-24', boatName: 'Dhoni', activityType: 'Dive' } }],
   });
@@ -89,4 +89,20 @@ test('historical payroll is identical and approved trip cents appear exactly onc
   assert.equal(money.productCents(after.grandTotal) - money.productCents(before.grandTotal), 34);
   assert.equal(after.breakdownDetails.filter(row => row.kind === 'TANK').length, 1);
   assert.equal(after.breakdownDetails.reduce((sum, row) => sum + row.amountCents, 0), a.cents.totalCommission);
+});
+
+test('global Trips activation includes approved payouts for the requested property only', async () => {
+  const inOtherProperty = fixture([], {
+    propertyId: 'other',
+    tripEnv: { TRIPS_ENABLED: 'true', TRIPS_START_DATE: '2026-11-24' },
+    allocations: [{ id: 'other-trip', staffId: 'a', amountCents: 67, role: 'Crew',
+      session: { businessDate: '2026-11-24', boatName: 'Dhoni', activityType: 'Dive' } }],
+  });
+  const historical = await inOtherProperty('2026-11-23');
+  assert.equal(historical.grandTotal, 0);
+  assert.equal(historical.staffResults.find(row => row.staffId === 'a').tripsWorked, undefined);
+  const updated = await inOtherProperty('2026-11-24');
+  assert.equal(updated.grandTotal, 0.67);
+  assert.equal(updated.staffResults.find(row => row.staffId === 'a').tripsWorked, 1);
+  assert.equal(updated.calculationVersion, undefined);
 });
