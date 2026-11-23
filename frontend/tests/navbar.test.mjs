@@ -8,6 +8,7 @@ const require=createRequire(import.meta.url);
 function loadSource(file,stubs={},options={}){
  const source=readFileSync(new URL(file,import.meta.url),'utf8')
   .replaceAll('import.meta.env.VITE_DEPLOYMENT_MODE',JSON.stringify(options.mode??'live'))
+  .replaceAll('import.meta.env.VITE_TRIPS_ENABLED',JSON.stringify(options.tripsEnabled?'true':'false'))
   .replaceAll('import.meta.env.BASE_URL',JSON.stringify('/'));
  const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
  const module={exports:{}};
@@ -25,6 +26,7 @@ function fixture(options={}){
   '../context/NavigationContext':{useNavigation:()=>({requestNavigation:action=>{calls.push('guard');action();}})},
   './SubNav':{navLabels:{'new-bill':'New bill'}},
   '../utils/propertyPresentation':presentation,
+  '../utils/tripsAvailability':loadSource('../src/utils/tripsAvailability.ts',{},options),
   '../features':{waterSportsEnabled:true},
   react:{...React,useEffect:()=>{},useRef:()=>({current:null})},
  };
@@ -35,6 +37,16 @@ function fixture(options={}){
 }
 const nodes=node=>Array.isArray(node)?node.flatMap(nodes):!React.isValidElement(node)?[]:[node,...nodes(node.props.children)];
 const byLabel=(tree,label)=>nodes(tree).find(node=>node.props['aria-label']===label);
+test('Trips & Tanks appears for each selected property when the release flag is on',()=>{
+ for(const propertyName of ['Iru Veli','Siyam World']){
+  const findTrips=tree=>nodes(tree).find(node=>node.type==='button' &&
+    nodes(node).some(child=>child.type==='span' && child.props.children==='Trips & Tanks'));
+  const enabled=fixture({sidebar:true,propertyName,tripsEnabled:true});
+  findTrips(enabled.tree).props.onClick();
+  assert.deepEqual(enabled.calls,['trips','close']);
+  assert.equal(findTrips(fixture({sidebar:true,propertyName}).tree),undefined);
+ }
+});
 test('navbar workspace actions invoke their existing callbacks in live and testing',()=>{
  for(const mode of ['live','testing']){
   const f=fixture({mode});
