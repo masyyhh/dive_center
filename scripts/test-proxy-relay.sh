@@ -16,7 +16,7 @@ compose up -d --no-deps --wait --wait-timeout 120 backend web
 backend_container=$(compose ps -q backend)
 # Inspect the actual host bindings. An exposed container port can exist in
 # NetworkSettings.Ports with a null binding when it is not published.
-binding_count=$(docker inspect --format '{{len (index .NetworkSettings.Ports "5001/tcp")}}' "$backend_container")
+binding_count=$(docker inspect --format '{{with index .NetworkSettings.Ports "5001/tcp"}}{{len .}}{{else}}0{{end}}' "$backend_container")
 [ "$binding_count" = 0 ] || { echo 'Relay mode must not publish the Node port.' >&2; exit 1; }
 # A direct client cannot bypass the NPM check with forged proxy headers.
 status=$(curl --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null -w '%{http_code}' \
