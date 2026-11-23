@@ -1,12 +1,13 @@
+import { tripsAvailable } from '../utils/tripsAvailability';
 import React, { useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useProperty } from '../context/PropertyContext';
 import { isSiyamWorld } from '../utils/propertyPresentation';
 import { waterSportsEnabled } from '../features';
-import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X, Keyboard, ArrowLeft, Package } from 'lucide-react';
+import { LayoutDashboard, Plus, Receipt, CalendarCheck, BarChart3, Settings, Waves, ArrowUpRight, X, Keyboard, ArrowLeft, Package, Anchor } from 'lucide-react';
 
-export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin' | 'dive-centre' | 'equipment';
-export const navLabels: Record<NavTab, string> = { home: 'Overview', equipment: 'Equipment rentals', 'dive-centre': 'Disclaimer', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
+export type NavTab = 'home' | 'new-bill' | 'bills' | 'presence' | 'reporting' | 'admin' | 'dive-centre' | 'equipment' | 'trips';
+export const navLabels: Record<NavTab, string> = { home: 'Overview', trips: 'Trips & Tanks', equipment: 'Equipment rentals', 'dive-centre': 'Disclaimer', 'new-bill': 'New bill', bills: 'Bills', presence: 'Attendance', reporting: 'Reports & payroll', admin: 'Administration' };
 interface SubNavProps { currentTab: NavTab; onTabChange: (tab: NavTab) => void; open: boolean; onClose: () => void; onShortcuts: () => void; catalogue?: { width: number; onResize: (width: number) => void }; }
 
 export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, onClose, onShortcuts, catalogue }) => {
@@ -37,6 +38,7 @@ export const SubNav: React.FC<SubNavProps> = ({ currentTab, onTabChange, open, o
   const items = [
     { id: 'home' as NavTab, icon: LayoutDashboard }, { id: 'bills' as NavTab, icon: Receipt },
     ...(waterSportsEnabled ? [{ id: 'dive-centre' as NavTab, icon: Waves }, { id: 'equipment' as NavTab, icon: Package }] : []),
+    ...(tripsAvailable(activeProperty?.id) ? [{ id: 'trips' as NavTab, icon: Anchor }] : []),
     { id: 'presence' as NavTab, icon: CalendarCheck }, { id: 'reporting' as NavTab, icon: BarChart3 },
   ];
   const navigate = (tab: NavTab) => { onTabChange(tab); onClose(); };

@@ -8,8 +8,8 @@ const money = (value: number) => value.toLocaleString('en-US', { minimumFraction
 const column = (label: string, width = 78, numeric = false, minWidth?: number, align?: 'left' | 'center' | 'right') => ({ label, width, numeric, minWidth, align });
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 const amounts = (values: [string, number][]) => values.map(([label, value]) => `${label}: ${money(value)}`).join('\n');
-const staffBreakdown = (row: { courseCommission: number; diveCommission: number; overrideCommission: number; personalCommission: number }) => {
-  const components: [string, number][] = [['Course', row.courseCommission], ['Dive', row.diveCommission], ['Override', row.overrideCommission], ['Personal', row.personalCommission]];
+const staffBreakdown = (row: { courseCommission: number; diveCommission: number; overrideCommission: number; personalCommission: number; tankCommission?: number }) => {
+  const components: [string, number][] = [['Course', row.courseCommission], ['Dive', row.diveCommission], ['Override', row.overrideCommission], ['Personal', row.personalCommission], ['Tank', row.tankCommission ?? 0]];
   return amounts(components.filter(([, value]) => value !== 0)) || 'No commission';
 };
 
@@ -104,6 +104,7 @@ export async function generateReportPdf(propertyId: string, period: string, mont
   const staffTotals = {
     courseCommission: sum(staffRows.map(row => row.courseCommission)), diveCommission: sum(staffRows.map(row => row.diveCommission)),
     overrideCommission: sum(staffRows.map(row => row.overrideCommission)), personalCommission: sum(staffRows.map(row => row.personalCommission)),
+    tankCommission: sum(staffRows.map(row => row.tankCommission ?? 0)),
     tipsCommission: sum(staffRows.map(row => row.tipsCommission)), totalCommission: sum(staffRows.map(row => row.totalCommission)),
   };
   tables.push({ title: 'Staff payments', singleTable: true,

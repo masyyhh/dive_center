@@ -41,6 +41,10 @@ model Property {
   waterSportsDocuments WaterSportsDocument[]
   waterSportsSessions WaterSportsSession[]
   waterSportsRecords WaterSportsRecord[]
+  tankCommissionSettings TankCommissionSettings?
+  tankResources TankResource[]
+  tankCommissionRules TankCommissionRule[]
+  tankSessions TankSession[]
 }
 
 model User {
@@ -129,6 +133,115 @@ model StaffMember {
   videoLines            BillItem[]    @relation("VideoStaff")
 
   @@index([propertyId, isActive])
+  tankAllocations TankCommissionAllocation[]
+}
+
+model TankCommissionSettings {
+  propertyId String @id
+  restricted Boolean @default(false)
+  version Int @default(1)
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+}
+
+model TankResource {
+  id String @id @default(uuid())
+  propertyId String
+  kind String // BOAT or SITE
+  name String
+  normalizedName String
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  boatTrips TankSession[] @relation("TripBoat")
+  siteVisits TankSessionSite[]
+  @@unique([propertyId, kind, normalizedName])
+}
+
+model TankCommissionRule {
+  id String @id @default(uuid())
+  propertyId String
+  name String
+  activityType String
+  boatId String?
+  effectiveFrom String
+  effectiveTo String?
+  isActive Boolean @default(true)
+  configJson String
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  @@index([propertyId, isActive])
+}
+
+model TankSession {
+  id String @id @default(uuid())
+  propertyId String
+  requestId String
+  businessDate String
+  departureTime String?
+  activityType String
+  boatId String?
+  boatName String?
+  diveSitesJson String @default("[]")
+  tanks Int @default(0)
+  passengers Int @default(0)
+  dives Int @default(0)
+  gearWash Int @default(0)
+  isComplimentary Boolean @default(false)
+  isTraining Boolean @default(false)
+  manualTotalCents Int?
+  participantsJson String @default("[]")
+  ruleId String?
+  overrideJson String?
+  overrideReason String?
+  notes String?
+  status String @default("DRAFT")
+  snapshotJson String?
+  totalCents Int?
+  unallocatedCents Int?
+  createdById String
+  approvedById String?
+  approvedAt DateTime?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  boat TankResource? @relation("TripBoat", fields: [boatId], references: [id], onDelete: Restrict)
+  sites TankSessionSite[]
+  allocations TankCommissionAllocation[]
+  @@unique([propertyId, requestId])
+  @@index([propertyId, businessDate, status])
+  @@map("dive_trips")
+}
+
+model TankSessionSite {
+  sessionId String
+  siteId String
+  position Int
+  session TankSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  site TankResource @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  @@id([sessionId, siteId])
+  @@unique([sessionId, position])
+  @@index([siteId])
+  @@map("dive_trip_sites")
+}
+
+model TankCommissionAllocation {
+  id String @id @default(uuid())
+  sessionId String
+  staffId String
+  staffName String
+  staffRoleTitle String
+  role String
+  amountCents Int
+  session TankSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  @@unique([sessionId, staffId])
+  @@index([staffId])
+  @@map("trip_crew_assignments")
 }
 
 model Category {

@@ -90,6 +90,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
     { header: `Base Leader Override (${currency})`, key: 'overrideCommission', width: 24 },
     { header: `Tips (${currency})`, key: 'tipsCommission', width: 14 },
     { header: `Personal (${currency})`, key: 'personalCommission', width: 16 },
+    ...(staffResults.some(row => row.tripsWorked) ? [{ header: `Tank (${currency})`, key: 'tankCommission', width: 16 }] : []),
     { header: `Total Pay (${currency})`, key: 'totalCommission', width: 16 },
   ];
   styleReportHeader(commSheet, 'FF0D9488');
@@ -103,6 +104,7 @@ export const generateDailyExcelReport = async (propertyId: string, date: string)
       overrideCommission: c.overrideCommission.toFixed(2),
       tipsCommission: c.tipsCommission.toFixed(2),
       personalCommission: c.personalCommission.toFixed(2),
+      tankCommission: (c.tankCommission ?? 0).toFixed(2),
       totalCommission: c.totalCommission.toFixed(2),
     });
   }

@@ -1,0 +1,221 @@
+/* Boats & sites follows the shared Administration panel and control styles. */
+.trip-resources .resource-heading,
+.resource-list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.trip-resources h3 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.trip-resources p:not(.notice):not(.field-error) {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.resource-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--soft);
+  border-radius: 8px;
+}
+.resource-category {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.resource-category small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.resource-add-card,
+.resource-list-card {
+  padding: 20px;
+}
+.resource-add-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+.resource-name-field {
+  flex: 1;
+  min-width: 0;
+}
+.resource-name-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.resource-name-field input {
+  width: 100%;
+  min-height: 42px;
+}
+.resource-add-form > button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+.resource-result-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.resource-list-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-block: 18px;
+}
+.resource-search {
+  flex: 1;
+  min-width: 0;
+}
+.resource-search input {
+  width: 100%;
+  min-height: 40px;
+}
+.resource-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.resource-filter select {
+  min-height: 40px;
+  color: var(--ink);
+}
+.resource-column-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.resource-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.resource-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.resource-row:last-child {
+  border-bottom: 0;
+}
+.resource-row-name {
+  min-width: 0;
+}
+.resource-row-name strong {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.resource-row-name div > span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.resource-switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  padding: 3px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--muted);
+  transition: background 0.15s;
+}
+.resource-switch > span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 0.15s;
+}
+.resource-switch[aria-checked='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.resource-switch[aria-checked='true'] > span {
+  transform: translateX(18px);
+}
+.resource-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.resource-switch:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.resource-empty {
+  padding: 32px 16px;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.resource-empty strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+@media (max-width: 640px) {
+  .resource-category {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .resource-add-card,
+  .resource-list-card {
+    padding: 16px;
+  }
+  .resource-add-form,
+  .resource-list-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .resource-add-form > button {
+    justify-content: center;
+  }
+  .resource-filter {
+    justify-content: space-between;
+  }
+  .resource-filter select {
+    flex: 1;
+  }
+  .resource-list-heading {
+    align-items: flex-start;
+  }
+  .resource-column-head {
+    padding-inline: 0;
+  }
+  .resource-row {
+    padding-inline: 0;
+  }
+}

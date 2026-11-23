@@ -185,6 +185,8 @@ export interface StaffCommissionResult {
   overrideCommission: number;
   tipsCommission: number;
   personalCommission: number;
+  tankCommission?: number;
+  tripsWorked?: number;
   totalCommission: number;
 }
 
@@ -209,7 +211,7 @@ interface PayrollBreakdownDetail {
   businessDate: string;
   itemName: string;
   quantity: number | null;
-  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL';
+  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL' | 'TANK';
   basisAmount: number;
   recipientCount: number;
   factor: number;

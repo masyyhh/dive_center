@@ -1,3 +1,4 @@
+import { tripsAvailable, tripsStartDate } from '../utils/tripsAvailability';
 import { isBusinessDate } from '../utils/dates';
 import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
@@ -18,6 +19,8 @@ export interface StaffCommissionResult {
   tipsCommission: number;
   personalCommission: number;
   totalCommission: number;
+  tankCommission?: number;
+  tripsWorked?: number;
   /** Present only when the period includes Iruveli's cent-based calculation. */
   cents?: CommissionCents;
 }
@@ -44,7 +47,7 @@ export interface CommissionBreakdownDetail {
   businessDate: string;
   itemName: string;
   quantity: number | null;
-  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL';
+  kind: 'COURSE_POOL' | 'DIVE_POOL' | 'OVERRIDE' | 'TIPS' | 'PERSONAL' | 'TANK';
   basisAmount: number;
   recipientCount: number;
   factor: number;
@@ -427,7 +430,7 @@ export const calculateCommissionForPeriod = async (
   }
 
   // Calculate totals and round figures to 2 decimal places
-  const staffResults = Array.from(commissionMap.values())
+  const staffResults: StaffCommissionResult[] = Array.from(commissionMap.values())
     .map((r) => {
       const total =
         r.courseCommission +
@@ -454,7 +457,56 @@ export const calculateCommissionForPeriod = async (
     })
     .sort((a, b) => b.totalCommission - a.totalCommission);
 
-  const grandTotal = hasCentDates ? addCents(...staffResults.map(row => row.cents!.totalCommission)) / 100 : staffResults.reduce((acc, curr) => acc + curr.totalCommission, 0);
+  let tankCents = 0;
+  if (tripsAvailable(propertyId) && endDate >= tripsStartDate) {
+    const allocations = await prisma.tankCommissionAllocation.findMany({
+      where: { session: {
+        propertyId,
+        status: 'APPROVED',
+        businessDate: { gte: startDate > tripsStartDate ? startDate : tripsStartDate, lte: endDate },
+      } },
+      include: { session: { select: { businessDate: true, boatName: true, activityType: true } } },
+    });
+    const byStaff = new Map<string, { cents: number; trips: number }>();
+    const rows = new Map(staffResults.map(row => [row.staffId, row]));
+    for (const allocation of allocations) {
+      const amount = byStaff.get(allocation.staffId) ?? { cents: 0, trips: 0 };
+      amount.cents = addCents(amount.cents, allocation.amountCents);
+      amount.trips++;
+      byStaff.set(allocation.staffId, amount);
+      if (!rows.has(allocation.staffId)) {
+        const row: StaffCommissionResult = {
+          staffId: allocation.staffId, staffName: allocation.staffName, roleTitle: allocation.staffRoleTitle,
+          courseCommission: 0, diveCommission: 0, overrideCommission: 0, tipsCommission: 0,
+          personalCommission: 0, totalCommission: 0,
+        };
+        rows.set(row.staffId, row);
+        staffResults.push(row);
+      }
+      if (allocation.staffId === detailStaffId) {
+        const value = allocation.amountCents / 100;
+        breakdownDetails.push({
+          id: allocation.id, billId: '', billItemId: null, checkNumber: 0,
+          businessDate: allocation.session.businessDate,
+          itemName: allocation.session.boatName ?? allocation.session.activityType,
+          quantity: null, kind: 'TANK', explanation: 'Saved trip commission for ' + allocation.role,
+          basisAmount: value, recipientCount: 1, factor: 1, amount: value, amountCents: allocation.amountCents,
+        });
+      }
+    }
+    for (const [staffId, amount] of byStaff) {
+      const row = rows.get(staffId)!;
+      row.tankCommission = amount.cents / 100;
+      row.tripsWorked = amount.trips;
+      const total = addCents(row.cents?.totalCommission ?? productCents(row.totalCommission), amount.cents);
+      row.totalCommission = total / 100;
+      if (row.cents) row.cents.totalCommission = total;
+      tankCents = addCents(tankCents, amount.cents);
+    }
+    if (allocations.length) staffResults.sort((a, b) => b.totalCommission - a.totalCommission);
+  }
+
+  const grandTotal = hasCentDates || tankCents > 0 ? addCents(...staffResults.map(row => row.cents?.totalCommission ?? productCents(row.totalCommission))) / 100 : staffResults.reduce((acc, curr) => acc + curr.totalCommission, 0);
 
   return {
     staffResults,
@@ -464,6 +516,6 @@ export const calculateCommissionForPeriod = async (
     storeAttendantPoolTotal: hasCentDates ? addCents(productCents(Math.round(storeAttendantPoolTotal * 100) / 100), retailCents) / 100 : Math.round(storeAttendantPoolTotal * 100) / 100,
     unallocatedStoreAttendantPoolTotal: hasCentDates ? addCents(productCents(Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100), unallocatedRetailCents) / 100 : Math.round(unallocatedStoreAttendantPoolTotal * 100) / 100,
     ...(hasCentDates ? { calculationVersion: 'IRUVELI_CENTS_V1' as const, unallocatedCommissions } : {}),
-    grandTotal: hasCentDates ? grandTotal : Math.round(grandTotal * 100) / 100,
+    grandTotal: hasCentDates || tankCents > 0 ? grandTotal : Math.round(grandTotal * 100) / 100,
   };
 };

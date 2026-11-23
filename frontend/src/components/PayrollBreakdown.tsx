@@ -4,7 +4,7 @@ import { apiFetch } from '../services/api';
 import { PayrollBreakdownData } from '../types';
 import { formatMoney } from '../utils/format';
 import { displayDate } from '../utils/dates';
-const channelNames = { COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', OVERRIDE: 'Base-leader override', TIPS: 'Tips', PERSONAL: 'Employee payment' };
+const channelNames = { COURSE_POOL: 'Course pool', DIVE_POOL: 'Dive pool', OVERRIDE: 'Base-leader override', TIPS: 'Tips', PERSONAL: 'Employee payment', TANK: 'Tank commission' };
 
 export const PayrollBreakdown: React.FC<{ propertyId: string; staffId: string; startDate: string; endDate: string; currencySymbol: string; onClose: () => void }> = ({ propertyId, staffId, startDate, endDate, currencySymbol, onClose }) => {
   const [data, setData] = useState<PayrollBreakdownData | null>(null);
@@ -33,7 +33,7 @@ export const PayrollBreakdown: React.FC<{ propertyId: string; staffId: string; s
         <p className="text-xs text-slate-500">Pool shares use eligible staff and attendance on each business date. Certifications are not paid to staff. Saved pool contributions preserve locked payroll rules.</p>
         <ol className="payroll-breakdown-list">{data.details.map(detail => <li key={detail.id}>
           <div className="flex flex-wrap justify-between gap-2"><strong>{detail.itemName}</strong><strong>{money(detail.amount)}</strong></div>
-          <div className="payroll-breakdown-meta">Check #{detail.checkNumber} · {displayDate(detail.businessDate)} · {channelNames[detail.kind]}</div>
+          <div className="payroll-breakdown-meta">{detail.kind === 'TANK' ? 'Trip' : detail.checkNumber ? `Check #${detail.checkNumber}` : 'Daily pool'} · {displayDate(detail.businessDate)} · {channelNames[detail.kind]}</div>
           <p>{detail.kind === 'PERSONAL' ? `${preciseMoney(detail.unitRate ?? 0)} × ${detail.quantity} service unit(s)` : `${preciseMoney(detail.basisAmount)}${detail.factor !== 1 ? ` × ${detail.factor * 100}%` : ''} ÷ ${detail.recipientCount} eligible employee${detail.recipientCount === 1 ? '' : 's'}`} = {money(detail.amount)}</p>
           <small>{detail.explanation}</small>
         </li>)}</ol>

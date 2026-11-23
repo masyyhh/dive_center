@@ -6,10 +6,16 @@ const staff = ['c', 'b', 'a'].map(id => ({ id, name: id, roleTitle: 'Instructor'
   isActive: true, isDiveStaff: true, isCoursePoolSharing: true, isDivePoolSharing: true, isBaseLeaderOverride: true }));
 const line = (id, poolTypeSnapshot, poolContributionAmount, extra = {}) => ({ id, itemName: id, quantity: 1, poolTypeSnapshot, poolContributionAmount, ...extra });
 const bill = (date, items, extra = {}) => ({ id: date, businessDate: date, checkNumber: 1, tipAmount: 0, items, ...extra });
-function fixture(bills, { propertyId = 'iruveli', locks = [], people = staff } = {}) {
-  const env = { ...process.env, IRUVELI_COMMISSION_PROPERTY_ID: 'iruveli', IRUVELI_COMMISSION_EFFECTIVE_DATE: '2026-11-17' };
+function fixture(bills, { propertyId = 'iruveli', locks = [], people = staff, tripEnv = {}, allocations = [] } = {}) {
+  const env = { ...process.env, IRUVELI_COMMISSION_PROPERTY_ID: 'iruveli', IRUVELI_COMMISSION_EFFECTIVE_DATE: '2026-11-17', ...tripEnv };
   const prisma = {
     monthLock: { findMany: async () => locks },
+    tankCommissionAllocation: { findMany: async ({ where }) => {
+      assert.equal(where.session.propertyId, 'iruveli');
+      assert.equal(where.session.status, 'APPROVED');
+      assert(where.session.businessDate.gte >= '2026-11-24');
+      return allocations;
+    } },
     staffMember: { findMany: async () => people },
     attendance: { findMany: async ({ where }) => [...new Set(bills.map(row => row.businessDate))].filter(date => date >= where.date.gte && date <= where.date.lte).flatMap(date => people.map(row => ({ date, staffMemberId: row.id, status: 'PRESENT' }))) },
   };
@@ -60,8 +66,27 @@ test('no recipients preserves unallocated balances and personal rates are full p
   assert.equal(paid.grandTotal, 2.02);
   assert.deepEqual(paid.personalDetails.map(row => row.amountCents), [101, 101]);
 });
-test('backport never references new Prisma models, schema fields or migrations', () => {
+test('payroll continues to use the live property configuration without capability columns', () => {
   const fs = require('node:fs'), path = require('node:path');
   const source = fs.readFileSync(path.join(__dirname, '../src/services/commissionService.ts'), 'utf8');
-  for (const forbidden of ['tankCommissionAllocation', 'reportLayout', 'baseLeaderOverrideBasis']) assert(!source.includes(forbidden));
+  for (const forbidden of ['reportLayout', 'baseLeaderOverrideBasis']) assert(!source.includes(forbidden));
+});
+
+test('historical payroll is identical and approved trip cents appear exactly once after rollout', async () => {
+  const bills = ['2026-11-23', '2026-11-24'].map(day => bill(day, [line(day, 'COURSE_POOL', 10)]));
+  const old = fixture(bills);
+  const withTrips = fixture(bills, {
+    tripEnv: { TRIPS_PROPERTY_ID: 'iruveli', TRIPS_START_DATE: '2026-11-24' },
+    allocations: [{ id: 'trip-pay', staffId: 'a', amountCents: 34, role: 'Crew',
+      session: { businessDate: '2026-11-24', boatName: 'Dhoni', activityType: 'Dive' } }],
+  });
+  assert.deepEqual(await withTrips('2026-11-23'), await old('2026-11-23'));
+  const before = await old('2026-11-23', '2026-11-24');
+  const after = await withTrips('2026-11-23', '2026-11-24');
+  const a = after.staffResults.find(row => row.staffId === 'a');
+  assert.equal(a.tankCommission, 0.34);
+  assert.equal(a.tripsWorked, 1);
+  assert.equal(money.productCents(after.grandTotal) - money.productCents(before.grandTotal), 34);
+  assert.equal(after.breakdownDetails.filter(row => row.kind === 'TANK').length, 1);
+  assert.equal(after.breakdownDetails.reduce((sum, row) => sum + row.amountCents, 0), a.cents.totalCommission);
 });

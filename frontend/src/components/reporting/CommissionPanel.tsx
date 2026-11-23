@@ -11,6 +11,7 @@ interface CommissionPanelProps extends ReportPanelProps {
   setBreakdownStaffId: (staffId: string) => void;
 }
 export function CommissionPanel({ report, currencySymbol, downloadChartCsv, loading, recomputing, handleRecompute, setBreakdownStaffId }: CommissionPanelProps) {
+  const showTrips = report?.staffCommissions.some(row => row.tripsWorked !== undefined) ?? false;
   return (
 <section id="panel-commissions" role="tabpanel" aria-labelledby="tab-commissions" className="space-y-6"><div className="section-toolbar">
             {/* Recompute Commission Button (PDF Page 6) */}
@@ -41,7 +42,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
             onClick={() =>
               downloadChartCsv(
                 'Staff_Commission',
-                ['Staff Name', 'Role', 'Course Pool', 'Dive Pool', 'Override', 'Tips', 'Personal', 'Total'],
+                ['Staff Name', 'Role', 'Course Pool', 'Dive Pool', 'Override', 'Tips', 'Personal', ...(showTrips ? ['Trips worked', 'Tank commission'] : []), 'Total'],
                 (report?.staffCommissions || []).map((s) => [
                   s.staffName,
                   s.roleTitle,
@@ -50,6 +51,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
                   s.overrideCommission,
                   s.tipsCommission,
                   s.personalCommission,
+                  ...(showTrips ? [s.tripsWorked ?? 0, s.tankCommission ?? 0] : []),
                   s.totalCommission,
                 ])
               )
@@ -72,6 +74,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
                 <th className="py-3 px-4">BL Override (+10%)</th>
                 <th className="py-3 px-4">Tips Share</th>
                 <th className="py-3 px-4">Personal</th>
+                {showTrips && <><th className="py-3 px-4">Trips worked</th><th className="py-3 px-4">Tank commission</th></>}
                 <th className="py-3 px-4 font-bold text-slate-900 dark:text-white">Total commission</th>
                 <th className="py-3 px-4">Breakdown</th>
               </tr>
@@ -107,6 +110,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
                     <td className="py-3 px-4 font-mono font-medium">
                       {formatMoney(s.personalCommission, currencySymbol)}
                     </td>
+                    {showTrips && <><td className="py-3 px-4">{s.tripsWorked ?? 0}</td><td className="py-3 px-4">{formatMoney(s.tankCommission ?? 0, currencySymbol)}</td></>}
                     <td className="py-3 px-4 font-mono font-bold text-teal-600 dark:text-teal-400 text-sm">
                       {formatMoney(s.totalCommission, currencySymbol)}
                     </td>
@@ -115,7 +119,7 @@ export function CommissionPanel({ report, currencySymbol, downloadChartCsv, load
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                  <td colSpan={showTrips ? 11 : 9} className="py-8 text-center text-slate-400">
                     No staff commission recorded for this date range.
                   </td>
                 </tr>

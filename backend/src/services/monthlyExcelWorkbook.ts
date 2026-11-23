@@ -89,6 +89,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
     { header: `Base Leader Override (${currency})`, key: 'override', width: 22 },
     { header: `Tips (${currency})`, key: 'tips', width: 14 },
     { header: `Personal (${currency})`, key: 'personal', width: 16 },
+    ...(staffResults.some(row => row.tripsWorked) ? [{ header: `Tank (${currency})`, key: 'tank', width: 16 }] : []),
     { header: `Total Pay (${currency})`, key: 'total', width: 16 },
   ];
   styleReportHeader(commSheet, 'FF1E293B');
@@ -102,6 +103,7 @@ export const generateMonthlyExcelWorkbook = async (propertyId: string, yearMonth
       override: s.overrideCommission.toFixed(2),
       tips: s.tipsCommission.toFixed(2),
       personal: s.personalCommission.toFixed(2),
+      tank: (s.tankCommission ?? 0).toFixed(2),
       total: s.totalCommission.toFixed(2),
     });
   }

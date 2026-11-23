@@ -1,3 +1,4 @@
+import { tankRouter } from './routes/tank.routes';
 import { disclaimerTestGuestsEnabled } from './services/disclaimerTesting';
 import { requestInputBudget } from './utils/validation';
 import { auditApiActivity } from './middleware/audit';
@@ -77,6 +78,7 @@ if (diveCentreEnabled) {
 app.use('/api/bills', billsRouter);
 app.use('/api/presence', presenceRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/tank-commission', tankRouter);
 app.use('/api/audit', auditRouter);
 
 // Never return internal exception details in production.

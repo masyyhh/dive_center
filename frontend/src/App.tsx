@@ -1,3 +1,4 @@
+import { tripsAvailable } from './utils/tripsAvailability';
 import { AuthenticatorSetupView } from './components/AuthenticatorSetupView';
 import { Modal } from './components/Modal';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
@@ -21,6 +22,7 @@ const NewBillView = lazy(() => import('./components/NewBillView').then(module =>
 const BillsView = lazy(() => import('./components/BillsView').then(module => ({ default: module.BillsView })));
 const PresenceView = lazy(() => import('./components/PresenceView').then(module => ({ default: module.PresenceView })));
 const ReportingView = lazy(() => import('./components/ReportingView').then(module => ({ default: module.ReportingView })));
+const TankCommissionView = lazy(() => import('./components/TankCommissionView').then(module => ({ default: module.TankCommissionView })));
 const AdminView = lazy(() => import('./components/AdminView').then(module => ({ default: module.AdminView })));
 import { TestingLoginView } from './components/TestingLoginView';
 import { LoginView } from './components/LoginView';
@@ -132,6 +134,7 @@ export const AppContent: React.FC = () => {
           {currentTab === 'new-bill' && <>{!isSiyamWorld(activeProperty) && <div className="page-heading"><span className="eyebrow">FRONT DESK</span><h1>Create a bill</h1></div>}<NewBillView onSetup={() => navigate('admin', 'items')} onBillSaved={check => { if (!isSiyamWorld(activeProperty)) { setSavedBill(check); commitRoute('bills'); } }} /></>}
           {currentTab === 'bills' && <BillsView onSetup={() => navigate('admin', 'items')} section={section} savedCheck={savedBill} onDismissSaved={() => setSavedBill(null)} />}
           {currentTab === 'presence' && <PresenceView initialDate={section} onSetup={() => navigate('admin', 'staff')} onPayroll={() => navigate('reporting', 'exports')} />}
+          {currentTab === 'trips' && (tripsAvailable(activeProperty?.id) ? <TankCommissionView /> : <div className="empty-state"><h1>Trips &amp; Tanks is unavailable at this property</h1></div>)}
           {currentTab === 'reporting' && <ReportingView section={section} onSectionChange={value => navigate('reporting', value)} />}
           {currentTab === 'admin' && (canAdmin ? <AdminView section={section} onSectionChange={value => navigate('admin', value)} /> : <div className="empty-state"><h1>Administrator access required</h1><p>Contact your property manager for help with workspace settings.</p></div>)}
         </Suspense>}
