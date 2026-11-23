@@ -9,7 +9,7 @@ const bill = (date, items, extra = {}) => ({ id: date, businessDate: date, check
 function fixture(bills, { propertyId = 'iruveli', locks = [], people = staff, tripEnv = {}, allocations = [] } = {}) {
   const env = { ...process.env, IRUVELI_COMMISSION_PROPERTY_ID: 'iruveli', IRUVELI_COMMISSION_EFFECTIVE_DATE: '2026-11-17', ...tripEnv };
   const prisma = {
-    monthLock: { findMany: async () => locks },
+    monthLock: { findMany: async ({ where }) => locks.filter(lock => !lock.lockedAt || lock.lockedAt < where.lockedAt.lt) },
     tankCommissionAllocation: { findMany: async ({ where }) => {
       assert.equal(where.session.propertyId, propertyId);
       assert.equal(where.session.status, 'APPROVED');
@@ -86,9 +86,28 @@ test('historical payroll is identical and approved trip cents appear exactly onc
   const a = after.staffResults.find(row => row.staffId === 'a');
   assert.equal(a.tankCommission, 0.34);
   assert.equal(a.tripsWorked, 1);
-  assert.equal(money.productCents(after.grandTotal) - money.productCents(before.grandTotal), 34);
+  // Trip earnings add 34 cents and the new dive-only basis removes $1
+  // of override on the post-rollout $10 course pool.
+  assert.equal(money.productCents(after.grandTotal) - money.productCents(before.grandTotal), -66);
   assert.equal(after.breakdownDetails.filter(row => row.kind === 'TANK').length, 1);
   assert.equal(after.breakdownDetails.reduce((sum, row) => sum + row.amountCents, 0), a.cents.totalCommission);
+});
+
+test('only Iru Veli switches to the dive pool from rollout in a mixed period', async () => {
+  const bills = ['2026-11-23', '2026-11-24'].map(day => bill(day, [
+    line(day + '-course', 'COURSE_POOL', 10), line(day + '-dive', 'DIVE_POOL', 3),
+  ]));
+  const tripEnv = { TRIPS_ENABLED: 'true', TRIPS_START_DATE: '2026-11-24' };
+  const result = await fixture(bills, { tripEnv })('2026-11-23', '2026-11-24');
+  assert.equal(result.staffResults.reduce((sum, row) => sum + row.cents.overrideCommission, 0), 160);
+  const newOverride = result.breakdownDetails.find(row => row.kind === 'OVERRIDE' && row.businessDate === '2026-11-24');
+  assert.deepEqual(newOverride.sourceBillItemIds, ['2026-11-24-dive']);
+  const other = await fixture(bills, { tripEnv, propertyId: 'other' })('2026-11-24');
+  assert(other.staffResults.every(row => row.overrideCommission === 0.43));
+  const locked = await fixture(bills, { tripEnv, locks: [
+    { yearMonth: '2026-11', lockedAt: new Date('2026-11-23T12:00:00Z') },
+  ] })('2026-11-24');
+  assert.equal(locked.staffResults.reduce((sum, row) => sum + row.cents.overrideCommission, 0), 130);
 });
 
 test('global Trips activation includes approved payouts for the requested property only', async () => {

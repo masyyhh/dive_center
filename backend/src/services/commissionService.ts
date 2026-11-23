@@ -71,9 +71,8 @@ export const calculateCommissionForPeriod = async (
   detailStaffId?: string,
   preloadedBills?: CommissionBill[]
 ) => {
-  // Explicit property ID scopes the schema-free backport. Preserve production's
-  // existing 10% override on course + dive pools; this release changes rounding only.
-  const diveOnlyOverride = false;
+  // Keep historical override amounts and apply Iru Veli's dive-only policy
+  // only from the Trips & Tanks rollout, outside previously locked months.
   if (process.env.IRUVELI_COMMISSION_PROPERTY_ID === propertyId && (!isBusinessDate(IRUVELI_CENTS_EFFECTIVE_DATE) || IRUVELI_CENTS_EFFECTIVE_DATE < '2026-11-17')) throw new Error('Invalid Iruveli rollout date.');
   const iruveliCents = process.env.IRUVELI_COMMISSION_PROPERTY_ID === propertyId && endDate >= IRUVELI_CENTS_EFFECTIVE_DATE;
   // Locks finalized before rollout retain legacy results. Locking new payroll must
@@ -81,6 +80,9 @@ export const calculateCommissionForPeriod = async (
   const locks = iruveliCents ? await prisma.monthLock.findMany({ where: { propertyId, isLocked: true, lockedAt: { lt: new Date(`${IRUVELI_CENTS_EFFECTIVE_DATE}T00:00:00+05:00`) }, yearMonth: { gte: startDate.slice(0, 7), lte: endDate.slice(0, 7) } }, select: { yearMonth: true } }) : [];
   const lockedMonths = new Set(locks.map(lock => lock.yearMonth));
   const usesCents = (date: string) => iruveliCents && date >= IRUVELI_CENTS_EFFECTIVE_DATE && !lockedMonths.has(date.slice(0, 7));
+  const useNewOverride = iruveliCents && tripsAvailable(propertyId) && endDate >= tripsStartDate;
+  const overrideLocks = useNewOverride ? await prisma.monthLock.findMany({ where: { propertyId, isLocked: true, lockedAt: { lt: new Date(`${tripsStartDate}T00:00:00+05:00`) }, yearMonth: { gte: startDate.slice(0, 7), lte: endDate.slice(0, 7) } }, select: { yearMonth: true } }) : [];
+  const overrideLockedMonths = new Set(overrideLocks.map(lock => lock.yearMonth));
   const centAmounts = new Map<string, CommissionCents>();
   const unallocatedCommissions: UnallocatedCommission[] = [];
   let certificationCents = 0, retailCents = 0, unallocatedRetailCents = 0;
@@ -184,6 +186,7 @@ export const calculateCommissionForPeriod = async (
 
     if (usesCents(date)) {
       hasCentDates = true;
+      const diveOnlyOverride = useNewOverride && date >= tripsStartDate && !overrideLockedMonths.has(date.slice(0, 7));
       const day = calculateIruveliDay(propertyId, date, dayBills, staffMembers, dayAttendanceMap, diveOnlyOverride, detailStaffId);
       for (const [id, values] of day.amounts) {
         const row = centAmounts.get(id) ?? emptyCommissionCents();
