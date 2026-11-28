@@ -272,6 +272,7 @@ model Item {
   // JSON string defining fixed per-line amount per role, e.g. '{"seller":10, "instructor":25}'
   personalRatesJson  String?    
   includesComplimentaryMedia Boolean @default(false)
+  separateLinePerUnit Boolean @default(false)
   isActive           Boolean    @default(true)
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
@@ -363,6 +364,7 @@ model BillItem {
   itemId                  String?
   itemName                String
   categoryName            String
+  separateLinePerUnit     Boolean      @default(false)
   quantity                Int          @default(1)
   unitPrice               Float
   discountPercent         Float        @default(0.0)

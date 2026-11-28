@@ -333,3 +333,57 @@ test('cancelled catalogue loading cannot apply stale activities or next-check va
  assert.doesNotMatch(text(f.render()),/Stale service/);
  assert.equal(descendants(f.render(),node=>node.props.id==='bill-check-number')[0].props.value,1001);
 });
+
+test('three units each have independently editable names and prices in both billing layouts', () => {
+  for (const property of ['Siyam World', 'Iru Fushi']) {
+    const lines = [1, 2, 3].map((unit) => ({
+      clientLineId: `unit-${unit}`,
+      itemId: 'custom',
+      itemName: `Excursion ${unit}`,
+      categoryName: 'Services',
+      quantity: 1,
+      unitPrice: 100,
+      discountPercent: 0,
+      lineTotal: 100,
+      separateLinePerUnit: true,
+    }));
+    const f = fixture(property, { draft: { billLines: lines } });
+    const expected = [
+      ['Morning trip', 85],
+      ['Private sunset trip', 145],
+      ['Night trip', 120],
+    ];
+    const field = (label) =>
+      descendants(
+        f.render(),
+        (node) => node.type === 'input' && node.props['aria-label'] === label,
+      )[0];
+    for (const [index, [name, price]] of expected.entries()) {
+      const input = field(`Item name for line ${index + 1}`);
+      assert.ok(input);
+      input.props.onChange({ target: { value: name } });
+      const priceInput = field(`Unit price for ${name}`);
+      assert.ok(priceInput);
+      priceInput.props.onChange({ target: { value: String(price) } });
+      for (let untouched = index + 1; untouched < 3; untouched++) {
+        assert.equal(
+          field(`Item name for line ${untouched + 1}`).props.value,
+          `Excursion ${untouched + 1}`,
+        );
+        assert.equal(field(`Unit price for Excursion ${untouched + 1}`).props.value, 100);
+      }
+    }
+    for (const [index, [name, price]] of expected.entries()) {
+      assert.equal(field(`Item name for line ${index + 1}`).props.value, name);
+      assert.equal(field(`Unit price for ${name}`).props.value, price);
+    }
+    assert.equal(
+      descendants(
+        f.render(),
+        (node) =>
+          node.type === 'input' && /^Item name for line /.test(node.props['aria-label'] || ''),
+      ).length,
+      3,
+    );
+  }
+});

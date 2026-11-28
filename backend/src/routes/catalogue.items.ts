@@ -101,7 +101,7 @@ export function registerCatalogueWriteRoutes(itemsRouter: Router) {
           action: 'ITEM_CREATE',
           targetType: 'Item',
           targetId: item.id,
-          details: { code: item.code, name: item.name, price: item.price, includesComplimentaryMedia: item.includesComplimentaryMedia },
+          details: { code: item.code, name: item.name, price: item.price, separateLinePerUnit: item.separateLinePerUnit, includesComplimentaryMedia: item.includesComplimentaryMedia },
         });
 
         return res.status(201).json({ item });
@@ -166,7 +166,7 @@ export function registerCatalogueWriteRoutes(itemsRouter: Router) {
           action: data.isActive === true && !existing.isActive ? 'ITEM_RESTORE' : data.isActive === false && existing.isActive ? 'ITEM_DELETE' : 'ITEM_UPDATE',
           targetType: 'Item',
           targetId: updated.id,
-          details: { code: updated.code, name: updated.name, price: updated.price, isActive: updated.isActive, previousPrice: existing.price, includesComplimentaryMedia: updated.includesComplimentaryMedia, previousIncludesComplimentaryMedia: existing.includesComplimentaryMedia },
+          details: { code: updated.code, name: updated.name, price: updated.price, isActive: updated.isActive, previousPrice: existing.price, separateLinePerUnit: updated.separateLinePerUnit, previousSeparateLinePerUnit: existing.separateLinePerUnit, includesComplimentaryMedia: updated.includesComplimentaryMedia, previousIncludesComplimentaryMedia: existing.includesComplimentaryMedia },
         });
 
         return res.json({ item: updated });

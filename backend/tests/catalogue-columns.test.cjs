@@ -61,3 +61,17 @@ test('catalogues exported with the previous Photo header remain importable after
     }
   }
 });
+
+test('separate-unit rule round-trips in CSV and Excel while older templates retain the existing setting', async () => {
+ for(const format of ['csv','xlsx']) {
+  const [row] = await parseCatalogue(await file([catalogueSpreadsheetRow({...item,separateLinePerUnit:true})],format),format);
+  assert.equal(row.commission.separateLinePerUnit,true);
+  const book=new ExcelJS.Workbook(); const sheet=book.addWorksheet('Catalogue');
+  sheet.addRow(catalogueSpreadsheetHeaders.slice(0,-1)); sheet.addRow(catalogueSpreadsheetRow(item).slice(0,-1));
+  const content=Buffer.from(await(format==='csv'?book.csv.writeBuffer():book.xlsx.writeBuffer())).toString('base64');
+  const [legacy]=await parseCatalogue(content,format);
+  assert.equal(legacy.commission.separateLinePerUnit,undefined);
+ }
+ const row=catalogueSpreadsheetRow(item);row[14]='Maybe';
+ await assert.rejects(parseCatalogue(await file([row],'csv'),'csv'),/Separate Line Per Unit/);
+});

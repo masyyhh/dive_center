@@ -4,7 +4,7 @@ const { Readable } = require('node:stream');
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
 
-const MAX_COLUMNS = 14;
+const MAX_COLUMNS = 15;
 const MAX_ENTRIES = 64;
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 8 * 1024 * 1024;

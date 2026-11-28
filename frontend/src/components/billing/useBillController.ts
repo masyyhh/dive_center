@@ -237,7 +237,10 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Could not add the package.'); }
   };
 
-  const updateQuantity = (index: number, delta: number) => setBillLines(lines => updateLinkedQuantity(lines, index, delta, items, photoRates));
+  const updateQuantity = (index: number, delta: number) => {
+    try { setBillLines(updateLinkedQuantity(billLines, index, delta, items, photoRates)); setErrorMsg(null); }
+    catch(error) { setErrorMsg(error instanceof Error ? error.message : 'Could not update quantity.'); }
+  };
 
   const updateDiscount = (index: number, discountPercent: number) => {
     const updated = [...billLines];
@@ -317,6 +320,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
   const handleSaveBill = async () => {
     if (saving || saveInFlight.current) return;
     if (!activeProperty || monthLock.locked !== false) return;
+    if (billLines.some(line => !line.itemName.trim() || line.itemName.trim().length > 200)) { setErrorMsg('Enter an item name of 1–200 characters for every bill line.'); return; }
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); return; }
     if (!staffReady) { setErrorMsg('Wait for staff availability to load before saving.'); return; }
     setErrorMsg(null);
@@ -393,6 +397,7 @@ export function useBillController({ onBillSaved, onSetup, editingBill, onCancel 
     if (editingBill && editReason.trim().length < 5) { setErrorMsg('Enter a reason for editing this posted bill (at least 5 characters).'); document.getElementById('bill-edit-reason')?.focus(); return; }
     setAttemptedReview(true); setErrorMsg(null);
     if (!isPositiveInt(checkNumber)) { setErrorMsg('Enter a whole check number between 1 and 2147483647.'); document.getElementById('bill-check-number')?.focus(); return; }
+    if (billLines.some(line => !line.itemName.trim() || line.itemName.trim().length > 200)) { setErrorMsg('Enter an item name of 1–200 characters for every bill line.'); return; }
     if (checkoutPreview.error) { setErrorMsg(checkoutPreview.error); document.getElementById('checkout-discount')?.focus(); return; }
     if (!isBusinessDate(businessDate)) { document.getElementById('bill-business-date')?.focus(); return; }
     if (!isRoomNumber(roomNumber) || !guestName.trim()) {

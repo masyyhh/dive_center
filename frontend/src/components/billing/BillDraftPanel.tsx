@@ -72,6 +72,27 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
               const storeAttendantPool = line.sourceLineId ? line.storeAttendantRateSnapshot === 5 : usesStoreAttendantPool(activeProperty, line.categoryName);
               const storePoolPreview = Math.round((checkoutPreview.lines[idx]?.lineTotal ?? line.lineTotal) * 5) / 100;
               const partialDiscountControls = (partialDiscount && partialDiscount.lineId === line.clientLineId && <div className="surface p-3 space-y-2" role="group" aria-label={`Discount selected units of ${line.itemName}`}><div className="flex flex-wrap items-end gap-3"><label>Units to discount<input type="number" min={1} max={line.quantity} step={1} value={partialDiscount.quantity} onChange={event => setPartialDiscount({ ...partialDiscount, quantity: event.target.value })} /></label><label>Discount (%)<input type="number" min={0} max={100} step="0.01" value={partialDiscount.percent} onChange={event => setPartialDiscount({ ...partialDiscount, percent: event.target.value })} /></label><button type="button" className="secondary-button" disabled={saving} onClick={() => { try { if (partialDiscount.quantity === '' || partialDiscount.percent === '') throw new Error('Enter a quantity and discount percentage.'); setBillLines(discountSelectedQuantity(billLines, billLines.findIndex(value => value.clientLineId === partialDiscount.lineId), Number(partialDiscount.quantity), Number(partialDiscount.percent))); setPartialDiscount(null); setErrorMsg(null); } catch (error) { setErrorMsg((error as Error).message); } }}>Apply to selected units</button><button type="button" className="text-button" onClick={() => setPartialDiscount(null)}>Cancel</button></div><p className="text-xs text-slate-500">Discounted units and remaining units appear as separate bill lines. Personal commission reduces by the same discount percentage.</p></div>);
+              const nameField =
+                line.separateLinePerUnit && !line.autoPhotoFor ? (
+                  <input
+                    aria-label={`Item name for line ${idx + 1}`}
+                    type="text"
+                    required
+                    maxLength={200}
+                    value={line.itemName}
+                    disabled={saving}
+                    className="w-full px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                    onChange={(event) =>
+                      setBillLines((lines) =>
+                        lines.map((entry, position) =>
+                          position === idx ? { ...entry, itemName: event.target.value } : entry,
+                        ),
+                      )
+                    }
+                  />
+                ) : (
+                  <strong>{line.itemName}</strong>
+                );
               const editor = (
                 <div
                   key={line.clientLineId || idx}
@@ -80,7 +101,7 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                   {!compactBilling && <div className="flex items-center justify-between gap-2">
                     <div>
                       <span className="font-bold text-slate-900 dark:text-white">
-                        {line.itemName}
+                        {nameField}
                       </span>
                       <span className="text-xs text-slate-400 ml-2">
                         ({line.categoryName})
@@ -130,9 +151,24 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                     {/* Price */}
                     <div>
                       <span className="text-slate-400 text-xs">Price: </span>
-                      <span className="font-mono font-semibold">
-                        {formatUnitPrice(line.unitPrice, currencySymbol)}
-                      </span>
+                        {line.separateLinePerUnit && !line.autoPhotoFor ? (
+                          <input
+                            aria-label={`Unit price for ${line.itemName}`}
+                            type="number"
+                            min="0"
+                            step="any"
+                            disabled={saving}
+                            value={line.unitPrice}
+                            className="w-28 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                            onChange={(event) =>
+                              applyAdjustment([lineKey], 'unitPrice', event.target.value)
+                            }
+                          />
+                        ) : (
+                          <span className="font-mono font-semibold">
+                            {formatUnitPrice(line.unitPrice, currencySymbol)}
+                          </span>
+                        )}
                     </div>
 
                     {/* Discount (%) */}
@@ -268,7 +304,7 @@ export function BillDraftPanel({ model }: { model: BillModel }) {
                   }}>
 
                   <td><div className="siyam-row-quantity"><button type="button" aria-label={`Decrease quantity for ${line.itemName}`} disabled={saving || Boolean(line.autoPhotoFor)} onClick={() => updateQuantity(idx, -1)}>−</button><span>{line.quantity}</span><button type="button" aria-label={`Increase quantity for ${line.itemName}`} disabled={saving || Boolean(line.autoPhotoFor)} onClick={() => updateQuantity(idx, 1)}>+</button></div></td>
-                  <td className="siyam-description-cell"><strong>{line.itemName}</strong>{line.autoPhotoFor && <small>Linked Photo</small>}{line.quantity > 1 && <button type="button" className="text-button siyam-partial-discount" disabled={saving} onClick={() => setPartialDiscount({ lineId: line.clientLineId!, quantity: '1', percent: String(line.discountPercent) })}>Discount only some units</button>}{partialDiscountControls}</td>
+                  <td className="siyam-description-cell">{nameField}{line.autoPhotoFor && <small>Linked Photo</small>}{line.quantity > 1 && <button type="button" className="text-button siyam-partial-discount" disabled={saving} onClick={() => setPartialDiscount({ lineId: line.clientLineId!, quantity: '1', percent: String(line.discountPercent) })}>Discount only some units</button>}{partialDiscountControls}</td>
                   <td className="siyam-money">{line.autoPhotoFor ? formatUnitPrice(line.unitPrice, currencySymbol) : <input className="siyam-price-input" aria-label={`Unit price for ${line.itemName}`} type="number" min="0" step="any" disabled={saving} value={line.unitPrice} onChange={event => applyAdjustment([lineKey], 'unitPrice', event.target.value)} />}</td>
                   <td className="siyam-discount-cell"><input aria-label={`Discount percentage for ${line.itemName}`} type="number" min="0" max="100" disabled={saving} value={line.discountPercent} onChange={event => updateDiscount(idx, Number(event.target.value) || 0)} /></td>
                   <td className="siyam-money">{line.autoPhotoFor ? <strong>{formatMoney(line.lineTotal, currencySymbol)}</strong> : <input className="siyam-price-input siyam-final-price" aria-label={`Final price for ${line.itemName}`} title="Line total after line discount, before checkout discount, service charge and tax" type="number" min="0" step="any" disabled={saving} value={Number(line.lineTotal.toFixed(4))} onChange={event => applyAdjustment([lineKey], 'lineTotal', event.target.value)} />}</td>

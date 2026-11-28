@@ -24,6 +24,18 @@ class ManualProduction(unittest.TestCase):
         self.assertIn(hashlib.sha256(fingerprint.encode()).hexdigest(), helper)
         subprocess.run(['bash', '-n'], input=helper, text=True, check=True)
 
+    def test_trips_release_sets_november_start_in_build_runtime_and_verification(self):
+        _, helper, fingerprint = manual.render(ROOT, 'd' * 40, '2026-11-01')
+        for table in manual.TRIP_TABLES:
+            self.assertIn(repr(table), fingerprint)
+        self.assertIn('--build-arg VITE_TRIPS_ENABLED=true', helper)
+        self.assertIn("'TRIPS_ENABLED':'true','TRIPS_START_DATE':'2026-11-01'", helper)
+        self.assertIn('-e TRIPS_ENABLED=true -e TRIPS_START_DATE=2026-11-01', helper)
+        self.assertIn('process.env.TRIPS_START_DATE!=="2026-11-01"', helper)
+        subprocess.run(['bash', '-n'], input=helper, text=True, check=True)
+        with self.assertRaises(ValueError):
+            manual.render(ROOT, 'd' * 40, '2026-11-24')
+
     def test_original_data_checks_and_release_guards_remain(self):
         _, helper, fingerprint = manual.render(ROOT, 'b' * 40)
         for guard in ['flock -n', 'active.override.json', 'compare_data "$before_file" "$after_file"',

@@ -1,3 +1,4 @@
+import { productCents } from '../utils/commissionMoney';
 import { photoIds } from '../utils/photoCredits';
 import { instructorIds } from '../utils/instructorCredits';
 import { applyCheckoutDiscount } from '../utils/checkoutDiscount';
@@ -87,6 +88,8 @@ export function registerBillSaveRoutes(billsRouter: Router) {
         const catalogue = await prisma.item.findMany({ where: { id: { in: itemIds }, propertyId: data.propertyId }, include: { category: true } });
         const itemMap = new Map(catalogue.filter(item => item.category.propertyId === data.propertyId).map(item => [item.id, item]));
         if(roots.some(line => !line.itemId || !itemMap.has(line.itemId) || (!itemMap.get(line.itemId)!.isActive && !sourceFor(line)))) return payrollReply(400, { error: 'Every activity must be an active catalogue item from this property.' });
+        const separateFor = (line: typeof data.items[number]) => sourceFor(line)?.separateLinePerUnit ?? itemMap.get(line.itemId!)!.separateLinePerUnit;
+        if(roots.some(line => separateFor(line) && line.quantity !== 1)) return payrollReply(400, { error: 'These catalogue items require a separate bill line for each unit. Refresh the bill before saving.' });
         const rootMap = new Map(roots.filter(line => line.clientLineId).map(line => [line.clientLineId!, line]));
         const photoLines = new Map<string, typeof data.items[number]>();
         for(const photo of data.items.filter(line => line.autoPhotoFor)) {
@@ -145,7 +148,7 @@ export function registerBillSaveRoutes(billsRouter: Router) {
             delete rates.video;
           }
           const commissionDiscountFactor = 1 - line.discountPercent / 100;
-          const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + (role === 'instructor' ? instructorIds(line).length * rate * line.quantity : role === 'photo' ? photoIds(line).length * rate * line.quantity : (line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
+          const totalPersonalCommission = Object.entries(rates).reduce((total, [role, rate]) => total + (role === 'instructor' ? instructorIds(line).length * rate * line.quantity : role === 'photo' ? 0 : (line as any)[`${role}StaffId`] ? rate * line.quantity : 0), 0) * commissionDiscountFactor;
           const lineGross = line.unitPrice * line.quantity;
           const discount = (lineGross * line.discountPercent) / 100;
           const lineTotal = lineGross - discount;
@@ -161,7 +164,8 @@ export function registerBillSaveRoutes(billsRouter: Router) {
             id: parentId,
             linePosition: lineItemsData.length,
             itemId: line.itemId || null,
-            itemName: savedLine?.itemName ?? item.name,
+            itemName: separateFor(line) ? line.itemName : savedLine?.itemName ?? item.name,
+            separateLinePerUnit: separateFor(line),
             categoryName: savedLine?.categoryName ?? item.category.name,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
@@ -185,7 +189,7 @@ export function registerBillSaveRoutes(billsRouter: Router) {
             videoStaffId: included ? null : line.videoStaffId || null,
             includesComplimentaryMedia: included,
             personalCommissionsJson: JSON.stringify(rates),
-            totalPersonalCommission: totalPersonalCommission + storeAttendantPoolAmount,
+            totalPersonalCommission: totalPersonalCommission + (photoIds(line).length && rates.photo ? productCents(rates.photo, line.quantity, commissionDiscountFactor) / 100 : 0) + storeAttendantPoolAmount,
           });
           const savedData = lineItemsData[lineItemsData.length - 1];
           savedData.poolContributionAmount = poolContributionAmount(savedData.poolTypeSnapshot!, savedData.poolRateSnapshot!, line.quantity, lineTotal);
@@ -203,7 +207,7 @@ export function registerBillSaveRoutes(billsRouter: Router) {
               photoStaffId: photoIds(photo)[0] || null, photoCredits: { create: photoIds(photo).map(staffId => ({ staffId })) }, sellerStaffId: null, guideStaffId: null, instructorStaffId: null, videoStaffId: null,
               includesComplimentaryMedia: false, personalCommissionsJson: JSON.stringify({ photo: photoCommissionFor(photo) }),
               commissionDiscountFactor: 1 - photo.discountPercent / 100,
-              totalPersonalCommission: photoIds(photo).length * photoCommissionFor(photo) * line.quantity * (1 - photo.discountPercent / 100),
+              totalPersonalCommission: photoIds(photo).length ? productCents(photoCommissionFor(photo), line.quantity, 1 - photo.discountPercent / 100) / 100 : 0,
             });
           }
         }

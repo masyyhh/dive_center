@@ -156,7 +156,7 @@ export function PropertyDialogs({ model }: { model: AdminModel }) {
                       onChange={(e) => setPropForm({ ...propForm, autoPhotoCommission: parseFloat(e.target.value) || 0 })}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none"
                     />
-                    <p className="text-xs text-slate-400 mt-1">Per-unit commission for each selected Photo staff member (default: $4.50).</p>
+                    <p className="text-xs text-slate-400 mt-1">Total per-unit commission shared equally among selected Photo staff (default: $4.50).</p>
                   </div>
                 </div>
 

@@ -18,25 +18,27 @@ export function registerCatalogueTransferRoutes(itemsRouter: Router) {
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Catalogue');
       sheet.addRow(catalogueSpreadsheetHeaders);
-      if(template === 'true') sheet.addRow(['', 'Single boat dive', 'Dives', 75, 'Dive pool', 10, null, 5, 10, null, null, null, 'No', 'Active']);
+      if(template === 'true') sheet.addRow(['', 'Single boat dive', 'Dives', 75, 'Dive pool', 10, null, 5, 10, null, null, null, 'No', 'Active', 'No']);
       else {
         const items = await prisma.item.findMany({ where: { propertyId }, include: { category: true }, orderBy: { code: 'asc' } });
         for(const item of items) if(item.category.propertyId === propertyId) sheet.addRow(catalogueSpreadsheetRow(item).map(value => typeof value === 'string' ? safeSpreadsheetText(value) : value));
       }
       sheet.views = [{ state: 'frozen', ySplit: 1 }];
-      sheet.autoFilter = 'A1:N1';
+      sheet.autoFilter = 'A1:O1';
       sheet.getRow(1).height = 42;
       sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
       sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF19323C' } };
       sheet.getRow(1).alignment = { vertical: 'middle', wrapText: true };
-      [18, 36, 24, 14, 22, 16, 24, 20, 20, 22, 24, 24, 25, 14].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+      [18, 36, 24, 14, 22, 16, 24, 20, 20, 22, 24, 24, 25, 14, 26].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
       for(const index of [4, 7, 8, 9, 10, 11, 12]) sheet.getColumn(index).numFmt = '0.00';
       sheet.getCell('F1').note = 'Enter 10 for a 10% course/dive pool contribution after discounts, before tax and service charge.';
       sheet.getCell('G1').note = 'Fixed amount per unit for Certifications. No staff pool share or base-leader override is paid from Certifications.';
       sheet.getCell('M1').note = 'Yes adds a separate Photo line at $41.975 per unit on top of the activity price. Its selected team member earns $4.50 per unit; separate photographer/video rates are paused. No uses the separate rates. Blank retains the existing setting.';
+      sheet.getCell('O1').note = 'Yes adds a separate bill line for each unit, with an editable name and price. Blank retains the existing rule.';
       for(let row = 2;row <= sheet.rowCount;row++) {
         sheet.getCell(`E${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Course pool,Dive pool,Certifications,No pool"'], showErrorMessage: true, error: 'Choose one of the listed pools.' };
         sheet.getCell(`M${row}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'], showErrorMessage: true, error: 'Choose Yes or No.' };
+        sheet.getCell(`O${row}`).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Yes,No"'], showErrorMessage: true, error: 'Choose Yes or No.' };
         sheet.getCell(`N${row}`).dataValidation = { type: 'list', allowBlank: false, formulae: ['"Active,Inactive"'], showErrorMessage: true, error: 'Choose Active or Inactive.' };
       }
       if(format === 'xlsx') {
@@ -53,6 +55,7 @@ export function registerCatalogueTransferRoutes(itemsRouter: Router) {
           'Include Photo ($41.975): Yes adds a separate $41.975 Photo line per unit on top of the activity price. Its selected team member earns $4.50 per unit. Separate photo/video rates are paused.',
           'Include Photo ($41.975) = No uses the separate photographer and videographer amounts. Blank retains the existing checkbox setting.',
           'No commissions: choose No pool, leave every employee payment blank, and choose No for Include Photo ($41.975).',
+          'Separate Line Per Unit: Yes creates individual bill lines with editable names and prices. Blank retains the existing rule.',
           'Status: Active or Inactive. Existing bill prices and saved commissions are retained.',
           'Upload CSV or Excel (.xlsx), up to 3 MB and 2,000 activities. Review the import before applying it.',
         ];
@@ -95,7 +98,7 @@ export function registerCatalogueTransferRoutes(itemsRouter: Router) {
         if(preview) return {
           ...result, previewRows: rows.slice(0, 20).map(({ code, name, category, price, isActive, commission }) => ({
             code, name, category, price, isActive, action: code && byCode.has(code) ? 'update' : 'create',
-            commission: { ...commission, includesComplimentaryMedia: commission.includesComplimentaryMedia ?? byCode.get(code)?.includesComplimentaryMedia ?? false },
+            commission: { ...commission, separateLinePerUnit: commission.separateLinePerUnit ?? byCode.get(code)?.separateLinePerUnit ?? false, includesComplimentaryMedia: commission.includesComplimentaryMedia ?? byCode.get(code)?.includesComplimentaryMedia ?? false },
           }))
         };
         const categories = await tx.category.findMany({ where: { propertyId } });
@@ -109,6 +112,7 @@ export function registerCatalogueTransferRoutes(itemsRouter: Router) {
           const data = {
             name: row.name, categoryId: category.id, price: row.price, isActive: row.isActive,
             includesComplimentaryMedia: row.commission.includesComplimentaryMedia,
+            separateLinePerUnit: row.commission.separateLinePerUnit,
             poolType: row.commission.poolType, poolContribution: row.commission.poolContribution,
             personalRatesJson: JSON.stringify(row.commission.personalRates), personalRoles: Object.keys(row.commission.personalRates).join(',')
           };

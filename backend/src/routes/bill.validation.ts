@@ -8,7 +8,7 @@ const billItemSchema = z.object({
   sourceLineId: z.string().min(1).max(100).optional(),
   autoPhotoFor: z.string().min(1).max(80).nullish(),
   itemId: z.string().optional().nullable(),
-  itemName: z.string(),
+  itemName: z.string().trim().min(1).max(200),
   categoryName: z.string(),
   quantity: positiveIntSchema,
   unitPrice: z.number().min(0),

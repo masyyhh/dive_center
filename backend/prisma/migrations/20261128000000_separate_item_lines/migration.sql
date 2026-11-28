@@ -1,0 +1,2 @@
+ALTER TABLE "Item" ADD COLUMN "separateLinePerUnit" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "BillItem" ADD COLUMN "separateLinePerUnit" BOOLEAN NOT NULL DEFAULT false;

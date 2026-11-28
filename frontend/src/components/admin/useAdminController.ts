@@ -160,6 +160,7 @@ export function useAdminController({ section, onSectionChange }: AdminViewProps)
     personalRoles: 'seller,guide',
     personalRatesJson: '{"seller": 5, "guide": 10}',
     includesComplimentaryMedia: false,
+    separateLinePerUnit: false,
   });
 
   // Audit Logs state
@@ -528,8 +529,8 @@ export function useAdminController({ section, onSectionChange }: AdminViewProps)
     setItemForm(item ? {
       categoryId: item.categoryId, code: item.code, name: item.name, price: item.price,
       poolType: item.poolType, poolContribution: item.poolContribution,
-      personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '', includesComplimentaryMedia: item.includesComplimentaryMedia,
-    } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: /^certifications?$/i.test(categories[0]?.name || '') ? 'CERTIFICATION_POOL' : 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}', includesComplimentaryMedia: false });
+      personalRoles: item.personalRoles || '', personalRatesJson: item.personalRatesJson || '', includesComplimentaryMedia: item.includesComplimentaryMedia, separateLinePerUnit: item.separateLinePerUnit ?? false,
+    } : { categoryId: categories[0]?.id || '', code: '', name: '', price: 85, poolType: /^certifications?$/i.test(categories[0]?.name || '') ? 'CERTIFICATION_POOL' : 'DIVE_POOL', poolContribution: 10, personalRoles: 'seller,guide', personalRatesJson: '{"seller": 5, "guide": 10}', includesComplimentaryMedia: false, separateLinePerUnit: false });
     setShowItemModal(true);
   };
   const copyItemRules = (item: Item) => {

@@ -6,7 +6,7 @@ import { isExcludedFromCredit } from '../utils/staffEligibility';
 import { prisma } from '../db';
 import type { Prisma } from '@prisma/client';
 import { isStoreAttendant, splitStorePool, STORE_ATTENDANT_RETAIL_RATE } from '../utils/storeAttendantPool';
-import { addCents, productCents } from '../utils/commissionMoney';
+import { addCents, productCents, splitCommissionCents } from '../utils/commissionMoney';
 import { calculateIruveliDay, commissionFields, emptyCommissionCents, IRUVELI_CENTS_EFFECTIVE_DATE, type CommissionCents, type UnallocatedCommission } from './iruveliCommissionDay';
 
 export interface StaffCommissionResult {
@@ -155,10 +155,10 @@ export const calculateCommissionForPeriod = async (
 
   const personalDetails: PersonalCommissionDetail[] = [];
   const breakdownDetails: CommissionBreakdownDetail[] = [];
-  const addDetail = (staffId: string, source: BreakdownSource, kind: CommissionBreakdownDetail['kind'], explanation: string, recipientCount = 1, factor = 1, unitRate?: number) => {
+  const addDetail = (staffId: string, source: BreakdownSource, kind: CommissionBreakdownDetail['kind'], explanation: string, recipientCount = 1, factor = 1, unitRate?: number, allocatedAmount?: number) => {
     if (staffId !== detailStaffId) return;
     breakdownDetails.push({ ...source, id: `${source.billItemId || source.billId}-${kind}-${breakdownDetails.length}`, kind,
-      recipientCount, factor, unitRate, explanation, amount: source.basisAmount * factor / recipientCount });
+      recipientCount, factor, unitRate, explanation, amount: allocatedAmount ?? source.basisAmount * factor / recipientCount });
   };
   // Certifications are tracked separately and never distributed as staff pay.
   let certificationPoolTotal = 0;
@@ -334,14 +334,16 @@ export const calculateCommissionForPeriod = async (
                   staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });
               }
             }
-            // Each selected Photo staff member receives the saved rate in full.
+            // Split one Photo commission pool across the selected staff.
             if (typeof rates.photo === 'number' && Number.isFinite(rates.photo) && rates.photo > 0) {
-              for (const staffId of photoIds(line)) {
+              const ids = photoIds(line);
+              const poolCents = productCents(rates.photo, line.quantity, discountFactor);
+              for (const { staffId, amountCents } of splitCommissionCents(poolCents, ids).shares) {
                 if (!canReceiveCredit(staffId)) continue;
-                const amt = rates.photo * line.quantity * discountFactor;
+                const amt = amountCents / 100;
                 const entry = commissionMap.get(staffId);
                 if (entry) entry.personalCommission += amt;
-                addDetail(staffId, { ...source, basisAmount: amt }, 'PERSONAL', 'Full saved Photo rate × quantity × saved after-discount factor; paid to each selected Photo staff member', 1, 1, rates.photo);
+                addDetail(staffId, { ...source, basisAmount: poolCents / 100 }, 'PERSONAL', 'Photo rate × quantity × saved after-discount factor; split equally among selected Photo staff, with remainder cents assigned by staff ID', ids.length, 1, rates.photo, amt);
                 personalDetails.push({ id: `${line.id}-photo-${staffId}`, checkNumber: bill.checkNumber, businessDate: bill.businessDate,
                   guestName: bill.guestName, roomNumber: bill.roomNumber, itemName: line.itemName,
                   role: line.includesComplimentaryMedia ? 'Photo / Video' : 'Photo', staffId, staffName: staffMap.get(staffId)?.name || 'Staff', amount: amt });

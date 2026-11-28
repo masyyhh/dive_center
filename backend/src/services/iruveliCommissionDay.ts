@@ -213,20 +213,25 @@ export function calculateIruveliDay(
       for (const [role, label, ids] of roles) {
         const rate = rates[role];
         if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) continue;
-        const value = productCents(rate, line.quantity, line.commissionDiscountFactor ?? 1);
-        for (const id of ids) {
+        const poolCents = productCents(rate, line.quantity, line.commissionDiscountFactor ?? 1);
+        const shares = role === 'photo'
+          ? splitCommissionCents(poolCents, [...ids]).shares
+          : ids.map((staffId) => ({ staffId, amountCents: poolCents }));
+        for (const { staffId: id, amountCents: value } of shares) {
           if (!eligibleIds.has(id)) continue;
           credit(id, 'personalCommission', value);
           detail(
             id,
             {
               ...source,
-              basisAmount: value / 100,
+              basisAmount: (role === 'photo' ? poolCents : value) / 100,
               kind: 'PERSONAL',
-              recipientCount: 1,
+              recipientCount: role === 'photo' ? ids.length : 1,
               factor: 1,
               unitRate: rate,
-              explanation: `${label} full saved rate × quantity × saved discount factor; rounded half up once per recipient.`,
+              explanation: role === 'photo'
+                ? 'Photo rate × quantity × saved discount factor; rounded half up once and split equally among selected Photo staff, with remainder cents assigned by staff ID.'
+                : `${label} full saved rate × quantity × saved discount factor; rounded half up once per recipient.`,
             },
             value,
           );

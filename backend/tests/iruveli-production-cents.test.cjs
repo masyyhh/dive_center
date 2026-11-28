@@ -13,7 +13,7 @@ function fixture(bills, { propertyId = 'iruveli', locks = [], people = staff, tr
     tankCommissionAllocation: { findMany: async ({ where }) => {
       assert.equal(where.session.propertyId, propertyId);
       assert.equal(where.session.status, 'APPROVED');
-      assert(where.session.businessDate.gte >= '2026-11-24');
+      assert(where.session.businessDate.gte >= (tripEnv.TRIPS_START_DATE ?? '2026-11-24'));
       return allocations;
     } },
     staffMember: { findMany: async () => people },
@@ -124,4 +124,18 @@ test('global Trips activation includes approved payouts for the requested proper
   assert.equal(updated.grandTotal, 0.67);
   assert.equal(updated.staffResults.find(row => row.staffId === 'a').tripsWorked, 1);
   assert.equal(updated.calculationVersion, undefined);
+});
+
+test('Photo pool is shared once across staff in both production commission engines', async () => {
+ for(const propertyId of ['iruveli','other']) {
+  const result=await fixture([bill('2026-11-28',[line('photos','NONE',0,{quantity:4,commissionDiscountFactor:1,personalCommissionsJson:'{"photo":4.5}',photoCredits:[{staffId:'a'},{staffId:'b'}]})])],{propertyId})('2026-11-28');
+  for(const id of ['a','b']) assert.equal(result.staffResults.find(row=>row.staffId===id).personalCommission,9);
+  assert.equal(result.breakdownDetails.find(row=>row.billItemId==='photos').amount,9);
+ }
+});
+test('November 1 rollout includes approved trip commissions from the first day', async () => {
+ const calculate=fixture([], {tripEnv:{TRIPS_ENABLED:'true',TRIPS_START_DATE:'2026-11-01'},allocations:[{id:'november-trip',staffId:'a',amountCents:900,role:'Crew',session:{businessDate:'2026-11-01',boatName:'Dhoni',activityType:'Dive'}}]});
+ assert.equal((await calculate('2026-10-31')).grandTotal,0);
+ const result=await calculate('2026-11-01');
+ assert.equal(result.staffResults.find(row=>row.staffId==='a').tankCommission,9);
 });

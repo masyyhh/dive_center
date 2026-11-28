@@ -112,7 +112,24 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
                 />
               </div>
 
-              <div className="commission-free-option">
+                              <label className="block space-y-1 text-sm">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={itemForm.separateLinePerUnit}
+                      onChange={(event) =>
+                        setItemForm({ ...itemForm, separateLinePerUnit: event.target.checked })
+                      }
+                    />
+                    <strong>Separate line for each unit</strong>
+                  </span>
+                  <span className="block text-xs text-slate-500">
+                    Adding another unit creates a new bill line with its own editable name and
+                    price. Applies to new bill lines.
+                  </span>
+                </label>
+
+<div className="commission-free-option">
                 <label><input type="checkbox" checked={noCommissions}
                   disabled={Boolean(editingItem?.hasBillHistory && editingItem.poolType !== 'NONE')}
                   onChange={event => {
@@ -175,7 +192,7 @@ export function CatalogueDialogs({ model }: { model: AdminModel }) {
                 <label className="flex items-start gap-2"><input type="checkbox" checked={itemForm.includesComplimentaryMedia} onChange={event => setItemForm({ ...itemForm, includesComplimentaryMedia: event.target.checked })} />
                   <span className="font-semibold">Include Photo ({photoPriceLabel})</span>
                 </label>
-                <p className="text-xs text-slate-500">Adds a separate Photo line at {photoPriceLabel} per unit on top of the activity price. Each selected Photo staff member on that line earns {photoCommissionLabel} per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
+                <p className="text-xs text-slate-500">Adds a separate Photo line at {photoPriceLabel} per unit on top of the activity price. Selected Photo staff equally share a total commission of {photoCommissionLabel} per unit. Separate photo/video rates are paused. Changes apply to new bills.</p>
               </div>
 
               </>}

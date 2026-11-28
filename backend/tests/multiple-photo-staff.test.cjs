@@ -20,18 +20,18 @@ test.before(async()=>{
  await prisma.staffMember.createMany({data:[...['one','two'].map(id=>({id,propertyId:'own',name:id,roleTitle:'Photographer',hireDate:'2026-01-01'})),{id:'foreign',propertyId:'foreign',name:'Foreign',roleTitle:'Photographer',hireDate:'2026-01-01'},{id:'inactive',propertyId:'own',name:'Inactive',roleTitle:'Photographer',hireDate:'2026-01-01',isActive:false}]});
 });
 test.after(()=>database.dispose());
-test('standalone Photo pays the full saved catalogue rate to each person after line and checkout discounts',async()=>{
+test('standalone Photo shares the saved catalogue commission after line and checkout discounts',async()=>{
  const result=await save([line({personalCommissionsJson:'{"photo":999}'})],{checkoutDiscountPercent:25});assert.equal(result.status,201,JSON.stringify(result.body));
- const row=result.body.bill.items[0];near(row.totalPersonalCommission,24);assert.equal(row.photoCredits.length,2);
+ const row=result.body.bill.items[0];near(row.totalPersonalCommission,12);assert.equal(row.photoCredits.length,2);
  const report=await calculateCommissionForPeriod('own','2026-11-04','2026-11-04','one');
- for(const id of ['one','two'])assert.equal(report.staffResults.find(person=>person.staffId===id).personalCommission,12);
- assert.equal(report.breakdownDetails.find(detail=>detail.billItemId===row.id&&detail.kind==='PERSONAL').amount,12);
+ for(const id of ['one','two'])assert.equal(report.staffResults.find(person=>person.staffId===id).personalCommission,6);
+ assert.equal(report.breakdownDetails.find(detail=>detail.billItemId===row.id&&detail.kind==='PERSONAL').amount,6);
 });
-test('Include Photo creates one charge and pays each selected Photo staff member the full property rate',async()=>{
+test('Include Photo creates one charge and shares the property commission',async()=>{
  const result=await save(paired(),{businessDate:'2026-11-06'});assert.equal(result.status,201,JSON.stringify(result.body));
- const photo=result.body.bill.items.find(row=>row.autoPhotoForLineId);assert.equal(photo.photoCredits.length,2);near(photo.totalPersonalCommission,21.6);
+ const photo=result.body.bill.items.find(row=>row.autoPhotoForLineId);assert.equal(photo.photoCredits.length,2);near(photo.totalPersonalCommission,10.8);
  assert.equal(result.body.bill.items.length,2);near(result.body.bill.grossAmount,425.93);
- const report=await calculateCommissionForPeriod('own','2026-11-06','2026-11-06');for(const id of ['one','two'])assert.equal(report.staffResults.find(person=>person.staffId===id).personalCommission,10.8);
+ const report=await calculateCommissionForPeriod('own','2026-11-06','2026-11-06');for(const id of ['one','two'])assert.equal(report.staffResults.find(person=>person.staffId===id).personalCommission,5.4);
  const invalid=paired();invalid[0].photoStaffIds=['one','two'];assert.equal((await save(invalid)).status,400);
 });
 test('duplicate, foreign and inactive Photo recipients are rejected on standalone and automatic Photo lines',async()=>{
@@ -54,7 +54,7 @@ test('editing Include Photo preserves both recipients and original Photo rates; 
  const payload={propertyId:'own',checkNumber:bill.checkNumber,businessDate:bill.businessDate,guestName:'Corrected',roomNumber:'0012',expectedUpdatedAt:bill.updatedAt.toISOString(),editReason:'Verify multiple Photo recipients',items:bill.items.map(row=>({...row,sourceLineId:row.id,clientLineId:row.id,autoPhotoFor:row.autoPhotoForLineId,photoStaffIds:row.photoCredits.map(credit=>credit.staffId)}))};
  const old={...payload,items:payload.items.map(row=>({...row,photoStaffIds:undefined}))};assert.equal((await call('PUT','/'+bill.id,old)).status,400);
  await prisma.property.update({where:{id:'own'},data:{autoPhotoPrice:99,autoPhotoCommission:99}});
- try{const saved=await call('PUT','/'+bill.id,payload);assert.equal(saved.status,200,JSON.stringify(saved.body));const row=saved.body.bill.items.find(row=>row.autoPhotoForLineId);assert.equal(row.unitPrice,41.975);near(row.totalPersonalCommission,21.6);assert.equal(row.photoCredits.length,2);}
+ try{const saved=await call('PUT','/'+bill.id,payload);assert.equal(saved.status,200,JSON.stringify(saved.body));const row=saved.body.bill.items.find(row=>row.autoPhotoForLineId);assert.equal(row.unitPrice,41.975);near(row.totalPersonalCommission,10.8);assert.equal(row.photoCredits.length,2);}
  finally{await prisma.property.update({where:{id:'own'},data:{autoPhotoPrice:41.975,autoPhotoCommission:4.5}});}
 });
 test('the migration retains historical single photographers and their original payments',async()=>{
@@ -64,4 +64,14 @@ test('the migration retains historical single photographers and their original p
  await prisma.$transaction(async tx=>{await tx.$executeRawUnsafe('DROP TABLE "BillItemPhotoStaff"');for(const statement of sql.split(';').map(value=>value.trim()).filter(Boolean))await tx.$executeRawUnsafe(statement);});
  assert.equal(await prisma.billItemPhotoStaff.count({where:{billItemId:bill.items[0].id,staffId:'one'}}),1);
  const report=await calculateCommissionForPeriod('own','2026-10-01','2026-10-01');assert.equal(report.staffResults.find(person=>person.staffId==='one').personalCommission,10);
+});
+
+test('four photos at 4.50 pay two selected people 9 each', async () => {
+ const items=paired(); items[0].quantity=4; items[1].quantity=4; items[1].discountPercent=0;
+ const result=await save(items,{businessDate:'2026-11-07'});
+ assert.equal(result.status,201,JSON.stringify(result.body));
+ const photo=result.body.bill.items.find(row=>row.autoPhotoForLineId);
+ near(photo.totalPersonalCommission,18);
+ const report=await calculateCommissionForPeriod('own','2026-11-07','2026-11-07');
+ for(const id of ['one','two']) near(report.staffResults.find(person=>person.staffId===id).personalCommission,9);
 });

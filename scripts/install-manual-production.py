@@ -9,6 +9,7 @@ import sys
 
 
 RENTAL_TABLES = ['EquipmentStock', 'EquipmentRental', 'EquipmentRentalLine', 'RentalAgreement', 'RentalEvent']
+TRIP_TABLES = ['TankCommissionSettings', 'TankResource', 'TankCommissionRule', 'dive_trips', 'trip_crew_assignments', 'dive_trip_sites']
 
 
 def replace_once(text, old, new):
@@ -17,19 +18,22 @@ def replace_once(text, old, new):
     return text.replace(old, new, 1)
 
 
-def render(source, commit):
+def render(source, commit, trips_start_date=None):
     if not re.fullmatch('[a-f0-9]{40}', commit):
         raise ValueError('A full commit SHA is required.')
+    if trips_start_date is not None and trips_start_date != '2026-11-01':
+        raise ValueError('This release supports a Trips start date of 2026-11-01 only.')
     release = commit[:12]
+    release_tables = RENTAL_TABLES + (TRIP_TABLES if trips_start_date else [])
     fingerprint = (source / 'scripts/production-data-fingerprint.cjs').read_text()
     fingerprint = replace_once(fingerprint,
         "const addedCreditTables = ['BillItemInstructor', 'BillItemPhotoStaff'];",
-        "const addedCreditTables = ['BillItemInstructor', 'BillItemPhotoStaff', " + ', '.join(repr(t) for t in RENTAL_TABLES) + '];')
+        "const addedCreditTables = ['BillItemInstructor', 'BillItemPhotoStaff', " + ', '.join(repr(t) for t in release_tables) + '];')
     # New rental tables are permitted only when present and empty; old table
     # values (including existing rental records) retain the original hash check.
     fingerprint = replace_once(fingerprint, '  const tables = {};',
         '  if (baseline) {\n'
-        '    for (const table of ' + repr(RENTAL_TABLES) + ') {\n'
+        '    for (const table of ' + repr(release_tables) + ') {\n'
         "      if (!actual[table]) throw Error('Missing rental table: ' + table);\n"
         '      if (!original[table]) {\n'
         '        const [row] = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::text AS count FROM ${quote(schema)}.${quote(table)}`);\n'
@@ -54,6 +58,18 @@ def render(source, commit):
     helper = replace_once(helper,
         'if(process.env.APP_DEPLOYMENT_MODE!=="live"||process.env.DISCLAIMER_TEST_GUESTS!=="false"||process.env.TESTING_LIVE_AUTH!=="false")process.exit(1)',
         'if(process.env.APP_DEPLOYMENT_MODE!=="live"||process.env.DISCLAIMER_TEST_GUESTS!=="false"||process.env.TESTING_LIVE_AUTH!=="false"||process.env.ENABLE_DIVE_CENTRE!=="false"||process.env.ENABLE_WATER_SPORTS!=="false")process.exit(1)')
+    if trips_start_date:
+        helper = replace_once(helper, '--build-arg VITE_ENABLE_WATER_SPORTS=false',
+            '--build-arg VITE_ENABLE_WATER_SPORTS=false --build-arg VITE_TRIPS_ENABLED=true')
+        helper = replace_once(helper,
+            "'ENABLE_DIVE_CENTRE':'false','ENABLE_WATER_SPORTS':'false'}",
+            "'ENABLE_DIVE_CENTRE':'false','ENABLE_WATER_SPORTS':'false','TRIPS_ENABLED':'true','TRIPS_START_DATE':'" + trips_start_date + "'}")
+        helper = replace_once(helper,
+            '-e ENABLE_DIVE_CENTRE=false -e ENABLE_WATER_SPORTS=false',
+            '-e ENABLE_DIVE_CENTRE=false -e ENABLE_WATER_SPORTS=false -e TRIPS_ENABLED=true -e TRIPS_START_DATE=' + trips_start_date)
+        helper = replace_once(helper,
+            '||process.env.ENABLE_WATER_SPORTS!=="false")process.exit(1)',
+            '||process.env.ENABLE_WATER_SPORTS!=="false"||process.env.TRIPS_ENABLED!=="true"||process.env.TRIPS_START_DATE!=="' + trips_start_date + '")process.exit(1)')
     return release, helper, fingerprint
 
 
@@ -65,7 +81,8 @@ def main():
     commit = subprocess.check_output(git + ['rev-parse', 'HEAD'], text=True).strip()
     if subprocess.check_output(git + ['status', '--porcelain', '--untracked-files=normal', '--', 'backend', 'frontend', 'scripts'], text=True).strip():
         raise ValueError('Commit all release source changes before installation.')
-    release, helper, fingerprint = render(source, commit)
+    trips_start_date = sys.argv[2] if len(sys.argv) > 2 else None
+    release, helper, fingerprint = render(source, commit, trips_start_date)
     subprocess.run(['bash', '-n'], input=helper, text=True, check=True)
     directory = Path('/usr/local/lib/dive-production-' + release)
     script = Path('/usr/local/sbin/dive-production-' + release)
@@ -86,6 +103,8 @@ def main():
     print('Release: ' + release)
     print('Helper: ' + str(script))
     print('Disclaimer and Equipment rentals will be disabled in production.')
+    if trips_start_date:
+        print('Trips & Tanks entries and commissions start on ' + trips_start_date + '.')
 
 
 if __name__ == '__main__':

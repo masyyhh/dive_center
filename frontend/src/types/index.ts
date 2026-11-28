@@ -75,6 +75,7 @@ export interface Item {
   personalRoles?: string | null;
   personalRatesJson?: string | null;
   includesComplimentaryMedia: boolean;
+  separateLinePerUnit?: boolean;
   isActive: boolean;
   hasBillHistory?: boolean;
   hasPackageUsage?: boolean;
@@ -89,6 +90,7 @@ export interface BillItem {
   id?: string;
   itemId?: string | null;
   itemName: string;
+  separateLinePerUnit?: boolean;
   categoryName: string;
   quantity: number;
   unitPrice: number;
